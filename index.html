@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>Rocket Jockey v0.4</title>
+<link rel="manifest" id="manifest">
+<link rel="icon" id="favicon">
+<link rel="apple-touch-icon" id="appleicon">
+<style>
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;
+  touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  -webkit-tap-highlight-color:transparent;overscroll-behavior:none;}
+canvas{display:block;position:fixed;left:0;top:0;touch-action:none;}
+#rotate{display:none;position:fixed;inset:0;background:#000;color:#fc0;z-index:10;
+  font:bold 22px "Courier New",Courier,monospace;text-align:center;
+  flex-direction:column;align-items:center;justify-content:center;letter-spacing:2px;}
+#rotate .ph{width:46px;height:80px;border:4px solid #fc0;border-radius:8px;margin-bottom:24px;
+  animation:rot 2s ease-in-out infinite;}
+@keyframes rot{0%,20%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
+@media (orientation:portrait){#rotate{display:flex;}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="rotate"><div class="ph"></div>ROTATE TO<br>LANDSCAPE</div>
+<script>
+(() => {
+'use strict';
+
+// ---------- setup ----------
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let VW = 0, VH = 0, DPR = 1;
+const TAU = Math.PI * 2;
+const params = new URLSearchParams(location.search);
+const ROUND_TIME = Math.max(5, +(params.get('round')) || 180);
+
+const WORLD_W = 3200, WORLD_H = 2200;
+const BASE_SPEED = 220, BOOST_SPEED = 400, TURN_RATE = 2.7, GRIP = 2.4;
+const FUEL_MAX = 100, FUEL_BURN = 40, FUEL_REGEN = 10;
+const CABLE_SPEED = 1200, CABLE_MAX = 360, CABLE_ANGLE = 1.0;
+const RIDER_R = 14, INVULN = 2;
+const AI_ERR = 0.18;
+// v0.4 swing caps: a post latch auto-releases after this many full turns around the post, or this many seconds
+const SWING_MAX_ROTATIONS = 2.5;
+const SWING_MAX_TIME = 9;
+const SWING_CLOTHES_IMMUNE = 1.0; // a victim can't be hit twice by the same live cable within this many seconds
+
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const rand = (a, b) => a + Math.random() * (b - a);
+const hyp = Math.hypot;
+function angDiff(a, b) { let d = (a - b) % TAU; if (d > Math.PI) d -= TAU; else if (d < -Math.PI) d += TAU; return d; }
+function gauss() { return (Math.random() + Math.random() + Math.random() - 1.5) / 0.5; }
+
+// ---------- PWA bits (inline manifest + generated icon) ----------
+function makeIcon(size) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d'); const s = size / 64;
+  g.fillStyle = '#000'; g.fillRect(0, 0, size, size);
+  g.strokeStyle = '#0ff'; g.lineWidth = 3 * s; g.beginPath(); g.arc(14 * s, 14 * s, 6 * s, 0, TAU); g.stroke();
+  g.beginPath(); g.moveTo(14 * s, 20 * s); g.lineTo(34 * s, 34 * s); g.stroke();
+  g.save(); g.translate(38 * s, 38 * s); g.rotate(-0.6);
+  g.fillStyle = '#fa3'; g.beginPath(); g.moveTo(-14 * s, -4 * s); g.lineTo(-26 * s, 0); g.lineTo(-14 * s, 4 * s); g.fill();
+  g.fillStyle = '#ccc'; g.fillRect(-14 * s, -5 * s, 26 * s, 10 * s);
+  g.beginPath(); g.moveTo(12 * s, -5 * s); g.lineTo(20 * s, 0); g.lineTo(12 * s, 5 * s); g.fill();
+  g.fillStyle = '#3cf'; g.beginPath(); g.arc(0, 0, 6 * s, 0, TAU); g.fill();
+  g.restore();
+  return c.toDataURL('image/png');
+}
+try {
+  const i192 = makeIcon(192), i512 = makeIcon(512);
+  document.getElementById('favicon').href = i192;
+  document.getElementById('appleicon').href = i192;
+  const start = location.href.split('#')[0];
+  const man = {
+    name: 'Rocket Jockey', short_name: 'R.Jockey', start_url: start, scope: start.replace(/[^/]*$/, ''),
+    display: 'fullscreen', orientation: 'landscape', background_color: '#000000', theme_color: '#000000',
+    icons: [{ src: i192, sizes: '192x192', type: 'image/png' }, { src: i512, sizes: '512x512', type: 'image/png' }]
+  };
+  document.getElementById('manifest').href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(man));
+} catch (e) { /* non-fatal */ }
+
+// ---------- audio ----------
+let AC = null, eng = null;
+function ensureAudio() {
+  try {
+    if (!AC) {
+      const A = window.AudioContext || window.webkitAudioContext; if (!A) return;
+      AC = new A();
+      const o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+      o.type = 'sawtooth'; o.frequency.value = 60; f.type = 'lowpass'; f.frequency.value = 500; g.gain.value = 0;
+      o.connect(f); f.connect(g); g.connect(AC.destination); o.start();
+      eng = { o, f, g };
+    }
+    if (AC.state === 'suspended') AC.resume();
+  } catch (e) { AC = null; }
+}
+function beep(freq, dur, type, vol, slideTo) {
+  if (!AC) return;
+  try {
+    const t = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
+    o.type = type || 'square'; o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(vol || 0.08, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+let noiseBuf = null;
+function noise(dur, vol, freq) {
+  if (!AC) return;
+  try {
+    if (!noiseBuf) { noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+    const t = AC.currentTime, s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+    s.buffer = noiseBuf; f.type = 'bandpass'; f.frequency.value = freq || 800;
+    g.gain.setValueAtTime(vol || 0.2, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination); s.start(t); s.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+const sfx = {
+  fire() { beep(700, 0.09, 'square', 0.05, 1500); },
+  latch() { beep(260, 0.07, 'triangle', 0.12); beep(520, 0.05, 'square', 0.04); },
+  knock() { noise(0.45, 0.3, 600); beep(700, 0.45, 'sawtooth', 0.08, 70); },
+  wall() { beep(110, 0.12, 'square', 0.07, 60); },
+  bump() { noise(0.18, 0.25, 300); },
+  spawn() { beep(300, 0.25, 'triangle', 0.08, 900); },
+  start() { [440, 554, 659, 880].forEach((f, i) => setTimeout(() => beep(f, 0.12, 'square', 0.06), i * 90)); },
+  end() { [880, 659, 554, 440, 330].forEach((f, i) => setTimeout(() => beep(f, 0.18, 'square', 0.06), i * 140)); },
+};
+let lastWallSfx = 0;
+
+// ---------- v0.3 constants / extra sounds ----------
+const FOOT_SPEED = 62;          // ~28% of rocket cruise speed
+const TUMBLE_TIME = 0.7;        // seconds tumbling before you can run
+const REMOUNT_INV = 1.5;        // blinking invulnerability after remount
+const RECALL_TIME = 15;         // on foot this long -> rocket flies back to you
+const TETHER_LIFE = 20, TIE_EFFECT = 6, TETHER_MAX = 4, TIE_COOL = 1.2;
+sfx.tie = () => { // rope creak + knot
+  beep(140, 0.18, 'triangle', 0.12, 95); setTimeout(() => beep(170, 0.16, 'triangle', 0.1, 110), 120);
+  setTimeout(() => { noise(0.08, 0.3, 1500); beep(900, 0.05, 'square', 0.05); }, 260);
+};
+sfx.twang = () => { beep(220, 0.5, 'sawtooth', 0.12, 55); beep(1400, 0.12, 'square', 0.05, 600); noise(0.12, 0.25, 2000); };
+sfx.release = () => { beep(900, 0.1, 'square', 0.05, 300); noise(0.06, 0.15, 2500); };
+sfx.runover = () => { beep(500, 0.08, 'square', 0.06, 900); setTimeout(() => beep(900, 0.08, 'square', 0.05, 500), 70); };
+
+// ---------- world ----------
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const posts = [];
+(function makePosts() {
+  const r = mulberry(1996);
+  const cols = 6, rows = 4;
+  for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+    const x = (i + 0.5) * WORLD_W / cols + (r() - 0.5) * 260;
+    const y = (j + 0.5) * WORLD_H / rows + (r() - 0.5) * 220;
+    posts.push({ x, y, r: 14 + r() * 10, ph: r() * TAU });
+  }
+})();
+
+const RIDER_DEFS = [
+  { name: 'YOU', color: '#33ccff' },
+  { name: 'RED', color: '#ff4444' },
+  { name: 'GREEN', color: '#44ff44' },
+  { name: 'GOLD', color: '#ffdd33' },
+];
+let riders = [], player = null;
+const tethers = [];
+function makeRider(i) {
+  const d = RIDER_DEFS[i];
+  return {
+    id: i, name: d.name, color: d.color, isPlayer: i === 0,
+    x: 0, y: 0, vx: 0, vy: 0, px: 0, py: 0, ang: 0, onRocket: true, inv: 0, stun: 0,
+    fuel: FUEL_MAX, boosting: false, score: 0, falls: 0, cables: [null, null], cableCool: 0,
+    // the rocket is its own object; while riding it just follows the rider
+    rk: { x: 0, y: 0, vx: 0, vy: 0, ang: 0, spin: 0, homing: false },
+    tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null,
+    ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false },
+  };
+}
+function syncRocket(r) { const k = r.rk; k.x = r.x; k.y = r.y; k.vx = r.vx; k.vy = r.vy; k.ang = r.ang; k.spin = 0; k.homing = false; }
+function spawnRider(r, first) {
+  let best = null, bestD = -1;
+  for (let k = 0; k < 40; k++) {
+    const x = rand(250, WORLD_W - 250), y = rand(250, WORLD_H - 250);
+    let md = 1e9;
+    for (const o of riders) if (o !== r && (o.onRocket || first)) md = Math.min(md, hyp(o.x - x, o.y - y));
+    let okPost = true;
+    for (const p of posts) if (hyp(p.x - x, p.y - y) < p.r + 70) okPost = false;
+    if (!okPost) continue;
+    if (md > bestD) { bestD = md; best = { x, y }; }
+  }
+  if (!best) best = { x: WORLD_W / 2, y: WORLD_H / 2 };
+  r.x = best.x; r.y = best.y; r.px = r.x; r.py = r.y;
+  r.ang = Math.atan2(WORLD_H / 2 - r.y, WORLD_W / 2 - r.x) + rand(-0.5, 0.5);
+  r.vx = Math.cos(r.ang) * BASE_SPEED * 0.5; r.vy = Math.sin(r.ang) * BASE_SPEED * 0.5;
+  r.onRocket = true; r.inv = first ? 1 : INVULN; r.stun = 0; r.tumble = 0; r.footT = 0;
+  r.fuel = Math.max(r.fuel, 50); r.cables = [null, null]; r.cableCool = 0;
+  syncRocket(r);
+}
+function resetWorld() {
+  riders = RIDER_DEFS.map((d, i) => makeRider(i));
+  player = riders[0];
+  for (const r of riders) spawnRider(r, true);
+  particles.length = 0; msgs.length = 0; tethers.length = 0;
+  cam.x = player.x; cam.y = player.y;
+}
+
+// ---------- anchors (things a cable / tether end can be attached to) ----------
+// {kind:'post', p} | {kind:'rocket', r}  (r's empty rocket) | {kind:'foot', r}  (rider r on foot)
+function anchorObj(a) { return a.kind === 'post' ? a.p : a.kind === 'rocket' ? a.r.rk : a.r; }
+function anchorValid(a) {
+  if (a.kind === 'post') return true;
+  if (a.kind === 'rocket') return !a.r.onRocket && !a.r.rk.homing;
+  return !a.r.onRocket;
+}
+function sameAnchor(a, b) { return a.kind === b.kind && a.p === b.p && a.r === b.r; }
+function anchorName(a) { return a.kind === 'post' ? 'POST' : a.kind === 'rocket' ? a.r.name + "'S ROCKET" : a.r.name; }
+// pull two objects so they are at most L apart; weights 0 = immovable
+function constrain(A, wa, B, wb, L) {
+  const dx = B.x - A.x, dy = B.y - A.y, d = hyp(dx, dy);
+  if (d <= L || d === 0 || wa + wb === 0) return;
+  const s = wa + wb; wa /= s; wb /= s;
+  const nx = dx / d, ny = dy / d, ex = d - L;
+  A.x += nx * ex * wa; A.y += ny * ex * wa; B.x -= nx * ex * wb; B.y -= ny * ex * wb;
+  const rv = (B.vx || 0) * nx + (B.vy || 0) * ny - ((A.vx || 0) * nx + (A.vy || 0) * ny); // >0 = separating
+  if (rv > 0) {
+    if (wa) { A.vx += nx * rv * wa; A.vy += ny * rv * wa; }
+    if (wb) { B.vx -= nx * rv * wb; B.vy -= ny * rv * wb; }
+  }
+}
+
+// ---------- particles / messages ----------
+const particles = [];
+function spawnParts(x, y, n, color, sp, life) {
+  for (let i = 0; i < n; i++) {
+    if (particles.length > 400) particles.shift();
+    const a = rand(0, TAU), s = rand(0.2, 1) * sp;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: life * rand(0.5, 1), max: life, color });
+  }
+}
+const msgs = [];
+function msg(text, color) { msgs.push({ text, color: color || '#fff', t: 2 }); if (msgs.length > 3) msgs.shift(); }
+
+// ---------- state ----------
+let state = 'title'; // title | play | over
+let timeLeft = ROUND_TIME, overT = 0, results = [];
+const cam = { x: WORLD_W / 2, y: WORLD_H / 2, scale: 1 };
+let shake = 0;
+
+// ---------- input ----------
+const keys = {};
+const fireQ = [false, false];
+let tieQ = false;
+// handlebar steering: only horizontal thumb offset matters; h is -1 (full left) .. +1 (full right)
+// on foot the same thumb control is a plain direction pad: fx, fy (-1..1)
+const stick = { active: false, id: null, ox: 0, oy: 0, x: 0, y: 0, h: 0, fx: 0, fy: 0 };
+const touchMap = new Map();   // id -> 'stick' | 'L' | 'R' | 'B' | 'T'
+const touchExtra = new Map(); // id -> Set of extra cable buttons held by the same thumb (slide L<->R)
+const btns = { L: { x: 0, y: 0, r: 40 }, R: { x: 0, y: 0, r: 40 }, B: { x: 0, y: 0, r: 32 }, T: { x: 0, y: 0, r: 34 } };
+let stickHome = { x: 100, y: 300, r: 60 };
+let isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+function layout() {
+  const s = clamp(Math.min(VW, VH) / 390, 0.8, 1.4);
+  btns.R.r = btns.L.r = 40 * s; btns.B.r = 32 * s; btns.T.r = 34 * s;
+  btns.R.x = VW - 70 * s; btns.R.y = VH - 135 * s;
+  btns.L.x = VW - 180 * s; btns.L.y = VH - 135 * s;
+  btns.B.x = VW - 125 * s; btns.B.y = VH - 46 * s;
+  stickHome = { x: 105 * s, y: VH - 100 * s, r: 60 * s };
+  // TIE sits on the LEFT, above the steer control: the right thumb(s) are busy holding both cables
+  btns.T.x = 105 * s; btns.T.y = VH - 215 * s;
+}
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  VW = window.innerWidth; VH = window.innerHeight;
+  cv.width = Math.round(VW * DPR); cv.height = Math.round(VH * DPR);
+  cv.style.width = VW + 'px'; cv.style.height = VH + 'px';
+  layout();
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+resize();
+
+function btnEnabled(k) { return k !== 'T' || canTie(); }
+function hitButton(x, y) {
+  let best = null, bd = 1e9;
+  for (const k in btns) {
+    if (!btnEnabled(k)) continue;
+    const b = btns[k]; const d = hyp(x - b.x, y - b.y);
+    if (d < b.r * 1.35 && d < bd) { bd = d; best = k; }
+  }
+  return best;
+}
+function pressBtn(k) { if (k === 'L') fireQ[0] = true; else if (k === 'R') fireQ[1] = true; else if (k === 'T') tieQ = true; }
+function heldBtn(k) {
+  for (const v of touchMap.values()) if (v === k) return true;
+  for (const s of touchExtra.values()) if (s.has(k)) return true;
+  return false;
+}
+function updStick(x, y) {
+  stick.x = x; stick.y = y;
+  const R = stickHome.r;
+  stick.h = clamp((x - stick.ox) / R, -1, 1); // vertical movement ignored for handlebars
+  let fx = (x - stick.ox) / R, fy = (y - stick.oy) / R; const m = hyp(fx, fy);
+  if (m > 1) { fx /= m; fy /= m; }
+  stick.fx = fx; stick.fy = fy;
+}
+
+function goFullscreen() {
+  try {
+    const el = document.documentElement;
+    const rq = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (rq && !document.fullscreenElement) {
+      const p = rq.call(el, { navigationUI: 'hide' });
+      if (p && p.then) p.then(() => { try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {} }).catch(() => {});
+    }
+  } catch (e) {}
+}
+function handleTap() {
+  ensureAudio();
+  if (state === 'title') { goFullscreen(); startGame(); }
+  else if (state === 'over' && overT > 1.2) { startGame(); }
+}
+
+function onTouchStart(e) {
+  e.preventDefault(); isTouch = true;
+  if (state !== 'play') { handleTap(); return; }
+  ensureAudio();
+  for (const t of e.changedTouches) {
+    const x = t.clientX, y = t.clientY;
+    const b = hitButton(x, y);
+    if (b) { touchMap.set(t.identifier, b); pressBtn(b); }
+    else if (x < VW * 0.5 && !stick.active) {
+      stick.active = true; stick.id = t.identifier;
+      // keep the slider fully on-screen so a full left push is always reachable
+      stick.ox = Math.max(x, stickHome.r * 0.85); stick.oy = clamp(y, stickHome.r * 0.8, VH - stickHome.r * 0.5); updStick(x, y);
+      touchMap.set(t.identifier, 'stick');
+    }
+  }
+}
+function onTouchMove(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const k = touchMap.get(t.identifier); if (!k) continue;
+    if (k === 'stick') updStick(t.clientX, t.clientY);
+    else { // allow sliding between buttons; sliding one thumb L<->R keeps BOTH cables held
+      const b = hitButton(t.clientX, t.clientY);
+      if (b && b !== k) {
+        const cab = x => x === 'L' || x === 'R';
+        if (cab(k) && cab(b)) { let s = touchExtra.get(t.identifier); if (!s) touchExtra.set(t.identifier, s = new Set()); s.add(k); s.delete(b); }
+        else touchExtra.delete(t.identifier);
+        touchMap.set(t.identifier, b); pressBtn(b);
+      }
+    }
+  }
+}
+function onTouchEnd(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const k = touchMap.get(t.identifier);
+    if (k === 'stick') { stick.active = false; stick.id = null; stick.h = 0; stick.fx = stick.fy = 0; }
+    touchMap.delete(t.identifier); touchExtra.delete(t.identifier);
+  }
+}
+cv.addEventListener('touchstart', onTouchStart, { passive: false });
+cv.addEventListener('touchmove', onTouchMove, { passive: false });
+cv.addEventListener('touchend', onTouchEnd, { passive: false });
+cv.addEventListener('touchcancel', onTouchEnd, { passive: false });
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('mousedown', e => { if (!isTouch || state !== 'play') handleTap(); });
+
+window.addEventListener('keydown', e => {
+  const c = e.code;
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(c)) e.preventDefault();
+  if (!e.repeat) {
+    if (c === 'KeyQ') fireQ[0] = true;
+    if (c === 'KeyE') fireQ[1] = true;
+    if (c === 'KeyT') tieQ = true;
+    if (c === 'Space' || c === 'Enter') handleTap();
+  }
+  keys[c] = true;
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; touchMap.clear(); touchExtra.clear(); stick.active = false; });
+document.addEventListener('visibilitychange', () => {
+  if (!AC) return;
+  if (document.hidden) AC.suspend(); else if (state === 'play') AC.resume();
+});
+
+// ---------- game flow ----------
+function startGame() {
+  resetWorld();
+  state = 'play'; timeLeft = ROUND_TIME; overT = 0;
+  fireQ[0] = fireQ[1] = false; tieQ = false;
+  msg('GO! YANK THEM OFF!', '#fc0');
+  sfx.start();
+}
+function endRound() {
+  state = 'over'; overT = 0;
+  results = riders.slice().sort((a, b) => (b.score - a.score) || (a.falls - b.falls));
+  sfx.end();
+}
+
+// ---------- controls ----------
+function playerControl(r) {
+  const c = { turn: 0, boost: false, fire: [false, false], hold: [false, false], tie: false };
+  let kt = 0;
+  if (keys.ArrowLeft || keys.KeyA) kt -= 1;
+  if (keys.ArrowRight || keys.KeyD) kt += 1;
+  // Handlebars: left = turn counter-clockwise (rocket's own left), right = clockwise,
+  // regardless of heading. Turn rate scales with horizontal push (small dead zone).
+  const DZ = 0.08;
+  if (stick.active && Math.abs(stick.h) > DZ) c.turn = Math.sign(stick.h) * (Math.abs(stick.h) - DZ) / (1 - DZ);
+  else c.turn = kt;
+  c.boost = !!(keys.ShiftLeft || keys.ShiftRight || keys.ArrowUp || keys.KeyW || heldBtn('B'));
+  c.hold[0] = !!(keys.KeyQ || heldBtn('L'));
+  c.hold[1] = !!(keys.KeyE || heldBtn('R'));
+  c.fire[0] = fireQ[0]; c.fire[1] = fireQ[1]; c.tie = tieQ;
+  fireQ[0] = fireQ[1] = false; tieQ = false;
+  return c;
+}
+function playerFoot() {
+  fireQ[0] = fireQ[1] = false; tieQ = false;
+  let mx = 0, my = 0;
+  if (keys.ArrowLeft || keys.KeyA) mx -= 1;
+  if (keys.ArrowRight || keys.KeyD) mx += 1;
+  if (keys.ArrowUp || keys.KeyW) my -= 1;
+  if (keys.ArrowDown || keys.KeyS) my += 1;
+  if (stick.active && hyp(stick.fx, stick.fy) > 0.15) { mx = stick.fx; my = stick.fy; }
+  const m = hyp(mx, my); if (m > 1) { mx /= m; my /= m; }
+  return { mx, my };
+}
+function aiFoot(r) {
+  const dx = r.rk.x - r.x, dy = r.rk.y - r.y, d = hyp(dx, dy);
+  if (d < 3) return { mx: 0, my: 0 };
+  return { mx: dx / d, my: dy / d };
+}
+function aiControl(r, dt) {
+  const ai = r.ai, c = { turn: 0, boost: false, fire: [false, false], hold: [false, false], aim: [null, null] };
+  ai.retarget -= dt; ai.cool -= dt;
+  if (!ai.target || !ai.target.onRocket || ai.retarget <= 0) {
+    const cands = riders.filter(o => o !== r && o.onRocket);
+    const p = riders[0];
+    if (p !== r && p.onRocket && Math.random() < 0.6) ai.target = p;
+    else ai.target = cands.length ? cands[(Math.random() * cands.length) | 0] : null;
+    ai.retarget = rand(3, 7);
+    ai.wx = rand(300, WORLD_W - 300); ai.wy = rand(300, WORLD_H - 300);
+  }
+  const t = ai.target && ai.target.onRocket ? ai.target : null;
+  let tx = ai.wx, ty = ai.wy, dist = 1e9;
+  if (t) { tx = t.x + t.vx * 0.5; ty = t.y + t.vy * 0.5; dist = hyp(t.x - r.x, t.y - r.y); }
+  let desired = Math.atan2(ty - r.y, tx - r.x);
+  // wall avoidance
+  const lx = r.x + r.vx * 0.9, ly = r.y + r.vy * 0.9, m = 170;
+  if (lx < m || lx > WORLD_W - m || ly < m || ly > WORLD_H - m) desired = Math.atan2(WORLD_H / 2 - r.y, WORLD_W / 2 - r.x);
+  // post avoidance
+  for (const p of posts) {
+    const dx = p.x - r.x, dy = p.y - r.y, d = hyp(dx, dy);
+    if (d < 110 + p.r) { const rel = angDiff(Math.atan2(dy, dx), r.ang); if (Math.abs(rel) < 0.6) { desired = r.ang - Math.sign(rel || 1) * 1.2; break; } }
+  }
+  c.turn = clamp(angDiff(desired, r.ang) * 2.5, -1, 1);
+  if (ai.boosting) { if (r.fuel < 10 || dist < 250) ai.boosting = false; }
+  else if (dist > 450 && dist < 1e8 && r.fuel > 40) ai.boosting = true;
+  c.boost = ai.boosting;
+  // fire at target
+  if (t && ai.cool <= 0 && dist < CABLE_MAX * 0.85 && t.inv <= 0) {
+    const a = Math.atan2(t.y - r.y, t.x - r.x), rel = angDiff(a, r.ang);
+    let side = -1;
+    if (rel < -0.25 && rel > -1.9) side = 0; else if (rel > 0.25 && rel < 1.9) side = 1;
+    if (side >= 0 && !r.cables[side]) {
+      const ft = dist / CABLE_SPEED;
+      const ax = t.x + (t.vx - r.vx) * ft, ay = t.y + (t.vy - r.vy) * ft;
+      c.fire[side] = true; c.aim[side] = Math.atan2(ay - r.y, ax - r.x) + gauss() * AI_ERR;
+      ai.cool = rand(3, 5.5);
+    }
+  }
+  return c;
+}
+
+// ---------- cables ----------
+function autoAim(r, s) {
+  const base = r.ang + (s ? 1 : -1) * CABLE_ANGLE;
+  let best = null, bestScore = 1e9;
+  const consider = (o, maxDiff, bonus, isRider) => {
+    const d = hyp(o.x - r.x, o.y - r.y); if (d > CABLE_MAX + (isRider ? 20 : 0)) return;
+    const diff = Math.abs(angDiff(Math.atan2(o.y - r.y, o.x - r.x), base)); if (diff > maxDiff) return;
+    const sc = isRider ? diff * 0.5 + d / CABLE_MAX * 0.2 - 0.3 : diff + d / CABLE_MAX * 0.3 + bonus;
+    if (sc < bestScore) { bestScore = sc; best = { o, d }; }
+  };
+  for (const o of riders) {
+    if (o === r) continue;
+    if (o.onRocket) { if (o.inv <= 0) consider(o, 0.75, 0, true); }
+    else { consider(o, 0.8, -0.05, false); consider(o.rk, 0.8, -0.05, false); }
+  }
+  for (const p of posts) consider(p, 0.8, 0, false);
+  if (!best) return base;
+  const ft = best.d / CABLE_SPEED, o = best.o;
+  const ovx = o.vx || 0, ovy = o.vy || 0;
+  return Math.atan2(o.y + (ovy - r.vy) * ft - r.y, o.x + (ovx - r.vx) * ft - r.x);
+}
+function fireCable(r, s, aim) {
+  if (r.cableCool > 0) return;
+  if (r.cables[s] && r.cables[s].state !== 'retract') return;
+  const a = aim != null ? aim : r.ang + (s ? 1 : -1) * CABLE_ANGLE;
+  r.cables[s] = { state: 'fly', dx: Math.cos(a), dy: Math.sin(a), len: 0, target: null, L: 0, tx: r.x, ty: r.y };
+  if (state === 'play' && (r.isPlayer || onScreen(r.x, r.y))) sfx.fire();
+}
+function retract(r, k) {
+  k.state = 'retract';
+  const dx = k.tx - r.x, dy = k.ty - r.y, d = hyp(dx, dy) || 1;
+  k.dx = dx / d; k.dy = dy / d; k.len = d; k.target = null;
+}
+function latchCable(r, k, target) {
+  const o = anchorObj(target);
+  k.state = 'latched'; k.target = target; k.tx = o.x; k.ty = o.y;
+  k.L = Math.max(target.kind === 'post' ? 60 : 40, hyp(r.x - o.x, r.y - o.y));
+  if (target.kind === 'post') { // swing tracking (caps) + live-cable clothesline bookkeeping
+    k.swept = 0; k.age = 0; k.lastA = Math.atan2(r.y - o.y, r.x - o.x); k.immune = new Map(); k.sides = new Map();
+  }
+  if (r.isPlayer) {
+    sfx.latch();
+    if (state === 'play') {
+      if (target.kind === 'rocket') msg('DRAGGING ' + target.r.name + "'S ROCKET!", '#fc0');
+      else if (target.kind === 'foot') msg('DRAGGING ' + target.r.name + '!', '#fc0');
+    }
+  }
+  spawnParts(o.x, o.y, 6, '#0ff', 120, 0.3);
+}
+function updateCable(r, s, hold, dt) {
+  const k = r.cables[s]; if (!k) return;
+  if (k.state === 'fly') {
+    k.len += CABLE_SPEED * dt;
+    k.tx = r.x + k.dx * k.len; k.ty = r.y + k.dy * k.len;
+    if (k.tx < 0 || k.ty < 0 || k.tx > WORLD_W || k.ty > WORLD_H) { retract(r, k); return; }
+    // 1) a rider still on a rocket -> yank them off (scores)
+    for (const o of riders) {
+      if (o === r || !o.onRocket || o.inv > 0) continue;
+      if (hyp(o.x - k.tx, o.y - k.ty) < RIDER_R + 9) { knockOff(o, r, 'yank'); retract(r, k); return; }
+    }
+    // 2) movable things (rider on foot, empty rocket): only latch if the button is held, else pass through
+    if (hold) {
+      for (const o of riders) {
+        if (o === r || o.onRocket) continue;
+        if (hyp(o.x - k.tx, o.y - k.ty) < RIDER_R + 7) { latchCable(r, k, { kind: 'foot', r: o }); return; }
+        if (!o.rk.homing && hyp(o.rk.x - k.tx, o.rk.y - k.ty) < RIDER_R + 9) { latchCable(r, k, { kind: 'rocket', r: o }); return; }
+      }
+    }
+    // 3) posts
+    for (const p of posts) {
+      if (hyp(p.x - k.tx, p.y - k.ty) < p.r + 6) {
+        k.tx = p.x; k.ty = p.y;
+        if (hold) latchCable(r, k, { kind: 'post', p }); else retract(r, k);
+        return;
+      }
+    }
+    if (k.len >= CABLE_MAX) retract(r, k);
+  } else if (k.state === 'latched') {
+    if (!anchorValid(k.target)) { retract(r, k); return; }
+    const o = anchorObj(k.target);
+    k.tx = o.x; k.ty = o.y;
+    if (!hold) { retract(r, k); return; }
+    if (k.target.kind === 'post') {
+      k.L = Math.max(70, k.L - 22 * dt); // slowly reel in -> tighter, faster whip
+      const a = Math.atan2(r.y - o.y, r.x - o.x);
+      k.swept += Math.abs(angDiff(a, k.lastA)); k.lastA = a; k.age += dt;
+      if (k.swept >= SWING_MAX_ROTATIONS * TAU || k.age >= SWING_MAX_TIME) { // auto-release
+        retract(r, k); k.flash = 0.3;
+        if (r.isPlayer && state === 'play') sfx.release();
+        return;
+      }
+    }
+  } else {
+    if (k.flash) k.flash = Math.max(0, k.flash - dt);
+    k.len -= 2200 * dt;
+    if (k.len <= 0) { r.cables[s] = null; return; }
+    k.tx = r.x + k.dx * k.len; k.ty = r.y + k.dy * k.len;
+  }
+}
+function applyCableConstraints(r) {
+  for (const k of r.cables) {
+    if (!k || k.state !== 'latched' || !anchorValid(k.target)) continue;
+    const o = anchorObj(k.target);
+    if (hyp(o.x - r.x, o.y - r.y) > k.L + 250) { retract(r, k); continue; } // safety: never get flung by an over-stretched rope
+    if (k.target.kind === 'post') constrain(k.target.p, 0, r, 1, k.L);      // swing around the post
+    else constrain(r, 0.12, anchorObj(k.target), 0.88, k.L);               // drag the thing behind you
+  }
+}
+function releaseCablesOn(pred) { // retract any latched cable whose target matches
+  for (const o of riders) for (const k of o.cables) if (k && k.state === 'latched' && pred(k.target)) retract(o, k);
+}
+
+// ---------- tie-offs / tethers ----------
+function canTie() {
+  if (!player || !player.onRocket || state !== 'play') return false;
+  const [a, b] = player.cables;
+  return !!(a && b && a.state === 'latched' && b.state === 'latched' && !sameAnchor(a.target, b.target));
+}
+function tetherKind(a, b) {
+  const ks = [a.kind, b.kind].sort().join('-');
+  return { 'post-post': 'clothes', 'foot-post': 'tied', 'foot-rocket': 'tangled', 'post-rocket': 'anchored', 'rocket-rocket': 'lashed', 'foot-foot': 'bound' }[ks];
+}
+function addTether(owner, a, b) {
+  const A = anchorObj(a), B = anchorObj(b);
+  const kind = tetherKind(a, b);
+  const footy = a.kind === 'foot' || b.kind === 'foot';
+  const life = footy ? TIE_EFFECT : TETHER_LIFE;
+  const minL = { clothes: 1e9, tied: 70, tangled: 26, anchored: 50, lashed: 40, bound: 30 }[kind];
+  const t = { a, b, owner, kind, L: Math.max(20, hyp(A.x - B.x, A.y - B.y)), minL, t: life, max: life, arm: 0.35, ownerArm: 1.0 };
+  tethers.push(t);
+  while (tethers.length > TETHER_MAX) tethers.shift();
+  return t;
+}
+function doTie(r) {
+  const [k0, k1] = r.cables;
+  const t = addTether(r, k0.target, k1.target);
+  r.cables = [null, null]; r.cableCool = TIE_COOL;
+  sfx.tie();
+  const A = anchorObj(t.a), B = anchorObj(t.b);
+  spawnParts(A.x, A.y, 10, '#f93', 140, 0.4); spawnParts(B.x, B.y, 10, '#f93', 140, 0.4);
+  const fa = t.a.kind === 'foot' ? t.a.r : t.b.kind === 'foot' ? t.b.r : null;
+  const ra = t.a.kind === 'rocket' ? t.a.r : t.b.kind === 'rocket' ? t.b.r : null;
+  if (t.kind === 'clothes') msg('CLOTHESLINE SET!', '#f93');
+  else if (t.kind === 'tied') msg('TIED UP ' + fa.name + '!', '#f93');
+  else if (t.kind === 'tangled') msg('TANGLED ' + fa.name + (ra === fa ? ' TO THEIR ROCKET!' : ' WITH ' + ra.name + "'S ROCKET!"), '#f93');
+  else if (t.kind === 'anchored') msg('ANCHORED ' + ra.name + "'S ROCKET!", '#f93');
+  else if (t.kind === 'lashed') msg('ROCKETS LASHED TOGETHER!', '#f93');
+  else msg('TIED ' + t.a.r.name + ' TO ' + t.b.r.name + '!', '#f93');
+}
+function snapTether(t, loud) {
+  const i = tethers.indexOf(t); if (i >= 0) tethers.splice(i, 1);
+  if (loud) {
+    const A = anchorObj(t.a), B = anchorObj(t.b);
+    spawnParts((A.x + B.x) / 2, (A.y + B.y) / 2, 14, '#f93', 200, 0.5);
+    if (onScreen(A.x, A.y) || onScreen(B.x, B.y)) sfx.twang();
+  }
+}
+function tiedDown(r) { // rider on foot held by a tether end -> can't remount
+  for (const t of tethers) if ((t.a.kind === 'foot' && t.a.r === r) || (t.b.kind === 'foot' && t.b.r === r)) return true;
+  return false;
+}
+function segDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+  let u = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0; u = clamp(u, 0, 1);
+  return hyp(px - ax - u * dx, py - ay - u * dy);
+}
+function segsCross(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const d = (x2 - x1) * (y4 - y3) - (y2 - y1) * (x4 - x3); if (d === 0) return false;
+  const u = ((x3 - x1) * (y4 - y3) - (y3 - y1) * (x4 - x3)) / d, v = ((x3 - x1) * (y2 - y1) - (y3 - y1) * (x2 - x1)) / d;
+  return u >= 0 && u <= 1 && v >= 0 && v <= 1;
+}
+function updateTethers(dt) {
+  for (let i = tethers.length - 1; i >= 0; i--) {
+    const t = tethers[i];
+    if (!tethers.includes(t)) continue;
+    t.t -= dt; t.arm -= dt; t.ownerArm -= dt;
+    if (!anchorValid(t.a) || !anchorValid(t.b)) { snapTether(t, false); continue; }
+    if (t.t <= 0) { snapTether(t, true); continue; }
+    if (t.L > t.minL) t.L = Math.max(t.minL, t.L - 70 * dt); // cinch tie-ups tighter
+    const A = anchorObj(t.a), B = anchorObj(t.b);
+    if (hyp(A.x - B.x, A.y - B.y) > t.L + 300) { snapTether(t, true); continue; } // safety snap
+    constrain(A, t.a.kind === 'post' ? 0 : 1, B, t.b.kind === 'post' ? 0 : 1, t.L);
+    if (t.kind === 'clothes' && t.arm <= 0) {
+      for (const r of riders) {
+        if (!r.onRocket || r.inv > 0) continue;
+        if (r === t.owner && t.ownerArm > 0) continue;
+        if (segDist(r.x, r.y, A.x, A.y, B.x, B.y) < 9 || segsCross(r.px, r.py, r.x, r.y, A.x, A.y, B.x, B.y)) {
+          const by = r === t.owner ? null : t.owner;
+          knockOff(r, by, 'clothes');
+          if (state === 'play') {
+            if (by && by.isPlayer) msg('CLOTHESLINE! +1 ' + r.name, '#fc0');
+            else if (r.isPlayer) msg(by ? 'CLOTHESLINED BY ' + by.name + '!' : 'CLOTHESLINED YOURSELF!', '#f44');
+            else msg('CLOTHESLINE! ' + r.name, '#f93');
+          }
+          snapTether(t, true);
+          break;
+        }
+      }
+    }
+  }
+}
+
+// a live cable latched to a POST knocks off other riders on rockets who cross it (stays latched)
+function swingClotheslines(dt) {
+  for (const r of riders) {
+    if (!r.onRocket) continue;
+    for (const k of r.cables) {
+      if (!k || k.state !== 'latched' || k.target.kind !== 'post') continue;
+      const p = k.target.p, ex = r.x - p.x, ey = r.y - p.y, len2 = ex * ex + ey * ey;
+      for (const [o, t] of k.immune) { if (t - dt <= 0) k.immune.delete(o); else k.immune.set(o, t - dt); }
+      for (const o of riders) {
+        if (o === r || !o.onRocket) continue;
+        const ox = o.x - p.x, oy = o.y - p.y;
+        const side = Math.sign(ex * oy - ey * ox);
+        const along = len2 ? (ox * ex + oy * ey) / len2 : -1;   // 0 = at post, 1 = at the swinging rider
+        const prev = k.sides.get(o); k.sides.set(o, side);
+        if (o.inv > 0 || k.immune.has(o)) continue;
+        const near = segDist(o.x, o.y, p.x, p.y, r.x, r.y) < 10;
+        const swept = prev !== undefined && side !== 0 && prev !== 0 && side !== prev && along > 0 && along < 1.05;
+        if (near || swept || segsCross(o.px, o.py, o.x, o.y, p.x, p.y, r.x, r.y)) {
+          k.immune.set(o, SWING_CLOTHES_IMMUNE);
+          knockOff(o, r, 'clothes');
+          if (state === 'play') {
+            if (r.isPlayer) msg('CLOTHESLINE! +1 ' + o.name, '#fc0');
+            else if (o.isPlayer) msg('CLOTHESLINED BY ' + r.name + '!', '#f44');
+            else msg('CLOTHESLINE! ' + o.name, '#f93');
+            if (r.isPlayer || o.isPlayer || onScreen(o.x, o.y)) sfx.twang();
+          }
+          spawnParts(o.x, o.y, 10, '#fff', 200, 0.4);
+        }
+      }
+    }
+  }
+}
+
+// ---------- knock off ----------
+function knockOff(o, by, how) {
+  o.onRocket = false; o.falls++; o.cables = [null, null]; o.killer = by || null; o.boosting = false;
+  o.tumble = TUMBLE_TIME; o.footT = 0; o.stun = 0; o.inv = 0; o.cableCool = 0;
+  // the rocket keeps sliding and spinning away
+  const k = o.rk; k.x = o.x; k.y = o.y; k.ang = o.ang; k.homing = false;
+  if (how === 'clothes') { k.vx = o.vx * 0.9; k.vy = o.vy * 0.9; o.vx *= -0.35; o.vy *= -0.35; }
+  else {
+    k.vx = o.vx * 1.1; k.vy = o.vy * 1.1;
+    if (by) { const dx = by.x - o.x, dy = by.y - o.y, d = hyp(dx, dy) || 1; o.vx = o.vx * 0.3 + dx / d * 280; o.vy = o.vy * 0.3 + dy / d * 280; }
+  }
+  k.spin = rand(-8, 8);
+  if (by && state === 'play') by.score++;
+  o.spin = rand(-10, 10);
+  spawnParts(o.x, o.y, 24, o.color, 260, 0.7);
+  spawnParts(o.x, o.y, 12, '#fff', 180, 0.4);
+  if (state === 'play') {
+    if (how !== 'clothes') {
+      if (by && by.isPlayer) { msg('+1  YANKED ' + o.name + '!', '#fc0'); }
+      else if (o.isPlayer) { msg('YANKED BY ' + (by ? by.name : '???') + '!', '#f44'); }
+      else if (by) msg(by.name + ' YANKED ' + o.name, '#aaa');
+    }
+    if (by && by.isPlayer) shake = 6; else if (o.isPlayer) shake = 10;
+    if (o.isPlayer || by && by.isPlayer || onScreen(o.x, o.y)) sfx.knock();
+  }
+}
+function remount(r) {
+  const k = r.rk;
+  // free everything attached to this rider / rocket
+  for (const t of tethers.slice()) if ([t.a, t.b].some(a => a.r === r)) snapTether(t, true);
+  releaseCablesOn(a => a.r === r);
+  r.onRocket = true; r.x = k.x; r.y = k.y; r.ang = k.ang; r.px = r.x; r.py = r.y;
+  r.vx = Math.cos(r.ang) * BASE_SPEED * 0.4; r.vy = Math.sin(r.ang) * BASE_SPEED * 0.4;
+  r.inv = REMOUNT_INV; r.stun = 0; r.tumble = 0; r.footT = 0; k.homing = false;
+  spawnParts(r.x, r.y, 16, '#fff', 150, 0.5);
+  if (r.isPlayer && state === 'play') { sfx.spawn(); msg('BACK IN THE SADDLE', '#3cf'); }
+}
+function recallRocket(r) {
+  r.rk.homing = true;
+  for (const t of tethers.slice()) if ([t.a, t.b].some(a => a.kind === 'rocket' && a.r === r)) snapTether(t, false);
+  releaseCablesOn(a => a.kind === 'rocket' && a.r === r);
+  if (r.isPlayer && state === 'play') { msg('ROCKET RECALLED!', '#3cf'); beep(600, 0.3, 'triangle', 0.08, 300); }
+}
+
+// ---------- physics ----------
+function pushOutPosts(o, rad, bounce) {
+  for (const p of posts) {
+    const dx = o.x - p.x, dy = o.y - p.y, d = hyp(dx, dy), md = p.r + rad;
+    if (d < md && d > 0) {
+      const nx = dx / d, ny = dy / d; o.x = p.x + nx * md; o.y = p.y + ny * md;
+      const vn = o.vx * nx + o.vy * ny; if (vn < 0) { o.vx -= (1 + bounce) * vn * nx; o.vy -= (1 + bounce) * vn * ny; }
+    }
+  }
+}
+function updateFoot(r, c, dt) {
+  r.footT += dt; r.stun = Math.max(0, r.stun - dt); r.tumble = Math.max(0, r.tumble - dt); r.hitCool = Math.max(0, r.hitCool - dt);
+  if (r.tumble > 0) {
+    const f = Math.exp(-2.5 * dt); r.vx *= f; r.vy *= f; r.ang += r.spin * dt;
+  } else if (r.stun > 0) {
+    const f = Math.exp(-5 * dt); r.vx *= f; r.vy *= f; r.ang += 6 * dt;
+  } else {
+    const tvx = c.mx * FOOT_SPEED, tvy = c.my * FOOT_SPEED, k = Math.min(1, 10 * dt);
+    r.vx += (tvx - r.vx) * k; r.vy += (tvy - r.vy) * k;
+    if (hyp(c.mx, c.my) > 0.1) { r.ang += angDiff(Math.atan2(c.my, c.mx), r.ang) * Math.min(1, 12 * dt); r.walk += dt * 14; }
+  }
+  r.x += r.vx * dt; r.y += r.vy * dt;
+  if (r.x < RIDER_R || r.x > WORLD_W - RIDER_R) { r.vx *= -0.4; r.x = clamp(r.x, RIDER_R, WORLD_W - RIDER_R); }
+  if (r.y < RIDER_R || r.y > WORLD_H - RIDER_R) { r.vy *= -0.4; r.y = clamp(r.y, RIDER_R, WORLD_H - RIDER_R); }
+  pushOutPosts(r, 8, 0.2);
+  // the empty rocket
+  const w = r.rk;
+  if (w.homing) {
+    const dx = r.x - w.x, dy = r.y - w.y, d = hyp(dx, dy) || 1, sp = Math.min(420, d / dt);
+    w.vx = dx / d * sp; w.vy = dy / d * sp; w.ang += angDiff(Math.atan2(dy, dx), w.ang) * Math.min(1, 6 * dt);
+    w.x += w.vx * dt; w.y += w.vy * dt;
+    if (Math.random() < 0.5) particles.push({ x: w.x, y: w.y, vx: -w.vx * 0.2, vy: -w.vy * 0.2, life: 0.4, max: 0.4, color: '#3cf' });
+  } else {
+    const g = Math.exp(-0.9 * dt); w.vx *= g; w.vy *= g; w.x += w.vx * dt; w.y += w.vy * dt; w.ang += w.spin * dt; w.spin *= Math.exp(-0.8 * dt);
+    if (w.x < 20 || w.x > WORLD_W - 20) { w.vx = -w.vx * 0.5; w.x = clamp(w.x, 20, WORLD_W - 20); }
+    if (w.y < 20 || w.y > WORLD_H - 20) { w.vy = -w.vy * 0.5; w.y = clamp(w.y, 20, WORLD_H - 20); }
+    pushOutPosts(w, 12, 0.4);
+    if (hyp(w.vx, w.vy) > 40 && Math.random() < 0.3) particles.push({ x: w.x, y: w.y, vx: rand(-20, 20), vy: rand(-20, 20), life: 0.8, max: 0.8, color: '#666' });
+  }
+  if (r.footT >= RECALL_TIME && !w.homing) recallRocket(r);
+  // remount by touching the rocket
+  if (r.tumble <= 0 && !tiedDown(r) && hyp(w.x - r.x, w.y - r.y) < RIDER_R + 12 && (state === 'play' || state === 'title')) remount(r);
+}
+function updateRider(r, c, dt) {
+  r.px = r.x; r.py = r.y;
+  if (!r.onRocket) { updateFoot(r, c, dt); return; }
+  r.inv = Math.max(0, r.inv - dt); r.stun = Math.max(0, r.stun - dt); r.cableCool = Math.max(0, r.cableCool - dt);
+  if (r.isPlayer && c.tie && canTie()) doTie(r);
+  const latchedPost = r.cables.some(k => k && k.state === 'latched' && k.target.kind === 'post');
+  r.ang += c.turn * TURN_RATE * dt * (r.stun > 0 ? 0.4 : 1);
+  if (latchedPost) {
+    const va = Math.atan2(r.vy, r.vx);
+    r.ang += angDiff(va, r.ang) * Math.min(1, 8 * dt);
+  }
+  if (c.boost && r.fuel > (r.boosting ? 0 : 8)) { r.boosting = true; r.fuel = Math.max(0, r.fuel - FUEL_BURN * dt); }
+  else { r.boosting = false; r.fuel = Math.min(FUEL_MAX, r.fuel + FUEL_REGEN * dt); }
+  let sp = r.boosting ? BOOST_SPEED : BASE_SPEED;
+  if (latchedPost) sp *= 1.15;
+  if (r.stun > 0) sp *= 0.35;
+  const dvx = Math.cos(r.ang) * sp, dvy = Math.sin(r.ang) * sp;
+  const k = Math.min(1, GRIP * dt * (latchedPost ? 2 : 1));
+  r.vx += (dvx - r.vx) * k; r.vy += (dvy - r.vy) * k;
+  r.x += r.vx * dt; r.y += r.vy * dt;
+  applyCableConstraints(r);
+  // walls
+  let hit = false;
+  if (r.x < RIDER_R) { r.x = RIDER_R; r.vx = Math.abs(r.vx) * 0.5; hit = true; }
+  if (r.x > WORLD_W - RIDER_R) { r.x = WORLD_W - RIDER_R; r.vx = -Math.abs(r.vx) * 0.5; hit = true; }
+  if (r.y < RIDER_R) { r.y = RIDER_R; r.vy = Math.abs(r.vy) * 0.5; hit = true; }
+  if (r.y > WORLD_H - RIDER_R) { r.y = WORLD_H - RIDER_R; r.vy = -Math.abs(r.vy) * 0.5; hit = true; }
+  if (hit) {
+    r.ang = Math.atan2(r.vy, r.vx); r.vx *= 0.6; r.vy *= 0.6; r.stun = Math.max(r.stun, 0.25);
+    for (let s = 0; s < 2; s++) if (r.cables[s] && r.cables[s].state === 'latched') retract(r, r.cables[s]);
+    if (r.isPlayer && state === 'play' && performance.now() - lastWallSfx > 250) { sfx.wall(); lastWallSfx = performance.now(); shake = 4; }
+    spawnParts(r.x, r.y, 5, '#fc0', 100, 0.3);
+  }
+  // posts (solid)
+  for (const p of posts) {
+    const dx = r.x - p.x, dy = r.y - p.y, d = hyp(dx, dy), md = p.r + RIDER_R - 2;
+    if (d < md && d > 0) {
+      const nx = dx / d, ny = dy / d; r.x = p.x + nx * md; r.y = p.y + ny * md;
+      const vn = r.vx * nx + r.vy * ny;
+      if (vn < 0) { r.vx -= 1.5 * vn * nx; r.vy -= 1.5 * vn * ny; r.vx *= 0.6; r.vy *= 0.6; r.ang = Math.atan2(r.vy, r.vx); r.stun = Math.max(r.stun, 0.25);
+        if (r.isPlayer && state === 'play' && performance.now() - lastWallSfx > 250) { sfx.wall(); lastWallSfx = performance.now(); } }
+    }
+  }
+  // cables
+  for (let s = 0; s < 2; s++) {
+    if (c.fire[s]) fireCable(r, s, c.aim ? c.aim[s] : (r.isPlayer ? autoAim(r, s) : null));
+    updateCable(r, s, c.hold[s], dt);
+  }
+  syncRocket(r);
+  // exhaust
+  if (r.boosting && Math.random() < 0.6) particles.push({ x: r.x - Math.cos(r.ang) * 22, y: r.y - Math.sin(r.ang) * 22, vx: -r.vx * 0.2 + rand(-20, 20), vy: -r.vy * 0.2 + rand(-20, 20), life: 0.45, max: 0.45, color: '#89a' });
+}
+function riderCollisions() {
+  for (let i = 0; i < riders.length; i++) for (let j = i + 1; j < riders.length; j++) {
+    const a = riders[i], b = riders[j];
+    if (!a.onRocket || !b.onRocket) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, d = hyp(dx, dy), md = RIDER_R * 2;
+    if (d >= md || d === 0) continue;
+    const nx = dx / d, ny = dy / d, ov = (md - d) / 2;
+    a.x -= nx * ov; a.y -= ny * ov; b.x += nx * ov; b.y += ny * ov;
+    const rv = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+    if (rv <= 0) continue;
+    const headOn = Math.cos(a.ang - b.ang) < -0.4;
+    const e = headOn ? 1.3 : 0.9;
+    a.vx -= nx * rv * e; a.vy -= ny * rv * e; b.vx += nx * rv * e; b.vy += ny * rv * e;
+    if (headOn) {
+      for (const r of [a, b]) { r.stun = 0.9; r.vx *= 0.5; r.vy *= 0.5; r.ang = Math.atan2(r.vy, r.vx) + rand(-0.4, 0.4); }
+      spawnParts((a.x + b.x) / 2, (a.y + b.y) / 2, 18, '#fff', 220, 0.4);
+      if (state === 'play' && (a.isPlayer || b.isPlayer)) { sfx.bump(); shake = 8; msg('HEAD-ON!', '#fff'); }
+    } else if (state === 'play' && (a.isPlayer || b.isPlayer)) sfx.bump();
+  }
+  // rockets running over riders on foot: cartoon nudge + dizzy stars, no points
+  for (const o of riders) {
+    if (!o.onRocket) continue;
+    for (const f of riders) {
+      if (f === o || f.onRocket || f.hitCool > 0) continue;
+      const dx = f.x - o.x, dy = f.y - o.y, d = hyp(dx, dy);
+      if (d >= RIDER_R + 9) continue;
+      const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
+      f.vx = o.vx * 0.7 + nx * 120; f.vy = o.vy * 0.7 + ny * 120; f.stun = 1.0; f.hitCool = 1.2; f.tumble = 0;
+      o.vx *= 0.85; o.vy *= 0.85;
+      spawnParts(f.x, f.y, 10, '#ff8', 160, 0.5);
+      if (state === 'play') {
+        if (o.isPlayer) msg('RAN OVER ' + f.name + '!', '#ccc');
+        else if (f.isPlayer) msg('YOU GOT RUN OVER!', '#f44');
+        if (o.isPlayer || f.isPlayer || onScreen(f.x, f.y)) sfx.runover();
+      }
+    }
+  }
+}
+
+function update(dt) {
+  if (state === 'over') { overT += dt; updateParticles(dt); return; }
+  if (state === 'play') { timeLeft -= dt; if (timeLeft <= 0) { timeLeft = 0; endRound(); return; } }
+  const human = state === 'play';
+  for (const r of riders) {
+    let c;
+    if (r.onRocket) c = (r.isPlayer && human) ? playerControl(r) : aiControl(r, dt);
+    else c = (r.isPlayer && human) ? playerFoot() : aiFoot(r);
+    updateRider(r, c, dt);
+  }
+  updateTethers(dt);
+  swingClotheslines(dt);
+  riderCollisions();
+  updateParticles(dt);
+  for (const m of msgs) m.t -= dt;
+  while (msgs.length && msgs[0].t <= 0) msgs.shift();
+  // camera
+  const tx = player.x + player.vx * 0.35, ty = player.y + player.vy * 0.35;
+  const k = Math.min(1, 4 * dt);
+  cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
+  shake = Math.max(0, shake - 30 * dt);
+  updateEngine();
+}
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]; p.life -= dt;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96;
+  }
+}
+function updateEngine() {
+  if (!AC || !eng) return;
+  const t = AC.currentTime;
+  const on = state === 'play' && player.onRocket;
+  const sp = hyp(player.vx, player.vy);
+  eng.g.gain.setTargetAtTime(on ? (player.boosting ? 0.07 : 0.035) : 0, t, 0.08);
+  eng.o.frequency.setTargetAtTime(40 + sp * 0.16, t, 0.1);
+  eng.f.frequency.setTargetAtTime(player.boosting ? 1200 : 450, t, 0.1);
+}
+
+// ---------- rendering ----------
+function onScreen(x, y) {
+  const s = cam.scale;
+  return Math.abs(x - cam.x) * s < VW / 2 + 60 && Math.abs(y - cam.y) * s < VH / 2 + 60;
+}
+const FONT = '"Courier New", Courier, monospace';
+let scanPat = null;
+function getScan() {
+  if (scanPat) return scanPat;
+  const c = document.createElement('canvas'); c.width = 1; c.height = 3;
+  const g = c.getContext('2d'); g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(0, 2, 1, 1);
+  scanPat = ctx.createPattern(c, 'repeat'); return scanPat;
+}
+function txt(s, x, y, size, color, align, outline) {
+  ctx.font = 'bold ' + size + 'px ' + FONT; ctx.textAlign = align || 'left'; ctx.textBaseline = 'middle';
+  if (outline !== false) { ctx.lineWidth = Math.max(2, size / 7); ctx.strokeStyle = '#000'; ctx.strokeText(s, x, y); }
+  ctx.fillStyle = color; ctx.fillText(s, x, y);
+}
+
+function drawRocket(r, flame, empty) {
+  ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.ang);
+  if (flame) {
+    const fl = (r.boosting ? 30 : 14) * rand(0.75, 1.2);
+    ctx.fillStyle = r.boosting ? '#9df' : '#fa3';
+    ctx.beginPath(); ctx.moveTo(-18, -5); ctx.lineTo(-18 - fl, 0); ctx.lineTo(-18, 5); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-18, -2.5); ctx.lineTo(-18 - fl * 0.5, 0); ctx.lineTo(-18, 2.5); ctx.fill();
+  }
+  ctx.fillStyle = r.color;
+  ctx.beginPath(); ctx.moveTo(-18, -6); ctx.lineTo(-25, -12); ctx.lineTo(-10, -6); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-18, 6); ctx.lineTo(-25, 12); ctx.lineTo(-10, 6); ctx.fill();
+  ctx.fillStyle = empty ? '#8d8d8d' : '#c8c8c8'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(24, 0); ctx.lineTo(13, -6.5); ctx.lineTo(-18, -6.5); ctx.lineTo(-18, 6.5); ctx.lineTo(13, 6.5); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#555'; ctx.fillRect(14, -2, 6, 4);
+  ctx.fillStyle = r.color; ctx.fillRect(-14, -6.5, 5, 13);
+  if (empty) { ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, TAU); ctx.fill(); } // empty saddle
+  ctx.restore();
+}
+function drawJockey(x, y, ang, color, dazed) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  ctx.fillStyle = color; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, 7.5, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(2.5, 0, 4.5, -1.1, 1.1); ctx.fill();
+  if (dazed) {
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(-3, -3); ctx.lineTo(3, 3); ctx.moveTo(3, -3); ctx.lineTo(-3, 3); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawRunner(r, now) {
+  // little feet that patter while running
+  const moving = hyp(r.vx, r.vy) > 10 && r.tumble <= 0 && r.stun <= 0;
+  const st = moving ? Math.sin(r.walk) * 5 : 0;
+  ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.ang);
+  ctx.fillStyle = '#222';
+  ctx.beginPath(); ctx.ellipse(st, -5, 3.5, 2.2, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-st, 5, 3.5, 2.2, 0, 0, TAU); ctx.fill();
+  ctx.restore();
+  drawJockey(r.x, r.y, r.ang, r.color, r.tumble > 0 || r.stun > 0);
+  if (r.stun > 0) { // cartoon dizzy stars
+    for (let i = 0; i < 3; i++) {
+      const a = now / 200 + i * TAU / 3;
+      ctx.fillStyle = '#ff8'; ctx.fillRect(r.x + Math.cos(a) * 12 - 2, r.y - 4 + Math.sin(a) * 5 - 2, 4, 4);
+    }
+  }
+  if (tiedDown(r)) { ctx.strokeStyle = '#f93'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(r.x, r.y, 11, 0, TAU); ctx.stroke(); }
+}
+function drawTether(t, now) {
+  const A = anchorObj(t.a), B = anchorObj(t.b);
+  ctx.globalAlpha = t.t < 2 ? (Math.floor(now / 120) % 2 ? 0.35 : 0.9) : 1;
+  if (t.kind === 'clothes') { ctx.strokeStyle = 'rgba(255,150,40,0.25)'; ctx.lineWidth = 12; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke(); }
+  ctx.strokeStyle = '#a5520f'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+  ctx.strokeStyle = '#ffa040'; ctx.lineWidth = 2.5; ctx.setLineDash([7, 5]);
+  ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke(); ctx.setLineDash([]);
+  for (const P of [A, B]) {
+    ctx.fillStyle = '#ff9a30'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(P.x, P.y, 5.5, 0, TAU); ctx.fill(); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function render(now) {
+  const s = cam.scale = clamp(VH / 480, 0.6, 1.3);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#05050f'; ctx.fillRect(0, 0, VW, VH);
+  const sx = shake ? rand(-shake, shake) : 0, sy = shake ? rand(-shake, shake) : 0;
+  ctx.save();
+  ctx.translate(VW / 2 + sx, VH / 2 + sy); ctx.scale(s, s); ctx.translate(-cam.x, -cam.y);
+  const x0 = cam.x - VW / 2 / s - 40, x1 = cam.x + VW / 2 / s + 40, y0 = cam.y - VH / 2 / s - 40, y1 = cam.y + VH / 2 / s + 40;
+  // arena floor
+  ctx.fillStyle = '#0c1024'; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  ctx.lineWidth = 1;
+  for (let gx = Math.max(0, Math.floor(x0 / 100) * 100); gx <= Math.min(WORLD_W, x1); gx += 100) {
+    ctx.strokeStyle = gx % 500 === 0 ? '#25407a' : '#162550';
+    ctx.beginPath(); ctx.moveTo(gx, Math.max(0, y0)); ctx.lineTo(gx, Math.min(WORLD_H, y1)); ctx.stroke();
+  }
+  for (let gy = Math.max(0, Math.floor(y0 / 100) * 100); gy <= Math.min(WORLD_H, y1); gy += 100) {
+    ctx.strokeStyle = gy % 500 === 0 ? '#25407a' : '#162550';
+    ctx.beginPath(); ctx.moveTo(Math.max(0, x0), gy); ctx.lineTo(Math.min(WORLD_W, x1), gy); ctx.stroke();
+  }
+  // walls (hazard stripes)
+  ctx.lineWidth = 18; ctx.strokeStyle = '#fc0'; ctx.strokeRect(-9, -9, WORLD_W + 18, WORLD_H + 18);
+  ctx.setLineDash([28, 28]); ctx.strokeStyle = '#111'; ctx.strokeRect(-9, -9, WORLD_W + 18, WORLD_H + 18); ctx.setLineDash([]);
+  // posts
+  const tt = now / 1000;
+  for (const p of posts) {
+    if (p.x < x0 - 50 || p.x > x1 + 50 || p.y < y0 - 50 || p.y > y1 + 50) continue;
+    ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.arc(p.x + 6, p.y + 6, p.r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,255,255,' + (0.25 + 0.2 * Math.sin(tt * 3 + p.ph)) + ')'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 7, 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#8a8fa0'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#d33'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 0.45, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(p.x - p.r * 0.3, p.y - p.r * 0.3, p.r * 0.18, 0, TAU); ctx.fill();
+  }
+  // particles (under riders)
+  for (const p of particles) {
+    ctx.globalAlpha = clamp(p.life / p.max, 0, 1); ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+  // empty rockets (under everything that moves)
+  for (const r of riders) {
+    if (r.onRocket) continue;
+    const w = r.rk;
+    if (r.isPlayer && state === 'play') { // highlight your own ride
+      ctx.strokeStyle = 'rgba(51,204,255,' + (0.5 + 0.4 * Math.sin(now / 120)) + ')'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(w.x, w.y, 30, 0, TAU); ctx.stroke();
+    }
+    if (w.homing) { ctx.strokeStyle = 'rgba(51,204,255,0.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(w.x, w.y, 22, 0, TAU); ctx.stroke(); }
+    drawRocket({ x: w.x, y: w.y, ang: w.ang, color: r.color, boosting: false }, false, true);
+  }
+  // tethers (orange rope)
+  for (const t of tethers) drawTether(t, now);
+  // cables
+  for (const r of riders) for (const k of r.cables) {
+    if (!k) continue;
+    ctx.strokeStyle = k.state === 'latched' ? '#fff' : r.color; ctx.lineWidth = k.state === 'latched' ? 3 : 2;
+    if (k.flash > 0) { ctx.strokeStyle = Math.floor(now / 50) % 2 ? '#fc0' : '#fff'; ctx.lineWidth = 5; } // auto-release flash
+    ctx.beginPath(); ctx.moveTo(r.x, r.y); ctx.lineTo(k.tx, k.ty); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.fillRect(k.tx - 3, k.ty - 3, 6, 6);
+  }
+  // riders on foot
+  for (const r of riders) {
+    if (r.onRocket) continue;
+    drawRunner(r, now);
+    if (!r.isPlayer) txt(r.name, r.x, r.y - 20, 12, r.color, 'center');
+  }
+  // riders on rockets
+  for (const r of riders) {
+    if (!r.onRocket) continue;
+    if (r.inv > 0 && Math.floor(now / 100) % 2) ctx.globalAlpha = 0.4;
+    drawRocket(r, true, false);
+    drawJockey(r.x, r.y, r.ang, r.color, r.stun > 0.3);
+    ctx.globalAlpha = 1;
+    if (!r.isPlayer) txt(r.name, r.x, r.y - 26, 13, r.color, 'center');
+  }
+  // player marker / arrow to your rocket
+  if (player && state === 'play') {
+    if (player.onRocket) {
+      ctx.strokeStyle = 'rgba(51,204,255,0.5)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(player.x, player.y, 26, 0, TAU); ctx.stroke();
+    } else {
+      const dx = player.rk.x - player.x, dy = player.rk.y - player.y, d = hyp(dx, dy);
+      if (d > 45) {
+        const a = Math.atan2(dy, dx), R0 = 30 + 4 * Math.sin(now / 100);
+        ctx.save(); ctx.translate(player.x + Math.cos(a) * R0, player.y + Math.sin(a) * R0); ctx.rotate(a);
+        ctx.fillStyle = '#3cf'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-4, -10); ctx.lineTo(0, 0); ctx.lineTo(-4, 10); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+  ctx.restore();
+
+  if (state === 'play') drawHUD(now);
+  else if (state === 'title') drawTitle(now);
+  else drawResults(now);
+  ctx.fillStyle = getScan(); ctx.fillRect(0, 0, VW, VH);
+}
+
+function drawHUD(now) {
+  const sc = clamp(VH / 390, 0.85, 1.5);
+  // score + fuel
+  txt('SCORE ' + player.score, 12, 20 * sc, 22 * sc, '#3cf');
+  const fw = 140 * sc, fh = 11 * sc, fy = 38 * sc;
+  txt('FUEL', 12, fy + fh / 2, 11 * sc, '#ccc');
+  const fx = 12 + 40 * sc;
+  ctx.fillStyle = '#222'; ctx.fillRect(fx, fy, fw, fh);
+  ctx.fillStyle = player.fuel < 20 ? '#f44' : player.boosting ? '#9df' : '#fa3';
+  ctx.fillRect(fx, fy, fw * player.fuel / FUEL_MAX, fh);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(fx, fy, fw, fh);
+  // mini scoreboard
+  let yy = fy + fh + 14 * sc;
+  for (const r of riders) { if (r.isPlayer) continue; txt(r.name + ' ' + r.score + (r.onRocket ? '' : ' (on foot)'), 12, yy, 12 * sc, r.color); yy += 15 * sc; }
+  // timer
+  const t = Math.ceil(timeLeft), mm = Math.floor(t / 60), ss = t % 60;
+  txt(mm + ':' + (ss < 10 ? '0' : '') + ss, VW / 2, 20 * sc, 26 * sc, t <= 30 ? '#f44' : '#fff', 'center');
+  // messages
+  let my = 50 * sc;
+  for (const m of msgs) { ctx.globalAlpha = clamp(m.t, 0, 1); txt(m.text, VW / 2, my, 16 * sc, m.color, 'center'); my += 20 * sc; }
+  ctx.globalAlpha = 1;
+  // on foot prompt
+  if (!player.onRocket) {
+    if (Math.floor(now / 350) % 2 === 0 || player.tumble > 0) txt('GET BACK ON YOUR ROCKET!', VW / 2, VH * 0.36, 24 * sc, '#3cf', 'center');
+    let sub = player.tumble > 0 ? 'KNOCKED OFF!' : tiedDown(player) ? 'TIED UP! WAIT IT OUT...' : 'RUN TO IT';
+    if (player.rk.homing) sub = 'ROCKET RETURNING...';
+    else if (player.footT > 5) sub += '   (RECALL IN ' + Math.max(1, Math.ceil(RECALL_TIME - player.footT)) + ')';
+    txt(sub, VW / 2, VH * 0.36 + 26 * sc, 14 * sc, '#fff', 'center');
+  } else if (canTie()) {
+    txt('BOTH CABLES HOOKED: ' + (isTouch ? 'TAP TIE!' : 'PRESS T TO TIE!'), VW / 2, VH * 0.3, 16 * sc, Math.floor(now / 200) % 2 ? '#f93' : '#fff', 'center');
+  }
+  drawMinimap(sc);
+  if (isTouch) drawTouch(sc, now);
+  else txt(player.onRocket ? 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables (hold)  T tie' : 'ARROWS/WASD run to your rocket', VW / 2, VH - 14, 12, '#678', 'center', false);
+}
+function drawMinimap(sc) {
+  const w = 130 * sc, h = w * WORLD_H / WORLD_W, x = VW - w - 10, y = 10;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#fc0'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+  const k = w / WORLD_W;
+  ctx.fillStyle = '#0aa';
+  for (const p of posts) ctx.fillRect(x + p.x * k - 1, y + p.y * k - 1, 2, 2);
+  ctx.strokeStyle = '#f93'; ctx.lineWidth = 1.5;
+  for (const t of tethers) { const A = anchorObj(t.a), B = anchorObj(t.b); ctx.beginPath(); ctx.moveTo(x + A.x * k, y + A.y * k); ctx.lineTo(x + B.x * k, y + B.y * k); ctx.stroke(); }
+  for (const r of riders) {
+    if (!r.onRocket) { ctx.fillStyle = '#777'; ctx.fillRect(x + r.rk.x * k - 1.5, y + r.rk.y * k - 1.5, 3, 3); }
+    ctx.fillStyle = r.onRocket ? r.color : '#888';
+    const sz = r.isPlayer ? 5 : 4;
+    ctx.fillRect(x + r.x * k - sz / 2, y + r.y * k - sz / 2, sz, sz);
+  }
+  const s = cam.scale;
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
+  ctx.strokeRect(x + (cam.x - VW / 2 / s) * k, y + (cam.y - VH / 2 / s) * k, VW / s * k, VH / s * k);
+}
+function drawTouch(sc, now) {
+  const bx = stick.active ? stick.ox : stickHome.x, by = stick.active ? stick.oy : stickHome.y, R = stickHome.r;
+  if (!player.onRocket) {
+    // on foot: plain round direction pad labelled RUN
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(bx, by, R, 0, TAU); ctx.fill(); ctx.stroke();
+    const kx = bx + (stick.active ? stick.fx * R : 0), ky = by + (stick.active ? stick.fy * R : 0);
+    ctx.fillStyle = 'rgba(51,204,255,0.5)'; ctx.beginPath(); ctx.arc(kx, ky, R * 0.4, 0, TAU); ctx.fill();
+    txt('RUN', bx, by - R - 11 * sc, 11 * sc, 'rgba(255,255,255,0.6)', 'center', false);
+  } else {
+    // horizontal handlebar slider
+    const kr = R * 0.36, hw = R + kr, hh = kr * 1.15;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(bx - hw + hh, by - hh); ctx.lineTo(bx + hw - hh, by - hh);
+    ctx.arc(bx + hw - hh, by, hh, -Math.PI / 2, Math.PI / 2); ctx.lineTo(bx - hw + hh, by + hh);
+    ctx.arc(bx - hw + hh, by, hh, Math.PI / 2, Math.PI * 1.5); ctx.closePath(); ctx.fill(); ctx.stroke();
+    const h = stick.active ? stick.h : 0, kx = bx + h * R;
+    if (Math.abs(h) > 0.01) { // fill bar from center to knob = turn amount
+      ctx.fillStyle = 'rgba(51,204,255,0.35)'; ctx.fillRect(Math.min(bx, kx), by - hh * 0.45, Math.abs(kx - bx), hh * 0.9);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(bx - 1, by - hh * 0.7, 2, hh * 1.4); // center tick
+    for (const d of [-1, 1]) { // arrows
+      const ax = bx + d * (hw + 10 * sc), lit = h * d > 0.08;
+      ctx.fillStyle = lit ? 'rgba(51,204,255,0.95)' : 'rgba(255,255,255,0.4)';
+      ctx.beginPath(); ctx.moveTo(ax + d * 9 * sc, by); ctx.lineTo(ax, by - 8 * sc); ctx.lineTo(ax, by + 8 * sc); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(51,204,255,0.6)'; ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath(); ctx.arc(kx, by, kr, 0, TAU); ctx.fill(); ctx.stroke();
+    txt('STEER', bx, by - hh - 11 * sc, 11 * sc, 'rgba(255,255,255,0.55)', 'center', false);
+  }
+  // buttons
+  const dim = !player.onRocket || player.cableCool > 0;
+  for (const k in btns) {
+    if (!btnEnabled(k)) continue;
+    const b = btns[k], held = heldBtn(k);
+    let col = k === 'B' ? '255,170,51' : k === 'T' ? '255,150,50' : '0,255,255';
+    if (k === 'L' && player.cables[0] && player.cables[0].state === 'latched') col = '255,255,255';
+    if (k === 'R' && player.cables[1] && player.cables[1].state === 'latched') col = '255,255,255';
+    const off = dim && k !== 'T' && (k === 'B' ? !player.onRocket : true);
+    const pulse = k === 'T' ? 0.25 + 0.25 * Math.sin(now / 90) : 0;
+    ctx.fillStyle = 'rgba(' + col + ',' + (off ? 0.05 : (held ? 0.45 : 0.15) + pulse) + ')';
+    ctx.strokeStyle = 'rgba(' + col + ',' + (off ? 0.25 : 0.7) + ')'; ctx.lineWidth = k === 'T' ? 3 : 2;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill(); ctx.stroke();
+    const lab = k === 'L' ? '<L' : k === 'R' ? 'R>' : k === 'T' ? 'TIE' : 'BOOST';
+    txt(lab, b.x, b.y, (k === 'B' ? 12 : k === 'T' ? 18 : 20) * sc, off ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.9)', 'center', false);
+  }
+}
+function drawBigTitle(text, x, y, size) {
+  ctx.font = 'bold ' + size + 'px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const d = Math.max(2, size / 14);
+  for (let i = 5; i >= 1; i--) { ctx.fillStyle = i > 2 ? '#400' : '#900'; ctx.fillText(text, x + i * d * 0.6, y + i * d * 0.6); }
+  const g = ctx.createLinearGradient(0, y - size / 2, 0, y + size / 2);
+  g.addColorStop(0, '#fff7a0'); g.addColorStop(0.45, '#ffcc00'); g.addColorStop(0.55, '#ff7700'); g.addColorStop(1, '#ff3300');
+  ctx.fillStyle = g; ctx.fillText(text, x, y);
+  ctx.lineWidth = Math.max(1.5, size / 30); ctx.strokeStyle = '#000'; ctx.strokeText(text, x, y);
+}
+function drawTitle(now) {
+  ctx.fillStyle = 'rgba(0,0,10,0.55)'; ctx.fillRect(0, 0, VW, VH);
+  const size = Math.min(VW / 9, VH / 5, 90);
+  drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
+  const sc = clamp(VH / 390, 0.8, 1.6);
+  txt('v0.4  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('Grapple posts to whip around corners.', VW / 2, VH * 0.52, 14 * sc, '#ccc', 'center');
+  txt('Lasso rivals to yank them off their rockets!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
+  txt('Hook two things, then TIE them: clotheslines, tie-ups!', VW / 2, VH * 0.52 + 36 * sc, 14 * sc, '#f93', 'center');
+  txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.52 + 58 * sc, 12 * sc, '#8ab', 'center');
+  if (Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO START' : 'CLICK OR PRESS SPACE TO START', VW / 2, VH * 0.88, 22 * sc, '#fff', 'center');
+}
+function drawResults(now) {
+  ctx.fillStyle = 'rgba(0,0,10,0.75)'; ctx.fillRect(0, 0, VW, VH);
+  const sc = clamp(VH / 390, 0.8, 1.6);
+  drawBigTitle('ROUND OVER', VW / 2, VH * 0.14, Math.min(VW / 10, 46 * sc));
+  const place = results.indexOf(player) + 1;
+  const tie = results.length > 1 && results[0].score === results[1].score && results[0].falls === results[1].falls && place <= 2;
+  const ord = ['1ST', '2ND', '3RD', '4TH'][place - 1];
+  txt(place === 1 && !tie ? 'YOU WIN!' : tie ? 'TIE FOR 1ST!' : 'YOU PLACED ' + ord, VW / 2, VH * 0.29, 22 * sc, place === 1 ? '#fc0' : '#fff', 'center');
+  const cx = VW / 2, rowH = 26 * sc; let y = VH * 0.41;
+  txt('RANK  RIDER   POINTS  FALLS', cx, y, 14 * sc, '#888', 'center'); y += rowH;
+  results.forEach((r, i) => {
+    const line = (i + 1) + '.    ' + (r.name + '      ').slice(0, 7) + '  ' + String(r.score).padStart(4) + '  ' + String(r.falls).padStart(5);
+    txt(line, cx, y, 16 * sc, r.color, 'center'); y += rowH;
+  });
+  if (overT > 1.2 && Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO RESTART' : 'CLICK OR SPACE TO RESTART', VW / 2, VH * 0.9, 20 * sc, '#fff', 'center');
+}
+
+// ---------- main loop ----------
+let last = performance.now(), acc = 0;
+const STEP = 1 / 60;
+function frame(now) {
+  let dt = (now - last) / 1000; last = now;
+  if (dt > 0.1) dt = 0.1; if (dt < 0) dt = 0;
+  const portrait = VH > VW;
+  if (!portrait) {
+    acc += dt;
+    let n = 0;
+    while (acc >= STEP && n < 8) { update(STEP); acc -= STEP; n++; }
+    if (n === 8) acc = 0;
+  }
+  render(now);
+  requestAnimationFrame(frame);
+}
+resetWorld();
+requestAnimationFrame(frame);
+
+// debug/test hook
+window.RJ = { get state() { return state; }, get riders() { return riders; }, get player() { return player; },
+  get timeLeft() { return timeLeft; }, set timeLeft(v) { timeLeft = v; }, posts, tethers, knockOff, addTether, canTie, btns,
+  get msgs() { return msgs.map(m => m.text); } };
+})();
+</script>
+</body>
+</html>
