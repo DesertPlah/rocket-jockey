@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.5</title>
+<title>Rocket Jockey v0.6</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -49,6 +49,9 @@ const AI_ERR = 0.18;
 // v0.4 swing caps: a post latch auto-releases after this many full turns around the post, or this many seconds
 const SWING_MAX_ROTATIONS = 2.5;
 const SWING_MAX_TIME = 9;
+// v0.6: altitude is switched OFF until we go 3D (everyone stays at MID, all fences are solid walls).
+// The v0.5 altitude code is kept intact; flip this to true to get it back (test hook: add ?alt=1 to the URL).
+const ALTITUDE_ENABLED = false || /[?&]alt=1(&|$)/.test(location.search);
 // v0.5 altitude: LOW=0, MID=1, HIGH=2 (riders on foot / empty rockets are on the ground = -1)
 const ALT_NAMES = ['LOW', 'MID', 'HIGH'];
 const ALT_TIME = 0.35;                 // seconds to move one level
@@ -200,7 +203,7 @@ function segsCross(x1, y1, x2, y2, x3, y3, x4, y4) {
     }
   }
 })();
-function fenceBlocks(f, level) { return f.tall || level <= 0; } // level -1 = ground, 0 = LOW
+function fenceBlocks(f, level) { return !ALTITUDE_ENABLED || f.tall || level <= 0; } // level -1 = ground, 0 = LOW
 function cableBlocked(level, x1, y1, x2, y2) {
   for (const f of fences) if (fenceBlocks(f, level) && segsCross(x1, y1, x2, y2, f.x1, f.y1, f.x2, f.y2)) return true;
   return false;
@@ -292,9 +295,10 @@ function anchorValid(a) {
 function sameAnchor(a, b) { return a.kind === b.kind && a.p === b.p && a.r === b.r; }
 function anchorName(a) { return a.kind === 'post' ? 'POST' : a.kind === 'rocket' ? a.r.name + "'S ROCKET" : a.r.name; }
 // altitude level used by all the rules: riding = rounded current altitude, on foot = ground (-1)
-function lvl(r) { return r.onRocket ? Math.round(r.altV) : -1; }
-function canReach(a, level) { return Math.abs(lvl(a) - level) <= ALT_REACH; }
+function lvl(r) { if (!ALTITUDE_ENABLED) return 1; return r.onRocket ? Math.round(r.altV) : -1; }
+function canReach(a, level) { return !ALTITUDE_ENABLED || Math.abs(lvl(a) - level) <= ALT_REACH; }
 function changeAlt(r, d) {
+  if (!ALTITUDE_ENABLED) return;
   const n = clamp(r.alt + d, 0, 2); if (n === r.alt) return;
   r.alt = n;
   if (r.isPlayer && state === 'play') beep(d > 0 ? 330 : 660, 0.16, 'triangle', 0.07, d > 0 ? 660 : 330);
@@ -353,9 +357,9 @@ function layout() {
   stickHome = { x: 105 * s, y: VH - 100 * s, r: 60 * s };
   // TIE sits on the LEFT, above the steer control: the right thumb(s) are busy holding both cables
   btns.T.x = 105 * s; btns.T.y = VH - 215 * s;
-  // altitude UP/DOWN stacked just right of the STEER slider (left thumb)
+  // altitude UP/DOWN (only when ALTITUDE_ENABLED): stacked on the RIGHT, just left of the <L cable button
   btns.U.r = btns.D.r = 30 * s;
-  btns.U.x = btns.D.x = 258 * s; btns.U.y = VH - 148 * s; btns.D.y = VH - 58 * s;
+  btns.U.x = btns.D.x = VW - 262 * s; btns.U.y = VH - 178 * s; btns.D.y = VH - 92 * s; // right side, left of <L
 }
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -368,7 +372,7 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 200));
 resize();
 
-function btnEnabled(k) { return k === 'T' ? canTie() : (k === 'U' || k === 'D') ? !!(player && player.onRocket && state === 'play') : true; }
+function btnEnabled(k) { return k === 'T' ? canTie() : (k === 'U' || k === 'D') ? !!(ALTITUDE_ENABLED && player && player.onRocket && state === 'play') : true; }
 function hitButton(x, y) {
   let best = null, bd = 1e9;
   for (const k in btns) {
@@ -465,8 +469,8 @@ window.addEventListener('keydown', e => {
     if (c === 'KeyQ') fireQ[0] = true;
     if (c === 'KeyE') fireQ[1] = true;
     if (c === 'KeyT') tieQ = true;
-    if (c === 'KeyR' || c === 'PageUp') { altQ += 1; e.preventDefault(); }
-    if (c === 'KeyF' || c === 'PageDown') { altQ -= 1; e.preventDefault(); }
+    if (ALTITUDE_ENABLED && (c === 'KeyR' || c === 'PageUp')) { altQ += 1; e.preventDefault(); }
+    if (ALTITUDE_ENABLED && (c === 'KeyF' || c === 'PageDown')) { altQ -= 1; e.preventDefault(); }
     if (c === 'Space' || c === 'Enter') handleTap();
   }
   keys[c] = true;
@@ -506,7 +510,7 @@ function playerControl(r) {
   c.boost = !!(keys.ShiftLeft || keys.ShiftRight || keys.ArrowUp || keys.KeyW || heldBtn('B'));
   c.hold[0] = !!(keys.KeyQ || heldBtn('L'));
   c.hold[1] = !!(keys.KeyE || heldBtn('R'));
-  c.fire[0] = fireQ[0]; c.fire[1] = fireQ[1]; c.tie = tieQ; c.alt = clamp(altQ, -2, 2);
+  c.fire[0] = fireQ[0]; c.fire[1] = fireQ[1]; c.tie = tieQ; c.alt = ALTITUDE_ENABLED ? clamp(altQ, -2, 2) : 0;
   fireQ[0] = fireQ[1] = false; tieQ = false; altQ = 0;
   return c;
 }
@@ -559,16 +563,16 @@ function aiControl(r, dt) {
     const dx = p.x - r.x, dy = p.y - r.y, d = hyp(dx, dy);
     if (d < 110 + p.r) { const rel = angDiff(Math.atan2(dy, dx), r.ang); if (Math.abs(rel) < 0.6) { desired = r.ang - Math.sign(rel || 1) * 1.2; break; } }
   }
-  // fence avoidance: hop over a low fence, otherwise turn away
+  // fence avoidance: hop over a low fence (altitude on only), otherwise turn away
   const fx = r.x + r.vx * 0.7, fy = r.y + r.vy * 0.7;
   for (const f of fences) {
     if (!fenceBlocks(f, lvl(r)) || !segsCross(r.x, r.y, fx, fy, f.x1, f.y1, f.x2, f.y2)) continue;
-    if (!f.tall) { c.alt = 1; ai.altCool = 1.5; }
+    if (ALTITUDE_ENABLED && !f.tall) { c.alt = 1; ai.altCool = 1.5; }
     else { const mx = (f.x1 + f.x2) / 2 - r.x, my = (f.y1 + f.y2) / 2 - r.y; desired = r.ang - Math.sign(angDiff(Math.atan2(my, mx), r.ang) || 1) * 1.3; }
     break;
   }
   // altitude: match the target's level when chasing, with occasional random changes
-  if (ai.altCool <= 0 && !c.alt) {
+  if (ALTITUDE_ENABLED && ai.altCool <= 0 && !c.alt) {
     let want = t ? lvl(t) : r.alt;
     if (Math.random() < 0.15) want = (Math.random() * 3) | 0;
     if (want !== r.alt) c.alt = Math.sign(want - r.alt);
@@ -855,7 +859,7 @@ function remount(r) {
   releaseCablesOn(a => a.r === r);
   r.onRocket = true; r.x = k.x; r.y = k.y; r.ang = k.ang; r.px = r.x; r.py = r.y;
   r.vx = Math.cos(r.ang) * BASE_SPEED * 0.4; r.vy = Math.sin(r.ang) * BASE_SPEED * 0.4;
-  r.inv = REMOUNT_INV; r.stun = 0; r.tumble = 0; r.footT = 0; k.homing = false; r.alt = r.altV = 0; // climb back on from the ground
+  r.inv = REMOUNT_INV; r.stun = 0; r.tumble = 0; r.footT = 0; k.homing = false; r.alt = r.altV = ALTITUDE_ENABLED ? 0 : 1; // climb back on from the ground (LOW only when altitude is on)
   spawnParts(r.x, r.y, 16, '#fff', 150, 0.5);
   if (r.isPlayer && state === 'play') { sfx.spawn(); msg('BACK IN THE SADDLE', '#3cf'); }
 }
@@ -988,7 +992,7 @@ function riderCollisions() {
   }
   // rockets running over riders on foot: cartoon nudge + dizzy stars, no points
   for (const o of riders) {
-    if (!o.onRocket || lvl(o) !== 0) continue; // only LOW rockets skim the ground
+    if (!o.onRocket || (ALTITUDE_ENABLED && lvl(o) !== 0)) continue; // only LOW rockets skim the ground
     for (const f of riders) {
       if (f === o || f.onRocket || f.hitCool > 0) continue;
       const dx = f.x - o.x, dy = f.y - o.y, d = hyp(dx, dy);
@@ -1065,8 +1069,8 @@ function txt(s, x, y, size, color, align, outline) {
   ctx.fillStyle = color; ctx.fillText(s, x, y);
 }
 
-function altScale(a) { return a < 1 ? ALT_SCALE[0] + (ALT_SCALE[1] - ALT_SCALE[0]) * a : ALT_SCALE[1] + (ALT_SCALE[2] - ALT_SCALE[1]) * (a - 1); }
-function altShadow(a) { return a < 1 ? ALT_SHADOW[0] + (ALT_SHADOW[1] - ALT_SHADOW[0]) * a : ALT_SHADOW[1] + (ALT_SHADOW[2] - ALT_SHADOW[1]) * (a - 1); }
+function altScale(a) { if (!ALTITUDE_ENABLED) return 1; return a < 1 ? ALT_SCALE[0] + (ALT_SCALE[1] - ALT_SCALE[0]) * a : ALT_SCALE[1] + (ALT_SCALE[2] - ALT_SCALE[1]) * (a - 1); }
+function altShadow(a) { if (!ALTITUDE_ENABLED) return 5; return a < 1 ? ALT_SHADOW[0] + (ALT_SHADOW[1] - ALT_SHADOW[0]) * a : ALT_SHADOW[1] + (ALT_SHADOW[2] - ALT_SHADOW[1]) * (a - 1); }
 function drawShadow(x, y, ang, sc, off, alpha) {
   ctx.save(); ctx.translate(x + off, y + off * 0.8); ctx.rotate(ang); ctx.scale(sc, sc);
   ctx.fillStyle = 'rgba(0,0,0,' + alpha + ')';
@@ -1100,15 +1104,27 @@ function drawFence(f, now) {
       ctx.fillStyle = '#dde'; ctx.beginPath(); ctx.arc(px - 2, py - 2, 2, 0, TAU); ctx.fill();
     }
   } else {
-    // wooden: short shadow, brown planks with a striped rail
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 8;
-    ctx.beginPath(); ctx.moveTo(f.x1 + 4, f.y1 + 4); ctx.lineTo(f.x2 + 4, f.y2 + 4); ctx.stroke();
-    ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
-    ctx.strokeStyle = '#e8c27a'; ctx.lineWidth = 8; ctx.setLineDash([10, 10]);
+    // wooden: short shadow, brown planks with a striped rail (altitude off: a thick, solid timber wall with posts)
+    const W = ALTITUDE_ENABLED ? 8 : 13, so = ALTITUDE_ENABLED ? 4 : 11;
+    ctx.strokeStyle = 'rgba(0,0,0,' + (ALTITUDE_ENABLED ? 0.45 : 0.55) + ')'; ctx.lineWidth = W + (ALTITUDE_ENABLED ? 0 : 2);
+    ctx.beginPath(); ctx.moveTo(f.x1 + so, f.y1 + so); ctx.lineTo(f.x2 + so, f.y2 + so); ctx.stroke();
+    ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = W; ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+    ctx.strokeStyle = '#e8c27a'; ctx.lineWidth = ALTITUDE_ENABLED ? 8 : 7; ctx.setLineDash([10, 10]);
     ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke(); ctx.setLineDash([]);
     ctx.strokeStyle = '#3d2610'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(f.x1 - uy * 4, f.y1 + ux * 4); ctx.lineTo(f.x2 - uy * 4, f.y2 + ux * 4);
     ctx.moveTo(f.x1 + uy * 4, f.y1 - ux * 4); ctx.lineTo(f.x2 + uy * 4, f.y2 - ux * 4); ctx.stroke();
+    if (!ALTITUDE_ENABLED) {
+      ctx.strokeStyle = '#2a1708'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(f.x1 - uy * 6.5, f.y1 + ux * 6.5); ctx.lineTo(f.x2 - uy * 6.5, f.y2 + ux * 6.5);
+      ctx.moveTo(f.x1 + uy * 6.5, f.y1 - ux * 6.5); ctx.lineTo(f.x2 + uy * 6.5, f.y2 - ux * 6.5); ctx.stroke();
+      const n = Math.max(2, Math.round(len / 60));
+      for (let i = 0; i <= n; i++) {
+        const px = f.x1 + ex * i / n, py = f.y1 + ey * i / n;
+        ctx.fillStyle = '#5a3818'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+        ctx.fillRect(px - 6, py - 6, 12, 12); ctx.strokeRect(px - 6, py - 6, 12, 12);
+      }
+    }
   }
 }
 function drawRocket(r, flame, empty, sc) {
@@ -1165,7 +1181,7 @@ function drawTether(t, now) {
   ctx.strokeStyle = '#a5520f'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
   ctx.strokeStyle = '#ffa040'; ctx.lineWidth = 2.5; ctx.setLineDash([7, 5]);
   ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke(); ctx.setLineDash([]);
-  if (t.kind === 'clothes') txt(ALT_NAMES[t.alt], (A.x + B.x) / 2, (A.y + B.y) / 2 - 10, 11, '#ffb060', 'center');
+  if (t.kind === 'clothes' && ALTITUDE_ENABLED) txt(ALT_NAMES[t.alt], (A.x + B.x) / 2, (A.y + B.y) / 2 - 10, 11, '#ffb060', 'center');
   for (const P of [A, B]) {
     ctx.fillStyle = '#ff9a30'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(P.x, P.y, 5.5, 0, TAU); ctx.fill(); ctx.stroke();
@@ -1258,7 +1274,7 @@ function render(now) {
     if (!r.isPlayer) {
       txt(r.name, r.x, r.y - 26 * sc, 13, r.color, 'center');
       ctx.font = 'bold 13px ' + FONT;
-      drawPips(r.x + ctx.measureText(r.name).width / 2 + 4, r.y - 26 * sc + 4, lvl(r), 3.5);
+      if (ALTITUDE_ENABLED) drawPips(r.x + ctx.measureText(r.name).width / 2 + 4, r.y - 26 * sc + 4, lvl(r), 3.5);
     }
   }
   // player marker / arrow to your rocket
@@ -1298,16 +1314,16 @@ function drawHUD(now) {
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(fx, fy, fw, fh);
   // player altitude: L / M / H boxes, current one lit
   const ax = fx + fw + 10 * sc, aw = 18 * sc, pl = lvl(player);
-  for (let i = 0; i < 3; i++) {
+  if (ALTITUDE_ENABLED) for (let i = 0; i < 3; i++) {
     const on = i === pl, bxx = ax + i * (aw + 3 * sc), byy = fy - 4 * sc;
     ctx.fillStyle = on ? '#3cf' : 'rgba(255,255,255,0.12)'; ctx.fillRect(bxx, byy, aw, fh + 8 * sc);
     ctx.strokeStyle = on ? '#fff' : 'rgba(255,255,255,0.35)'; ctx.strokeRect(bxx, byy, aw, fh + 8 * sc);
     txt('LMH'[i], bxx + aw / 2, byy + (fh + 8 * sc) / 2, 11 * sc, on ? '#000' : 'rgba(255,255,255,0.5)', 'center', false);
   }
-  if (!player.onRocket) txt('GROUND', ax + 1.5 * (aw + 3 * sc), fy + fh + 14 * sc, 10 * sc, '#aaa', 'center', false);
+  if (ALTITUDE_ENABLED && !player.onRocket) txt('GROUND', ax + 1.5 * (aw + 3 * sc), fy + fh + 14 * sc, 10 * sc, '#aaa', 'center', false);
   // mini scoreboard
   let yy = fy + fh + 14 * sc;
-  for (const r of riders) { if (r.isPlayer) continue; txt(r.name + ' ' + r.score + (r.onRocket ? ' [' + 'LMH'[lvl(r)] + ']' : ' (on foot)'), 12, yy, 12 * sc, r.color); yy += 15 * sc; }
+  for (const r of riders) { if (r.isPlayer) continue; txt(r.name + ' ' + r.score + (r.onRocket ? (ALTITUDE_ENABLED ? ' [' + 'LMH'[lvl(r)] + ']' : '') : ' (on foot)'), 12, yy, 12 * sc, r.color); yy += 15 * sc; }
   // timer
   const t = Math.ceil(timeLeft), mm = Math.floor(t / 60), ss = t % 60;
   txt(mm + ':' + (ss < 10 ? '0' : '') + ss, VW / 2, 20 * sc, 26 * sc, t <= 30 ? '#f44' : '#fff', 'center');
@@ -1327,7 +1343,7 @@ function drawHUD(now) {
   }
   drawMinimap(sc);
   if (isTouch) drawTouch(sc, now);
-  else txt(player.onRocket ? 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables (hold)  T tie  R/F altitude' : 'ARROWS/WASD run to your rocket', VW / 2, VH - 14, 12, '#678', 'center', false);
+  else txt(player.onRocket ? 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables (hold)  T tie' + (ALTITUDE_ENABLED ? '  R/F altitude' : '') : 'ARROWS/WASD run to your rocket', VW / 2, VH - 14, 12, '#678', 'center', false);
 }
 function drawMinimap(sc) {
   const w = 130 * sc, h = w * WORLD_H / WORLD_W, x = VW - w - 10, y = 10;
@@ -1420,12 +1436,12 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.5  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.6  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   txt('Grapple posts to whip around corners.', VW / 2, VH * 0.52, 14 * sc, '#ccc', 'center');
   txt('Lasso rivals to yank them off their rockets!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE them: clotheslines, tie-ups!', VW / 2, VH * 0.52 + 36 * sc, 14 * sc, '#f93', 'center');
   txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.52 + 58 * sc, 12 * sc, '#8ab', 'center');
-  txt(isTouch ? 'UP / DN: altitude (cables reach 1 level; LOW fences only stop LOW)' : 'R / F: altitude (cables reach 1 level; LOW fences only stop LOW)', VW / 2, VH * 0.52 + 75 * sc, 12 * sc, '#b9a0ff', 'center');
+  if (ALTITUDE_ENABLED) txt(isTouch ? 'UP / DN: altitude (cables reach 1 level; LOW fences only stop LOW)' : 'R / F: altitude (cables reach 1 level; LOW fences only stop LOW)', VW / 2, VH * 0.52 + 75 * sc, 12 * sc, '#b9a0ff', 'center');
   if (Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO START' : 'CLICK OR PRESS SPACE TO START', VW / 2, VH * 0.9, 22 * sc, '#fff', 'center');
 }
 function drawResults(now) {
@@ -1467,7 +1483,7 @@ requestAnimationFrame(frame);
 // debug/test hook
 window.RJ = { get state() { return state; }, get riders() { return riders; }, get player() { return player; },
   get timeLeft() { return timeLeft; }, set timeLeft(v) { timeLeft = v; }, posts, tethers, knockOff, addTether, canTie, btns,
-  get msgs() { return msgs.map(m => m.text); }, clearMsgs() { msgs.length = 0; }, fences, lvl, canReach };
+  get msgs() { return msgs.map(m => m.text); }, clearMsgs() { msgs.length = 0; }, fences, lvl, canReach, altOn: ALTITUDE_ENABLED, cam };
 })();
 </script>
 </body>
