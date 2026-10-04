@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.6.1</title>
+<title>Rocket Jockey v0.7</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -50,6 +50,17 @@ const AIR_DRAG = 1.6;        // 1/s: speed above the target (e.g. after boost) b
 const TURN_SCRUB = 0.15;     // fraction of forward speed lost per second at full steering
 const SPEED_SOFT_CAP = 420;  // px/s: anything faster is pulled back down
 const WALL_BOUNCE = 0.25;    // walls/fences: normal restitution for rockets (damped, not elastic)
+// v0.7 power-ups (deliberately MILD, like the original)
+const POWERUP_MAX = 3;            // pickups on the field at once
+const POWERUP_RESPAWN = 8;        // s after one is taken before a new one appears
+const POWERUP_R = 15;             // pickup radius (fly through it: rider radius + this)
+const POWERUP_CLEAR = 110;        // spawn at least this far from walls, fences and posts
+const LONG_CABLE_MULT = 1.35, LONG_CABLE_TIME = 10; // C: +35% cable range for 10 s
+const GRIP_TIME = 15;             // G: one-hit shield (absorbs one yank or clothesline), up to 15 s
+const TURBO_MULT = 1.15, TURBO_TIME = 6;            // T: +15% cruise speed for 6 s
+// F: instantly refills the boost meter
+const AI_PU_CHANCE = 0.35, AI_PU_RANGE = 450;       // AI: sometimes detours to a nearby pickup when not busy
+const PU_TYPES = { F: { name: 'FUEL', color: '#ffaa33' }, C: { name: 'LONG CABLE', color: '#33ccff' }, G: { name: 'GRIP', color: '#66ff66' }, T: { name: 'TURBO', color: '#ff55ff' } };
 // v0.6.1 remount fix
 const MIN_ON_FOOT_TIME = 1.5; // s: no remount until the tumble is over AND this long has passed since the knockoff
 const ROCKET_MIN_DIST = 120;  // px: a knocked-away rocket should come to rest at least this far from its rider
@@ -154,6 +165,8 @@ const sfx = {
   end() { [880, 659, 554, 440, 330].forEach((f, i) => setTimeout(() => beep(f, 0.18, 'square', 0.06), i * 140)); },
 };
 let lastWallSfx = 0;
+sfx.pickup = (v = 1) => { [660, 880, 1320].forEach((f, i) => setTimeout(() => beep(f, 0.08, 'square', 0.05 * v), i * 55)); };
+sfx.gripPop = () => { beep(1200, 0.12, 'triangle', 0.08, 300); noise(0.08, 0.2, 3000); };
 
 // ---------- v0.3 constants / extra sounds ----------
 const FOOT_SPEED = 62;          // ~28% of rocket cruise speed
@@ -263,7 +276,8 @@ function makeRider(i) {
     // the rocket is its own object; while riding it just follows the rider
     rk: { x: 0, y: 0, vx: 0, vy: 0, ang: 0, spin: 0, homing: false },
     tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null, alt: 1, altV: 1,
-    ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2) },
+    ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0 },
+    pu: { cable: 0, grip: 0, turbo: 0 },   // v0.7 active power-up timers (s)
   };
 }
 function syncRocket(r) { const k = r.rk; k.x = r.x; k.y = r.y; k.vx = r.vx; k.vy = r.vy; k.ang = r.ang; k.spin = 0; k.homing = false; }
@@ -292,7 +306,81 @@ function resetWorld() {
   player = riders[0];
   for (const r of riders) spawnRider(r, true);
   particles.length = 0; msgs.length = 0; tethers.length = 0;
+  pickups.length = 0; puRespawn.length = 0;
+  for (let i = 0; i < POWERUP_MAX; i++) spawnPickup();
   cam.x = player.x; cam.y = player.y;
+}
+
+// ---------- v0.7 power-ups ----------
+const pickups = [];     // {x, y, type, t}
+const puRespawn = [];   // countdown timers for taken pickups
+function cableMax(r) { return CABLE_MAX * (r.pu && r.pu.cable > 0 ? LONG_CABLE_MULT : 1); }
+function puSpotClear(x, y) {
+  if (x < POWERUP_CLEAR || y < POWERUP_CLEAR || x > WORLD_W - POWERUP_CLEAR || y > WORLD_H - POWERUP_CLEAR) return false;
+  for (const p of posts) if (hyp(p.x - x, p.y - y) < p.r + POWERUP_CLEAR) return false;
+  for (const f of fences) if (segDist(x, y, f.x1, f.y1, f.x2, f.y2) < POWERUP_CLEAR) return false;
+  for (const q of pickups) if (hyp(q.x - x, q.y - y) < 400) return false;
+  return true;
+}
+function spawnPickup(type, x, y) {
+  if (x == null) {
+    for (let k = 0; k < 80; k++) { const tx = rand(POWERUP_CLEAR, WORLD_W - POWERUP_CLEAR), ty = rand(POWERUP_CLEAR, WORLD_H - POWERUP_CLEAR); if (puSpotClear(tx, ty)) { x = tx; y = ty; break; } }
+    if (x == null) return null;
+  }
+  const q = { x, y, type: type || 'FCGT'[(Math.random() * 4) | 0], t: rand(0, 6) };
+  pickups.push(q); return q;
+}
+function applyPickup(r, q) {
+  if (q.type === 'F') r.fuel = FUEL_MAX;
+  else if (q.type === 'C') r.pu.cable = LONG_CABLE_TIME;
+  else if (q.type === 'G') r.pu.grip = GRIP_TIME;
+  else if (q.type === 'T') r.pu.turbo = TURBO_TIME;
+  spawnParts(q.x, q.y, 14, PU_TYPES[q.type].color, 160, 0.5);
+  if (r.isPlayer && state === 'play') { msg(PU_TYPES[q.type].name + '!', PU_TYPES[q.type].color); sfx.pickup(); }
+  else if (state === 'play' && onScreen(q.x, q.y)) sfx.pickup(0.5);
+}
+function updatePickups(dt) {
+  for (const r of riders) { const u = r.pu; u.cable = Math.max(0, u.cable - dt); u.grip = Math.max(0, u.grip - dt); u.turbo = Math.max(0, u.turbo - dt); }
+  for (const q of pickups) q.t += dt;
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const q = pickups[i];
+    for (const r of riders) {
+      if (!r.onRocket) continue; // riders on foot can't pick up
+      if (hyp(r.x - q.x, r.y - q.y) < RIDER_R + POWERUP_R || segDist(q.x, q.y, r.px, r.py, r.x, r.y) < RIDER_R + POWERUP_R) {
+        applyPickup(r, q); pickups.splice(i, 1); puRespawn.push(POWERUP_RESPAWN); break;
+      }
+    }
+  }
+  for (let i = puRespawn.length - 1; i >= 0; i--) {
+    puRespawn[i] -= dt;
+    if (puRespawn[i] <= 0 && pickups.length < POWERUP_MAX) { if (spawnPickup()) puRespawn.splice(i, 1); else puRespawn[i] = 0.5; }
+  }
+}
+// GRIP: absorbs one yank / clothesline, then pops. Returns true if the hit was absorbed.
+function gripAbsorb(o, by) {
+  if (!(o.pu && o.pu.grip > 0)) return false;
+  o.pu.grip = 0;
+  spawnParts(o.x, o.y, 18, PU_TYPES.G.color, 200, 0.5);
+  if (state === 'play') {
+    if (o.isPlayer) msg('GRIP HELD! SHIELD POPPED', PU_TYPES.G.color);
+    else if (by && by.isPlayer) msg(o.name + "'S GRIP HELD!", '#aaa');
+    if (o.isPlayer || (by && by.isPlayer) || onScreen(o.x, o.y)) sfx.gripPop();
+  }
+  return true;
+}
+function drawPickup(q) {
+  const c = PU_TYPES[q.type].color, pulse = 0.5 + 0.5 * Math.sin(q.t * 5), bob = Math.sin(q.t * 3) * 2;
+  ctx.save(); ctx.translate(q.x, q.y + bob);
+  ctx.globalAlpha = 0.25 + 0.2 * pulse; ctx.fillStyle = c;
+  ctx.beginPath(); ctx.arc(0, 0, POWERUP_R + 7 + 3 * pulse, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.rotate(q.t * 1.5);
+  ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.strokeRect(-POWERUP_R * 0.85, -POWERUP_R * 0.85, POWERUP_R * 1.7, POWERUP_R * 1.7);
+  ctx.rotate(-q.t * 1.5);
+  ctx.fillStyle = '#0a0a1a'; ctx.beginPath(); ctx.arc(0, 0, POWERUP_R * 0.8, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.restore();
+  txt(q.type, q.x, q.y + bob + 1, 14, c, 'center', false);
 }
 
 // ---------- anchors (things a cable / tether end can be attached to) ----------
@@ -566,6 +654,20 @@ function aiControl(r, dt) {
   let tx = ai.wx, ty = ai.wy, dist = 1e9;
   if (t) { tx = t.x + t.vx * 0.5; ty = t.y + t.vy * 0.5; dist = hyp(t.x - r.x, t.y - r.y); }
   let desired = Math.atan2(ty - r.y, tx - r.x);
+  // v0.7: now and then, when not busy with a close target, detour to a nearby pickup
+  ai.puCool -= dt;
+  if (ai.puCool <= 0 && !ai.pu) {
+    ai.puCool = rand(2, 4);
+    if ((!t || dist > 300) && Math.random() < AI_PU_CHANCE) {
+      let bd = AI_PU_RANGE;
+      for (const q of pickups) { const d = hyp(q.x - r.x, q.y - r.y); if (d < bd) { bd = d; ai.pu = q; ai.puT = 5; } }
+    }
+  }
+  if (ai.pu) { // stick with the detour until it's taken, a close fight starts, or 5 s pass
+    ai.puT -= dt;
+    if (!pickups.includes(ai.pu) || (t && dist < 250) || ai.puT <= 0) { ai.pu = null; ai.puCool = rand(2, 4); }
+    else desired = Math.atan2(ai.pu.y - r.y, ai.pu.x - r.x);
+  }
   // wall avoidance
   const lx = r.x + r.vx * 0.9, ly = r.y + r.vy * 0.9, m = 170;
   if (lx < m || lx > WORLD_W - m || ly < m || ly > WORLD_H - m) desired = Math.atan2(WORLD_H / 2 - r.y, WORLD_W / 2 - r.x);
@@ -594,7 +696,7 @@ function aiControl(r, dt) {
   else if (dist > 450 && dist < 1e8 && r.fuel > 40) ai.boosting = true;
   c.boost = ai.boosting;
   // fire at target
-  if (t && ai.cool <= 0 && dist < CABLE_MAX * 0.85 && t.inv <= 0) {
+  if (t && ai.cool <= 0 && dist < cableMax(r) * 0.85 && t.inv <= 0) {
     const a = Math.atan2(t.y - r.y, t.x - r.x), rel = angDiff(a, r.ang);
     let side = -1;
     if (rel < -0.25 && rel > -1.9) side = 0; else if (rel > 0.25 && rel < 1.9) side = 1;
@@ -613,9 +715,9 @@ function autoAim(r, s) {
   const base = r.ang + (s ? 1 : -1) * CABLE_ANGLE;
   let best = null, bestScore = 1e9;
   const consider = (o, maxDiff, bonus, isRider) => {
-    const d = hyp(o.x - r.x, o.y - r.y); if (d > CABLE_MAX + (isRider ? 20 : 0)) return;
+    const d = hyp(o.x - r.x, o.y - r.y), cm = cableMax(r); if (d > cm + (isRider ? 20 : 0)) return;
     const diff = Math.abs(angDiff(Math.atan2(o.y - r.y, o.x - r.x), base)); if (diff > maxDiff) return;
-    const sc = isRider ? diff * 0.5 + d / CABLE_MAX * 0.2 - 0.3 : diff + d / CABLE_MAX * 0.3 + bonus;
+    const sc = isRider ? diff * 0.5 + d / cm * 0.2 - 0.3 : diff + d / cm * 0.3 + bonus;
     if (sc < bestScore) { bestScore = sc; best = { o, d }; }
   };
   for (const o of riders) {
@@ -685,7 +787,7 @@ function updateCable(r, s, hold, dt) {
         return;
       }
     }
-    if (k.len >= CABLE_MAX) retract(r, k);
+    if (k.len >= cableMax(r)) retract(r, k);
   } else if (k.state === 'latched') {
     if (!anchorValid(k.target)) { retract(r, k); return; }
     const o = anchorObj(k.target);
@@ -789,8 +891,8 @@ function updateTethers(dt) {
         if (lvl(r) !== t.alt) continue; // a rope only catches riders at the altitude it was tied at
         if (segDist(r.x, r.y, A.x, A.y, B.x, B.y) < 9 || segsCross(r.px, r.py, r.x, r.y, A.x, A.y, B.x, B.y)) {
           const by = r === t.owner ? null : t.owner;
-          knockOff(r, by, 'clothes');
-          if (state === 'play') {
+          const hit = knockOff(r, by, 'clothes');
+          if (hit && state === 'play') {
             if (by && by.isPlayer) msg('CLOTHESLINE! +1 ' + r.name, '#fc0');
             else if (r.isPlayer) msg(by ? 'CLOTHESLINED BY ' + by.name + '!' : 'CLOTHESLINED YOURSELF!', '#f44');
             else msg('CLOTHESLINE! ' + r.name, '#f93');
@@ -823,8 +925,8 @@ function swingClotheslines(dt) {
         const swept = prev !== undefined && side !== 0 && prev !== 0 && side !== prev && along > 0 && along < 1.05;
         if (near || swept || segsCross(o.px, o.py, o.x, o.y, p.x, p.y, r.x, r.y)) {
           k.immune.set(o, SWING_CLOTHES_IMMUNE);
-          knockOff(o, r, 'clothes');
-          if (state === 'play') {
+          const hit = knockOff(o, r, 'clothes');
+          if (hit && state === 'play') {
             if (r.isPlayer) msg('CLOTHESLINE! +1 ' + o.name, '#fc0');
             else if (o.isPlayer) msg('CLOTHESLINED BY ' + r.name + '!', '#f44');
             else msg('CLOTHESLINE! ' + o.name, '#f93');
@@ -839,6 +941,7 @@ function swingClotheslines(dt) {
 
 // ---------- knock off ----------
 function knockOff(o, by, how) {
+  if ((how === 'yank' || how === 'clothes') && gripAbsorb(o, by)) return false; // v0.7 GRIP shield
   o.onRocket = false; o.falls++; o.cables = [null, null]; o.killer = by || null; o.boosting = false;
   o.tumble = TUMBLE_TIME; o.footT = 0; o.stun = 0; o.inv = 0; o.cableCool = 0;
   // the rocket keeps sliding and spinning away
@@ -863,6 +966,7 @@ function knockOff(o, by, how) {
     if (by && by.isPlayer) shake = 6; else if (o.isPlayer) shake = 10;
     if (o.isPlayer || by && by.isPlayer || onScreen(o.x, o.y)) sfx.knock();
   }
+  return true;
 }
 // v0.6.1: the empty rocket must really separate from its rider. Predict where both come to rest
 // (rider: tumble drag ~0.35 x velocity; empty rocket: drag 0.9/s -> 1.11 x velocity) and make sure
@@ -976,7 +1080,7 @@ function updateRider(r, c, dt) {
   }
   if (c.boost && r.fuel > (r.boosting ? 0 : 8)) { r.boosting = true; r.fuel = Math.max(0, r.fuel - FUEL_BURN * dt); }
   else { r.boosting = false; r.fuel = Math.min(FUEL_MAX, r.fuel + FUEL_REGEN * dt); }
-  let sp = (r.boosting ? BOOST_SPEED : BASE_SPEED) * ALT_SPEED[L];
+  let sp = (r.boosting ? BOOST_SPEED : BASE_SPEED * (r.pu.turbo > 0 ? TURBO_MULT : 1)) * ALT_SPEED[L];
   if (latchedPost) sp *= 1.15;
   if (r.stun > 0) sp *= 0.35;
   if (latchedPost) { // swinging on a post: keep the v0.6 feel (cable tension does the steering)
@@ -1084,6 +1188,7 @@ function update(dt) {
   updateTethers(dt);
   swingClotheslines(dt);
   riderCollisions();
+  updatePickups(dt);
   updateParticles(dt);
   for (const m of msgs) m.t -= dt;
   while (msgs.length && msgs[0].t <= 0) msgs.shift();
@@ -1307,6 +1412,8 @@ function render(now) {
     drawShadow(w.x, w.y, w.ang, 0.88, 2, 0.4);
     drawRocket({ x: w.x, y: w.y, ang: w.ang, color: r.color, boosting: false }, false, true, 0.88);
   }
+  // v0.7 pickups
+  for (const q of pickups) drawPickup(q);
   // tethers (orange rope)
   for (const t of tethers) drawTether(t, now);
   // cables
@@ -1332,6 +1439,10 @@ function render(now) {
     drawRocket(r, true, false, sc);
     drawJockey(r.x, r.y, r.ang, r.color, r.stun > 0.3, sc);
     ctx.globalAlpha = 1;
+    if (r.pu.grip > 0 && (r.pu.grip > 3 || Math.floor(now / 120) % 2)) { // v0.7 GRIP shield ring (blinks in its last 3 s)
+      ctx.strokeStyle = 'rgba(102,255,102,' + (0.55 + 0.3 * Math.sin(now / 150)) + ')'; ctx.lineWidth = 3; ctx.setLineDash([7, 5]); ctx.lineDashOffset = -now / 40;
+      ctx.beginPath(); ctx.arc(r.x, r.y, 31 * sc, 0, TAU); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    }
     if (!r.isPlayer) {
       txt(r.name, r.x, r.y - 26 * sc, 13, r.color, 'center');
       ctx.font = 'bold 13px ' + FONT;
@@ -1381,6 +1492,19 @@ function drawHUD(now) {
     ctx.strokeStyle = on ? '#fff' : 'rgba(255,255,255,0.35)'; ctx.strokeRect(bxx, byy, aw, fh + 8 * sc);
     txt('LMH'[i], bxx + aw / 2, byy + (fh + 8 * sc) / 2, 11 * sc, on ? '#000' : 'rgba(255,255,255,0.5)', 'center', false);
   }
+  // v0.7 active power-up icons with timers
+  let ix = ax + (ALTITUDE_ENABLED ? 3 * (aw + 3 * sc) + 8 * sc : 0);
+  const iz = 18 * sc, iy = fy - 3.5 * sc;
+  for (const [key, tl, max] of [['C', player.pu.cable, LONG_CABLE_TIME], ['G', player.pu.grip, GRIP_TIME], ['T', player.pu.turbo, TURBO_TIME]]) {
+    if (tl <= 0) continue;
+    const col = PU_TYPES[key].color, blink = tl < 2 && Math.floor(now / 150) % 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(ix, iy, iz, iz);
+    ctx.strokeStyle = blink ? '#fff' : col; ctx.lineWidth = 2; ctx.strokeRect(ix, iy, iz, iz);
+    ctx.fillStyle = col; ctx.fillRect(ix + 2, iy + iz - 4 * sc, (iz - 4) * tl / max, 2.5 * sc);
+    txt(key, ix + iz / 2, iy + iz / 2 - 1.5 * sc, 12 * sc, col, 'center', false);
+    txt(Math.ceil(tl) + 's', ix + iz + 3 * sc, iy + iz / 2, 11 * sc, '#ddd', 'left', false);
+    ix += iz + 28 * sc;
+  }
   if (ALTITUDE_ENABLED && !player.onRocket) txt('GROUND', ax + 1.5 * (aw + 3 * sc), fy + fh + 14 * sc, 10 * sc, '#aaa', 'center', false);
   // mini scoreboard
   let yy = fy + fh + 14 * sc;
@@ -1414,6 +1538,7 @@ function drawMinimap(sc) {
   ctx.fillStyle = '#0aa';
   for (const p of posts) ctx.fillRect(x + p.x * k - 1, y + p.y * k - 1, 2, 2);
   for (const f of fences) { ctx.strokeStyle = f.tall ? '#ccd' : '#c8873e'; ctx.lineWidth = f.tall ? 2.5 : 1.5; ctx.beginPath(); ctx.moveTo(x + f.x1 * k, y + f.y1 * k); ctx.lineTo(x + f.x2 * k, y + f.y2 * k); ctx.stroke(); }
+  for (const q of pickups) { ctx.fillStyle = PU_TYPES[q.type].color; const px = x + q.x * k, py = y + q.y * k; ctx.beginPath(); ctx.moveTo(px, py - 3); ctx.lineTo(px + 3, py); ctx.lineTo(px, py + 3); ctx.lineTo(px - 3, py); ctx.closePath(); ctx.fill(); }
   ctx.strokeStyle = '#f93'; ctx.lineWidth = 1.5;
   for (const t of tethers) { const A = anchorObj(t.a), B = anchorObj(t.b); ctx.beginPath(); ctx.moveTo(x + A.x * k, y + A.y * k); ctx.lineTo(x + B.x * k, y + B.y * k); ctx.stroke(); }
   for (const r of riders) {
@@ -1497,7 +1622,7 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.6.1  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.7  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   txt('Grapple posts to whip around corners.', VW / 2, VH * 0.52, 14 * sc, '#ccc', 'center');
   txt('Lasso rivals to yank them off their rockets!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE them: clotheslines, tie-ups!', VW / 2, VH * 0.52 + 36 * sc, 14 * sc, '#f93', 'center');
@@ -1544,7 +1669,8 @@ requestAnimationFrame(frame);
 // debug/test hook
 window.RJ = { get state() { return state; }, get riders() { return riders; }, get player() { return player; },
   get timeLeft() { return timeLeft; }, set timeLeft(v) { timeLeft = v; }, posts, tethers, knockOff, addTether, canTie, btns,
-  get msgs() { return msgs.map(m => m.text); }, clearMsgs() { msgs.length = 0; }, fences, lvl, canReach, altOn: ALTITUDE_ENABLED, cam };
+  get msgs() { return msgs.map(m => m.text); }, clearMsgs() { msgs.length = 0; }, fences, lvl, canReach, altOn: ALTITUDE_ENABLED, cam,
+  pickups, puRespawn, spawnPickup, cableMax, PU: { POWERUP_MAX, POWERUP_RESPAWN, POWERUP_CLEAR, LONG_CABLE_MULT, LONG_CABLE_TIME, GRIP_TIME, TURBO_MULT, TURBO_TIME, CABLE_MAX, BASE_SPEED } };
 })();
 </script>
 </body>
