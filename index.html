@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.7</title>
+<title>Rocket Jockey v0.8</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -61,6 +61,27 @@ const TURBO_MULT = 1.15, TURBO_TIME = 6;            // T: +15% cruise speed for 
 // F: instantly refills the boost meter
 const AI_PU_CHANCE = 0.35, AI_PU_RANGE = 450;       // AI: sometimes detours to a nearby pickup when not busy
 const PU_TYPES = { F: { name: 'FUEL', color: '#ffaa33' }, C: { name: 'LONG CABLE', color: '#33ccff' }, G: { name: 'GRIP', color: '#66ff66' }, T: { name: 'TURBO', color: '#ff55ff' } };
+// v0.8 hit zones on occupied rockets: NOSE (front 30%) / MIDDLE = rider (40%) / TAIL (rear 30%)
+const ZONE_NOSE = 0.3, ZONE_TAIL = 0.3;   // fractions of the rocket length; the middle 40% yanks
+const HIT_HALF_LEN = 31, HIT_HALF_WID = 16; // cable-tip hitbox around a rider on a rocket (px, incl. tip tolerance)
+const ROCKET_LATCH_MAX = 4;     // s: a cable hooked onto a live rocket's nose/tail auto-releases after this
+const LIVE_ROPE_MAX = 300;      // px: max rope length when hooked onto a live rocket
+const LIVE_STRETCH = 60;        // px of elastic stretch beyond the rope length before it goes rigid
+const LIVE_STIFF = 6;           // 1/s: how hard the elastic part pulls back (both riders pulled equally)
+const BIND_TIME = 6;            // s: a binding (live rocket tied to a rider/rocket) lasts this long
+const BIND_ANCHOR_THRUST = 0.4; // two live rockets bound: the slower one (the anchor) has this much thrust and gets dragged
+const LIVE_TURN = 3;            // 1/s: a taut live hook swings the nose of whoever is pulling away less toward the other (tow / tug off course)
+const BIND_TURN = 3;            // 1/s: how fast the anchor's nose is swung round to trail the dragger
+const LEASH_TIME = 6;           // s: a live rocket tied to a post swings on a short leash this long
+const BIND_SNAP = 160;          // px over the rope length -> binding / leash snaps
+const CRASH_DV = 230;           // px/s impact: an entangled (hooked/bound/leashed) rider crashing this hard falls off
+const ENTANGLE_GRACE = 0.6;     // s: still counts as entangled just after being released (whip into a wall)
+// v0.8 performance scoring
+const CREDIT_WINDOW = 3;        // s: the last rider whose cable/rope/binding affected you gets credit for your fall
+const PTS_KO = 10, PTS_CLOTHES = 15, PTS_TIE = 5, PTS_BIND = 8, PTS_HOOK = 2, PTS_DRAG = 1, DRAG_EVERY = 2;
+const COMBO_WINDOW = 4, PTS_COMBO = 5; // 2nd KO within 4 s: +5, 3rd: +10, ...
+const PTS_FALL = 3;             // lost when you get knocked off (score never below 0)
+const PTS_PICKUP = 1;
 // v0.6.1 remount fix
 const MIN_ON_FOOT_TIME = 1.5; // s: no remount until the tumble is over AND this long has passed since the knockoff
 const ROCKET_MIN_DIST = 120;  // px: a knocked-away rocket should come to rest at least this far from its rider
@@ -278,6 +299,7 @@ function makeRider(i) {
     tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null, alt: 1, altV: 1,
     ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0 },
     pu: { cable: 0, grip: 0, turbo: 0 },   // v0.7 active power-up timers (s)
+    kos: 0, tricks: 0, lastBy: null, lastByT: -99, lastKO: -99, chain: 0, entangled: 0, anchored: 0, // v0.8 scoring / credit
   };
 }
 function syncRocket(r) { const k = r.rk; k.x = r.x; k.y = r.y; k.vx = r.vx; k.vy = r.vy; k.ang = r.ang; k.spin = 0; k.homing = false; }
@@ -306,7 +328,7 @@ function resetWorld() {
   player = riders[0];
   for (const r of riders) spawnRider(r, true);
   particles.length = 0; msgs.length = 0; tethers.length = 0;
-  pickups.length = 0; puRespawn.length = 0;
+  pickups.length = 0; puRespawn.length = 0; pops.length = 0;
   for (let i = 0; i < POWERUP_MAX; i++) spawnPickup();
   cam.x = player.x; cam.y = player.y;
 }
@@ -331,6 +353,7 @@ function spawnPickup(type, x, y) {
   pickups.push(q); return q;
 }
 function applyPickup(r, q) {
+  award(r, PTS_PICKUP, 'PICKUP', q.x, q.y);
   if (q.type === 'F') r.fuel = FUEL_MAX;
   else if (q.type === 'C') r.pu.cable = LONG_CABLE_TIME;
   else if (q.type === 'G') r.pu.grip = GRIP_TIME;
@@ -385,14 +408,16 @@ function drawPickup(q) {
 
 // ---------- anchors (things a cable / tether end can be attached to) ----------
 // {kind:'post', p} | {kind:'rocket', r}  (r's empty rocket) | {kind:'foot', r}  (rider r on foot)
+// v0.8: {kind:'live', r, zone}  (rider r still riding; hooked by the nose or tail)
 function anchorObj(a) { return a.kind === 'post' ? a.p : a.kind === 'rocket' ? a.r.rk : a.r; }
 function anchorValid(a) {
   if (a.kind === 'post') return true;
+  if (a.kind === 'live') return a.r.onRocket;
   if (a.kind === 'rocket') return !a.r.onRocket && !a.r.rk.homing;
   return !a.r.onRocket;
 }
 function sameAnchor(a, b) { return a.kind === b.kind && a.p === b.p && a.r === b.r; }
-function anchorName(a) { return a.kind === 'post' ? 'POST' : a.kind === 'rocket' ? a.r.name + "'S ROCKET" : a.r.name; }
+function anchorName(a) { return a.kind === 'post' ? 'POST' : (a.kind === 'rocket' || a.kind === 'live') ? a.r.name + "'S ROCKET" : a.r.name; }
 // altitude level used by all the rules: riding = rounded current altitude, on foot = ground (-1)
 function lvl(r) { if (!ALTITUDE_ENABLED) return 1; return r.onRocket ? Math.round(r.altV) : -1; }
 function canReach(a, level) { return !ALTITUDE_ENABLED || Math.abs(lvl(a) - level) <= ALT_REACH; }
@@ -414,6 +439,22 @@ function constrain(A, wa, B, wb, L) {
     if (wa) { A.vx += nx * rv * wa; A.vy += ny * rv * wa; }
     if (wb) { B.vx -= nx * rv * wb; B.vy -= ny * rv * wb; }
   }
+}
+
+// ---------- v0.8 scoring ----------
+let gameT = 0;            // running clock (s) for credit / combo windows
+const pops = [];          // floating score popups {x, y, text, color, t, mine}
+function award(r, pts, label, x, y) {
+  if (state !== 'play' || !r) return;
+  r.score = Math.max(0, r.score + pts);
+  pops.push({ x: x == null ? r.x : x, y: (y == null ? r.y : y) - 24, text: (pts >= 0 ? '+' : '') + pts + ' ' + label, color: pts < 0 ? '#f55' : r.isPlayer ? '#ffdd33' : r.color, t: 1.6, mine: r.isPlayer });
+  if (pops.length > 24) pops.shift();
+}
+function noteHit(victim, by) { if (victim && by && victim !== by) { victim.lastBy = by; victim.lastByT = gameT; } } // credit tracking
+function creditFor(o, by) {
+  if (by && by !== o) return by;
+  if (o.lastBy && o.lastBy !== o && gameT - o.lastByT <= CREDIT_WINDOW) return o.lastBy;
+  return null;
 }
 
 // ---------- particles / messages ----------
@@ -702,7 +743,8 @@ function aiControl(r, dt) {
     if (rel < -0.25 && rel > -1.9) side = 0; else if (rel > 0.25 && rel < 1.9) side = 1;
     if (side >= 0 && !r.cables[side]) {
       const ft = dist / CABLE_SPEED;
-      const ax = t.x + (t.vx - r.vx) * ft, ay = t.y + (t.vy - r.vy) * ft;
+      const [zx, zy] = zoneAimOffset(t);
+      const ax = t.x + zx + (t.vx - r.vx) * ft, ay = t.y + zy + (t.vy - r.vy) * ft;
       c.fire[side] = true; c.aim[side] = Math.atan2(ay - r.y, ax - r.x) + gauss() * AI_ERR;
       ai.cool = rand(3, 5.5);
     }
@@ -711,6 +753,16 @@ function aiControl(r, dt) {
 }
 
 // ---------- cables ----------
+let forceZone = null; // test hook: 'nose' | 'mid' | 'tail' forces the zone of the next rider hits
+function hitZone(o, x, y) { // where a cable tip at (x, y) hits rider o's rocket: 'nose' | 'mid' | 'tail' | null
+  const hx = Math.cos(o.ang), hy = Math.sin(o.ang), dx = x - o.x, dy = y - o.y;
+  const along = dx * hx + dy * hy, perp = -dx * hy + dy * hx;
+  if (Math.abs(along) > HIT_HALF_LEN || Math.abs(perp) > HIT_HALF_WID) return null;
+  if (forceZone) return forceZone;
+  const u = (along + HIT_HALF_LEN) / (2 * HIT_HALF_LEN); // 0 = tail end, 1 = nose end
+  return u > 1 - ZONE_NOSE ? 'nose' : u < ZONE_TAIL ? 'tail' : 'mid';
+}
+function zoneAimOffset(o) { const u = rand(-1, 1) * HIT_HALF_LEN * 0.95; return [Math.cos(o.ang) * u, Math.sin(o.ang) * u]; } // aim anywhere along the rocket (no middle bias)
 function autoAim(r, s) {
   const base = r.ang + (s ? 1 : -1) * CABLE_ANGLE;
   let best = null, bestScore = 1e9;
@@ -729,7 +781,8 @@ function autoAim(r, s) {
   if (!best) return base;
   const ft = best.d / CABLE_SPEED, o = best.o;
   const ovx = o.vx || 0, ovy = o.vy || 0;
-  return Math.atan2(o.y + (ovy - r.vy) * ft - r.y, o.x + (ovx - r.vx) * ft - r.x);
+  const [ox, oy] = (riders.includes(o) && o.onRocket) ? zoneAimOffset(o) : [0, 0];
+  return Math.atan2(o.y + oy + (ovy - r.vy) * ft - r.y, o.x + ox + (ovx - r.vx) * ft - r.x);
 }
 function fireCable(r, s, aim) {
   if (r.cableCool > 0) return;
@@ -747,6 +800,17 @@ function latchCable(r, k, target) {
   const o = anchorObj(target);
   k.state = 'latched'; k.target = target; k.tx = o.x; k.ty = o.y;
   k.L = Math.max(target.kind === 'post' ? 60 : 40, hyp(r.x - o.x, r.y - o.y));
+  k.dragT = 0;
+  if (target.kind === 'live') { // v0.8: hooked a live rocket's nose or tail (the rider stays on)
+    k.L = clamp(hyp(r.x - o.x, r.y - o.y), 60, LIVE_ROPE_MAX); k.age = 0; k.aiHold = rand(1.5, 3.5);
+    noteHit(o, r); o.entangled = ENTANGLE_GRACE;
+    award(r, PTS_HOOK, 'HOOK', o.x, o.y);
+    if (state === 'play') {
+      const zn = target.zone === 'nose' ? 'NOSE' : 'TAIL';
+      if (r.isPlayer) msg('HOOKED ' + o.name + "'S " + zn + '!', '#fc0');
+      else if (o.isPlayer) msg(r.name + ' HOOKED YOUR ' + zn + '!', '#f44');
+    }
+  }
   if (target.kind === 'post') { // swing tracking (caps) + live-cable clothesline bookkeeping
     k.swept = 0; k.age = 0; k.lastA = Math.atan2(r.y - o.y, r.x - o.x); k.immune = new Map(); k.sides = new Map();
   }
@@ -766,10 +830,25 @@ function updateCable(r, s, hold, dt) {
     k.tx = r.x + k.dx * k.len; k.ty = r.y + k.dy * k.len;
     if (k.tx < 0 || k.ty < 0 || k.tx > WORLD_W || k.ty > WORLD_H) { retract(r, k); return; }
     if (cableBlocked(lvl(r), r.x, r.y, k.tx, k.ty)) { spawnParts(k.tx, k.ty, 4, '#aaa', 80, 0.2); retract(r, k); return; } // fence in the way
-    // 1) a rider still on a rocket -> yank them off (scores)
-    for (const o of riders) {
-      if (o === r || !o.onRocket || o.inv > 0 || !canReach(r, lvl(o))) continue; // altitude gap too big -> passes by
-      if (hyp(o.x - k.tx, o.y - k.ty) < RIDER_R + 9) { knockOff(o, r, 'yank'); retract(r, k); return; }
+    // 1) a rider still on a rocket: MIDDLE -> yank them off; NOSE / TAIL -> hook the live rocket (held cable; AI always)
+    const step = CABLE_SPEED * dt, ns = Math.max(1, Math.ceil(step / 6)), aiCtl = !(r.isPlayer && state === 'play');
+    for (let i = 1; i <= ns; i++) {
+      const L = k.len - step + step * i / ns, px = r.x + k.dx * L, py = r.y + k.dy * L;
+      for (const o of riders) {
+        if (o === r || !o.onRocket || o.inv > 0 || !canReach(r, lvl(o))) continue; // altitude gap too big -> passes by
+        let z = hitZone(o, px, py); if (!z) continue;
+        k.tx = px; k.ty = py;
+        { // judge the zone where the cable line crosses the rocket's long axis (not where it first grazes the hull)
+          const ax = Math.cos(o.ang), ay = Math.sin(o.ang), det = ax * k.dy - k.dx * ay;
+          if (Math.abs(det) > 0.25) {
+            const wx = o.x - r.x, wy = o.y - r.y, sa = (k.dx * wy - k.dy * wx) / det;
+            if (Math.abs(sa) <= HIT_HALF_LEN) z = hitZone(o, o.x + ax * sa, o.y + ay * sa) || z;
+          }
+        }
+        if (z === 'mid') { knockOff(o, r, 'yank'); retract(r, k); return; }
+        if (hold || aiCtl) { latchCable(r, k, { kind: 'live', r: o, zone: z }); return; }
+        spawnParts(px, py, 5, '#fff', 90, 0.2); retract(r, k); return; // glanced off the nose / tail (button not held)
+      }
     }
     // 2) movable things (rider on foot, empty rocket): only latch if the button is held, else pass through
     if (hold && canReach(r, -1)) { // things on the ground: only reachable from LOW
@@ -790,10 +869,20 @@ function updateCable(r, s, hold, dt) {
     if (k.len >= cableMax(r)) retract(r, k);
   } else if (k.state === 'latched') {
     if (!anchorValid(k.target)) { retract(r, k); return; }
-    const o = anchorObj(k.target);
+    const o = anchorObj(k.target), live = k.target.kind === 'live';
     k.tx = o.x; k.ty = o.y;
-    if (cableBlocked(lvl(r), r.x, r.y, o.x, o.y) || (k.target.kind !== 'post' && !canReach(r, -1))) { k.flash = 0.3; retract(r, k); return; }
+    if (live) { const sg = k.target.zone === 'nose' ? 17 : -17; k.tx = o.x + Math.cos(o.ang) * sg; k.ty = o.y + Math.sin(o.ang) * sg; }
+    if (cableBlocked(lvl(r), r.x, r.y, o.x, o.y) || (k.target.kind !== 'post' && !canReach(r, live ? lvl(o) : -1))) { k.flash = 0.3; retract(r, k); return; }
+    if (live) {
+      k.age += dt; o.entangled = ENTANGLE_GRACE; noteHit(o, r);
+      if (!(r.isPlayer && state === 'play')) hold = k.age < k.aiHold;
+      if (k.age >= ROCKET_LATCH_MAX) { retract(r, k); k.flash = 0.3; if (r.isPlayer && state === 'play') sfx.release(); return; } // auto-release
+    }
     if (!hold) { retract(r, k); return; }
+    if (k.target.kind === 'rocket' || k.target.kind === 'foot') { // drag bonus
+      k.dragT += dt;
+      if (k.dragT >= DRAG_EVERY) { k.dragT -= DRAG_EVERY; award(r, PTS_DRAG, 'DRAG', o.x, o.y); }
+    }
     if (k.target.kind === 'post') {
       k.L = Math.max(70, k.L - 22 * dt); // slowly reel in -> tighter, faster whip
       const a = Math.atan2(r.y - o.y, r.x - o.x);
@@ -811,12 +900,25 @@ function updateCable(r, s, hold, dt) {
     k.tx = r.x + k.dx * k.len; k.ty = r.y + k.dy * k.len;
   }
 }
-function applyCableConstraints(r) {
+function liveRope(A, B, L, dt) { // elastic rope between two riders on rockets (equal mass): tow / tug
+  const dx = B.x - A.x, dy = B.y - A.y, d = hyp(dx, dy);
+  if (d <= L || d === 0) return;
+  const nx = dx / d, ny = dy / d, ex = d - L;
+  // spring tension pulls both together (half each), and damping soaks up the separating speed
+  const rv = (B.vx - A.vx) * nx + (B.vy - A.vy) * ny; // >0 = separating
+  const j = (LIVE_STIFF * 4 * ex * dt + Math.max(0, rv) * Math.min(1, LIVE_STIFF * dt)) * 0.5;
+  A.vx += nx * j; A.vy += ny * j; B.vx -= nx * j; B.vy -= ny * j;
+  const S = -(A.vx * nx + A.vy * ny) < B.vx * nx + B.vy * ny ? A : B, F = S === A ? B : A; // whoever pulls away less is the one towed / tugged
+  S.ang += angDiff(Math.atan2(F.y - S.y, F.x - S.x), S.ang) * Math.min(1, ex / LIVE_STRETCH) * Math.min(1, LIVE_TURN * dt);
+  constrain(A, 1, B, 1, L + LIVE_STRETCH); // rigid beyond the stretch
+}
+function applyCableConstraints(r, dt) {
   for (const k of r.cables) {
     if (!k || k.state !== 'latched' || !anchorValid(k.target)) continue;
     const o = anchorObj(k.target);
     if (hyp(o.x - r.x, o.y - r.y) > k.L + 250) { retract(r, k); continue; } // safety: never get flung by an over-stretched rope
     if (k.target.kind === 'post') constrain(k.target.p, 0, r, 1, k.L);      // swing around the post
+    else if (k.target.kind === 'live') liveRope(r, k.target.r, k.L, dt || 1 / 60); // v0.8 tow / tug a live rocket
     else constrain(r, 0.12, anchorObj(k.target), 0.88, k.L);               // drag the thing behind you
   }
 }
@@ -832,15 +934,17 @@ function canTie() {
 }
 function tetherKind(a, b) {
   const ks = [a.kind, b.kind].sort().join('-');
-  return { 'post-post': 'clothes', 'foot-post': 'tied', 'foot-rocket': 'tangled', 'post-rocket': 'anchored', 'rocket-rocket': 'lashed', 'foot-foot': 'bound' }[ks];
+  return { 'post-post': 'clothes', 'foot-post': 'tied', 'foot-rocket': 'tangled', 'post-rocket': 'anchored', 'rocket-rocket': 'lashed', 'foot-foot': 'bound',
+    'live-live': 'binding', 'foot-live': 'binding', 'live-rocket': 'binding', 'live-post': 'leash' }[ks]; // v0.8 live rockets
 }
 function addTether(owner, a, b) {
   const A = anchorObj(a), B = anchorObj(b);
   const kind = tetherKind(a, b);
   const footy = a.kind === 'foot' || b.kind === 'foot';
-  const life = footy ? TIE_EFFECT : TETHER_LIFE;
-  const minL = { clothes: 1e9, tied: 70, tangled: 26, anchored: 50, lashed: 40, bound: 30 }[kind];
+  const life = kind === 'binding' ? BIND_TIME : kind === 'leash' ? LEASH_TIME : footy ? TIE_EFFECT : TETHER_LIFE;
+  const minL = { clothes: 1e9, tied: 70, tangled: 26, anchored: 50, lashed: 40, bound: 30, binding: 70, leash: 80 }[kind];
   const t = { a, b, owner, kind, L: Math.max(20, hyp(A.x - B.x, A.y - B.y)), minL, t: life, max: life, arm: 0.35, ownerArm: 1.0, alt: owner && owner.onRocket ? lvl(owner) : 1 };
+  if (a.kind === 'live' && b.kind === 'live') t.anchor = hyp(A.vx, A.vy) <= hyp(B.vx, B.vy) ? A : B; // slower rocket = the anchor, dragged by the other
   tethers.push(t);
   while (tethers.length > TETHER_MAX) tethers.shift();
   return t;
@@ -859,7 +963,15 @@ function doTie(r) {
   else if (t.kind === 'tangled') msg('TANGLED ' + fa.name + (ra === fa ? ' TO THEIR ROCKET!' : ' WITH ' + ra.name + "'S ROCKET!"), '#f93');
   else if (t.kind === 'anchored') msg('ANCHORED ' + ra.name + "'S ROCKET!", '#f93');
   else if (t.kind === 'lashed') msg('ROCKETS LASHED TOGETHER!', '#f93');
+  else if (t.kind === 'binding') msg('BOUND ' + t.a.r.name + ' TO ' + t.b.r.name + '!', '#f93');
+  else if (t.kind === 'leash') { const lv = t.a.kind === 'live' ? t.a.r : t.b.r; msg('LEASHED ' + lv.name + "'S ROCKET TO A POST!", '#f93'); }
   else msg('TIED ' + t.a.r.name + ' TO ' + t.b.r.name + '!', '#f93');
+  // v0.8 trick points
+  const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+  if (t.kind === 'binding' || t.kind === 'bound') { award(r, PTS_BIND, 'BIND', mx, my); r.tricks++; }
+  else if (t.kind === 'tied' || t.kind === 'tangled') { award(r, PTS_TIE, 'TIE-UP', mx, my); r.tricks++; }
+  else if (t.kind === 'anchored' || t.kind === 'leash' || t.kind === 'lashed') { award(r, PTS_TIE, 'ANCHOR', mx, my); r.tricks++; }
+  for (const e of [t.a, t.b]) if (e.kind !== 'post') noteHit(e.r, r);
 }
 function snapTether(t, loud) {
   const i = tethers.indexOf(t); if (i >= 0) tethers.splice(i, 1);
@@ -882,8 +994,16 @@ function updateTethers(dt) {
     if (t.t <= 0) { snapTether(t, true); continue; }
     if (t.L > t.minL) t.L = Math.max(t.minL, t.L - 70 * dt); // cinch tie-ups tighter
     const A = anchorObj(t.a), B = anchorObj(t.b);
-    if (hyp(A.x - B.x, A.y - B.y) > t.L + 300) { snapTether(t, true); continue; } // safety snap
-    constrain(A, t.a.kind === 'post' ? 0 : 1, B, t.b.kind === 'post' ? 0 : 1, t.L);
+    const tight = t.kind === 'binding' || t.kind === 'leash';
+    if (hyp(A.x - B.x, A.y - B.y) > t.L + (tight ? BIND_SNAP : 300)) { snapTether(t, true); continue; } // overstretch snap
+    for (const e of [t.a, t.b]) if (e.kind === 'live') { e.r.entangled = ENTANGLE_GRACE; noteHit(e.r, t.owner); } // bound / leashed riders
+    if (t.anchor) { // the anchor's nose is hauled round to trail the dragger (and its thrust is cut, see updateRider)
+      const an = t.anchor, dg = an === A ? B : A;
+      an.anchored = 0.1;
+      if (hyp(dg.x - an.x, dg.y - an.y) > t.L - 8) an.ang += angDiff(Math.atan2(dg.y - an.y, dg.x - an.x), an.ang) * Math.min(1, BIND_TURN * dt);
+    }
+    const wt = (e, o) => e.kind === 'post' ? 0 : t.anchor ? (o === t.anchor ? 1 : 0.35) : 1; // the dragger barely slows; the anchor is hauled along
+    constrain(A, wt(t.a, A), B, wt(t.b, B), t.L);
     if (t.kind === 'clothes' && t.arm <= 0) {
       for (const r of riders) {
         if (!r.onRocket || r.inv > 0) continue;
@@ -893,7 +1013,7 @@ function updateTethers(dt) {
           const by = r === t.owner ? null : t.owner;
           const hit = knockOff(r, by, 'clothes');
           if (hit && state === 'play') {
-            if (by && by.isPlayer) msg('CLOTHESLINE! +1 ' + r.name, '#fc0');
+            if (by && by.isPlayer) msg('CLOTHESLINE! ' + r.name, '#fc0');
             else if (r.isPlayer) msg(by ? 'CLOTHESLINED BY ' + by.name + '!' : 'CLOTHESLINED YOURSELF!', '#f44');
             else msg('CLOTHESLINE! ' + r.name, '#f93');
           }
@@ -927,7 +1047,7 @@ function swingClotheslines(dt) {
           k.immune.set(o, SWING_CLOTHES_IMMUNE);
           const hit = knockOff(o, r, 'clothes');
           if (hit && state === 'play') {
-            if (r.isPlayer) msg('CLOTHESLINE! +1 ' + o.name, '#fc0');
+            if (r.isPlayer) msg('CLOTHESLINE! ' + o.name, '#fc0');
             else if (o.isPlayer) msg('CLOTHESLINED BY ' + r.name + '!', '#f44');
             else msg('CLOTHESLINE! ' + o.name, '#f93');
             if (r.isPlayer || o.isPlayer || onScreen(o.x, o.y)) sfx.twang();
@@ -942,7 +1062,8 @@ function swingClotheslines(dt) {
 // ---------- knock off ----------
 function knockOff(o, by, how) {
   if ((how === 'yank' || how === 'clothes') && gripAbsorb(o, by)) return false; // v0.7 GRIP shield
-  o.onRocket = false; o.falls++; o.cables = [null, null]; o.killer = by || null; o.boosting = false;
+  const credit = creditFor(o, by); // v0.8: who caused this fall (direct hit, or the last cable/rope/binding on them within 3 s)
+  o.onRocket = false; o.falls++; o.cables = [null, null]; o.killer = credit; o.boosting = false;
   o.tumble = TUMBLE_TIME; o.footT = 0; o.stun = 0; o.inv = 0; o.cableCool = 0;
   // the rocket keeps sliding and spinning away
   const k = o.rk; k.x = o.x; k.y = o.y; k.ang = o.ang; k.homing = false;
@@ -953,18 +1074,32 @@ function knockOff(o, by, how) {
   }
   kickRocketAway(o);
   k.spin = rand(-8, 8);
-  if (by && state === 'play') by.score++;
+  if (state === 'play') { // v0.8 performance scoring
+    if (credit) {
+      credit.kos++;
+      const clo = how === 'clothes';
+      award(credit, clo ? PTS_CLOTHES : PTS_KO, clo ? 'CLOTHESLINE' : 'KNOCKOFF', o.x, o.y);
+      credit.chain = gameT - credit.lastKO <= COMBO_WINDOW ? credit.chain + 1 : 1; credit.lastKO = gameT;
+      if (credit.chain > 1) award(credit, PTS_COMBO * (credit.chain - 1), 'COMBO', o.x, o.y - 18);
+    }
+    award(o, -PTS_FALL, 'FALL', o.x, o.y + 34);
+  }
+  o.lastBy = null; o.entangled = 0;
   o.spin = rand(-10, 10);
   spawnParts(o.x, o.y, 24, o.color, 260, 0.7);
   spawnParts(o.x, o.y, 12, '#fff', 180, 0.4);
   if (state === 'play') {
-    if (how !== 'clothes') {
-      if (by && by.isPlayer) { msg('+1  YANKED ' + o.name + '!', '#fc0'); }
+    if (how === 'crash') {
+      if (credit && credit.isPlayer) msg(o.name + ' CRASHED!', '#fc0');
+      else if (o.isPlayer) msg('YOU CRASHED' + (credit ? ' (' + credit.name + ')' : '') + '!', '#f44');
+      else msg(o.name + ' CRASHED' + (credit ? ' (' + credit.name + ')' : ''), '#aaa');
+    } else if (how !== 'clothes') {
+      if (by && by.isPlayer) { msg('YANKED ' + o.name + '!', '#fc0'); }
       else if (o.isPlayer) { msg('YANKED BY ' + (by ? by.name : '???') + '!', '#f44'); }
       else if (by) msg(by.name + ' YANKED ' + o.name, '#aaa');
     }
-    if (by && by.isPlayer) shake = 6; else if (o.isPlayer) shake = 10;
-    if (o.isPlayer || by && by.isPlayer || onScreen(o.x, o.y)) sfx.knock();
+    if (credit && credit.isPlayer) shake = 6; else if (o.isPlayer) shake = 10;
+    if (o.isPlayer || credit && credit.isPlayer || onScreen(o.x, o.y)) sfx.knock();
   }
   return true;
 }
@@ -1083,6 +1218,7 @@ function updateRider(r, c, dt) {
   let sp = (r.boosting ? BOOST_SPEED : BASE_SPEED * (r.pu.turbo > 0 ? TURBO_MULT : 1)) * ALT_SPEED[L];
   if (latchedPost) sp *= 1.15;
   if (r.stun > 0) sp *= 0.35;
+  if (r.anchored > 0) { sp *= BIND_ANCHOR_THRUST; r.anchored -= dt; } // v0.8: bound anchor gets dragged
   if (latchedPost) { // swinging on a post: keep the v0.6 feel (cable tension does the steering)
     const dvx = Math.cos(r.ang) * sp, dvy = Math.sin(r.ang) * sp, k = Math.min(1, GRIP * dt * 2);
     r.vx += (dvx - r.vx) * k; r.vy += (dvy - r.vy) * k;
@@ -1103,9 +1239,10 @@ function updateRider(r, c, dt) {
     if (v > SPEED_SOFT_CAP) { const nv = v - (v - SPEED_SOFT_CAP) * Math.min(1, 3 * dt); r.vx *= nv / v; r.vy *= nv / v; }
   }
   r.x += r.vx * dt; r.y += r.vy * dt;
-  applyCableConstraints(r);
+  applyCableConstraints(r, dt);
   // walls
   let hit = false;
+  const pvx = r.vx, pvy = r.vy; // v0.8: impact size for crash knockoffs
   if (r.x < RIDER_R) { r.x = RIDER_R; r.vx = Math.abs(r.vx) * WALL_BOUNCE; hit = true; }
   if (r.x > WORLD_W - RIDER_R) { r.x = WORLD_W - RIDER_R; r.vx = -Math.abs(r.vx) * WALL_BOUNCE; hit = true; }
   if (r.y < RIDER_R) { r.y = RIDER_R; r.vy = Math.abs(r.vy) * WALL_BOUNCE; hit = true; }
@@ -1118,15 +1255,18 @@ function updateRider(r, c, dt) {
     spawnParts(r.x, r.y, 5, '#fc0', 100, 0.3);
   }
   // posts (solid)
+  let postHit = false;
   for (const p of posts) {
     const dx = r.x - p.x, dy = r.y - p.y, d = hyp(dx, dy), md = p.r + RIDER_R - 2;
-    if (d < md && d > 0) {
+    if (d < md && d > 0) { postHit = true;
       const nx = dx / d, ny = dy / d; r.x = p.x + nx * md; r.y = p.y + ny * md;
       const vn = r.vx * nx + r.vy * ny;
       if (vn < 0) { r.vx -= 1.5 * vn * nx; r.vy -= 1.5 * vn * ny; r.vx *= 0.6; r.vy *= 0.6; r.ang = Math.atan2(r.vy, r.vx); r.stun = Math.max(r.stun, 0.25);
         if (r.isPlayer && state === 'play' && performance.now() - lastWallSfx > 250) { sfx.wall(); lastWallSfx = performance.now(); } }
     }
   }
+  // v0.8: a hooked / bound / leashed rider who slams into a wall, fence or post falls off (credit: whoever tied them up)
+  if ((hit || postHit) && r.entangled > 0 && hyp(r.vx - pvx, r.vy - pvy) > CRASH_DV) { knockOff(r, null, 'crash'); return; }
   // cables
   for (let s = 0; s < 2; s++) {
     if (c.fire[s]) fireCable(r, s, c.aim ? c.aim[s] : (r.isPlayer ? autoAim(r, s) : null));
@@ -1146,6 +1286,10 @@ function riderCollisions() {
     a.x -= nx * ov; a.y -= ny * ov; b.x += nx * ov; b.y += ny * ov;
     const rv = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
     if (rv <= 0) continue;
+    if (rv > CRASH_DV && (a.entangled > 0 || b.entangled > 0)) { // v0.8: entangled rider rammed hard -> falls off
+      for (const r of [a, b]) if (r.entangled > 0 && r.onRocket) knockOff(r, null, 'crash');
+      if (!a.onRocket || !b.onRocket) continue;
+    }
     const headOn = Math.cos(a.ang - b.ang) < -0.4;
     const e = headOn ? 1.3 : 0.9;
     a.vx -= nx * rv * e; a.vy -= ny * rv * e; b.vx += nx * rv * e; b.vy += ny * rv * e;
@@ -1189,6 +1333,9 @@ function update(dt) {
   swingClotheslines(dt);
   riderCollisions();
   updatePickups(dt);
+  gameT += dt;
+  for (const r of riders) r.entangled = Math.max(0, r.entangled - dt);
+  for (let i = pops.length - 1; i >= 0; i--) { const p = pops[i]; p.t -= dt; p.y -= 28 * dt; if (p.t <= 0) pops.splice(i, 1); }
   updateParticles(dt);
   for (const m of msgs) m.t -= dt;
   while (msgs.length && msgs[0].t <= 0) msgs.shift();
@@ -1449,6 +1596,12 @@ function render(now) {
       if (ALTITUDE_ENABLED) drawPips(r.x + ctx.measureText(r.name).width / 2 + 4, r.y - 26 * sc + 4, lvl(r), 3.5);
     }
   }
+  // v0.8 floating score popups (yours bright, the AI's dim)
+  for (const p of pops) {
+    ctx.globalAlpha = clamp(p.t / 0.6, 0, 1) * (p.mine ? 1 : 0.5);
+    txt(p.text, p.x, p.y, p.mine ? 15 : 11, p.color, 'center', p.mine);
+  }
+  ctx.globalAlpha = 1;
   // player marker / arrow to your rocket
   if (player && state === 'play') {
     if (player.onRocket) {
@@ -1622,11 +1775,13 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.7  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.8  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   txt('Grapple posts to whip around corners.', VW / 2, VH * 0.52, 14 * sc, '#ccc', 'center');
-  txt('Lasso rivals to yank them off their rockets!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
+  txt('Hit the RIDER to yank them off; hook a NOSE or TAIL to tow!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE them: clotheslines, tie-ups!', VW / 2, VH * 0.52 + 36 * sc, 14 * sc, '#f93', 'center');
   txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.52 + 58 * sc, 12 * sc, '#8ab', 'center');
+  txt('SCORING: KO +' + PTS_KO + '  CLOTHESLINE +' + PTS_CLOTHES + '  BIND +' + PTS_BIND + '  TIE/ANCHOR +' + PTS_TIE + '  HOOK +' + PTS_HOOK + '  COMBO +' + PTS_COMBO + '  DRAG +1/' + DRAG_EVERY + 's  PICKUP +' + PTS_PICKUP + '  FALL -' + PTS_FALL,
+    VW / 2, VH * 0.52 + 75 * sc, 9.5 * sc, '#9c9', 'center', false);
   if (ALTITUDE_ENABLED) txt(isTouch ? 'UP / DN: altitude (cables reach 1 level; LOW fences only stop LOW)' : 'R / F: altitude (cables reach 1 level; LOW fences only stop LOW)', VW / 2, VH * 0.52 + 75 * sc, 12 * sc, '#b9a0ff', 'center');
   if (Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO START' : 'CLICK OR PRESS SPACE TO START', VW / 2, VH * 0.9, 22 * sc, '#fff', 'center');
 }
@@ -1639,10 +1794,13 @@ function drawResults(now) {
   const ord = ['1ST', '2ND', '3RD', '4TH'][place - 1];
   txt(place === 1 && !tie ? 'YOU WIN!' : tie ? 'TIE FOR 1ST!' : 'YOU PLACED ' + ord, VW / 2, VH * 0.29, 22 * sc, place === 1 ? '#fc0' : '#fff', 'center');
   const cx = VW / 2, rowH = 26 * sc; let y = VH * 0.41;
-  txt('RANK  RIDER   POINTS  FALLS', cx, y, 14 * sc, '#888', 'center'); y += rowH;
+  const cols = [['RANK', -250, 'left'], ['RIDER', -170, 'left'], ['POINTS', 60, 'right'], ['KOs', 130, 'right'], ['TRICKS', 225, 'right'], ['FALLS', 305, 'right']];
+  for (const c of cols) txt(c[0], cx + c[1] * sc, y, 13 * sc, '#888', c[2]);
+  y += rowH;
   results.forEach((r, i) => {
-    const line = (i + 1) + '.    ' + (r.name + '      ').slice(0, 7) + '  ' + String(r.score).padStart(4) + '  ' + String(r.falls).padStart(5);
-    txt(line, cx, y, 16 * sc, r.color, 'center'); y += rowH;
+    const vals = [(i + 1) + '.', r.name, String(r.score), String(r.kos), String(r.tricks), String(r.falls)];
+    cols.forEach((c, j) => txt(vals[j], cx + c[1] * sc, y, (j === 2 ? 18 : 16) * sc, r.color, c[2]));
+    y += rowH;
   });
   if (overT > 1.2 && Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO RESTART' : 'CLICK OR SPACE TO RESTART', VW / 2, VH * 0.9, 20 * sc, '#fff', 'center');
 }
@@ -1669,7 +1827,8 @@ requestAnimationFrame(frame);
 // debug/test hook
 window.RJ = { get state() { return state; }, get riders() { return riders; }, get player() { return player; },
   get timeLeft() { return timeLeft; }, set timeLeft(v) { timeLeft = v; }, posts, tethers, knockOff, addTether, canTie, btns,
-  get msgs() { return msgs.map(m => m.text); }, clearMsgs() { msgs.length = 0; }, fences, lvl, canReach, altOn: ALTITUDE_ENABLED, cam,
+  get msgs() { return msgs.map(m => m.text); }, clearMsgs() { msgs.length = 0; }, fences, lvl, canReach, altOn: ALTITUDE_ENABLED, cam, pops, hitZone, get forceZone() { return forceZone; }, set forceZone(v) { forceZone = v; },
+  get gameT() { return gameT; }, get results() { return results; }, endRound, doTie,
   pickups, puRespawn, spawnPickup, cableMax, PU: { POWERUP_MAX, POWERUP_RESPAWN, POWERUP_CLEAR, LONG_CABLE_MULT, LONG_CABLE_TIME, GRIP_TIME, TURBO_MULT, TURBO_TIME, CABLE_MAX, BASE_SPEED } };
 })();
 </script>
