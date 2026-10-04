@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.6</title>
+<title>Rocket Jockey v0.6.1</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -41,7 +41,18 @@ const params = new URLSearchParams(location.search);
 const ROUND_TIME = Math.max(5, +(params.get('round')) || 180);
 
 const WORLD_W = 3200, WORLD_H = 2200;
-const BASE_SPEED = 220, BOOST_SPEED = 400, TURN_RATE = 2.7, GRIP = 2.4;
+const BASE_SPEED = 220, BOOST_SPEED = 400, TURN_RATE = 2.7, GRIP = 2.4; // GRIP: velocity->heading pull while swinging on a post (v0.6 feel)
+// v0.6.1 atmospheric flight (riders and AI): forward + sideways velocity are handled separately
+const LATERAL_GRIP = 15;     // 1/s: velocity swings round to the heading this fast (bike/plane banking into turns, not space drift)
+const THRUST_ACCEL = 2.4;    // 1/s: how fast you get up to cruise speed (BASE_SPEED)
+const BOOST_ACCEL = 2.6;     // 1/s: how fast boost pulls you up to BOOST_SPEED
+const AIR_DRAG = 1.6;        // 1/s: speed above the target (e.g. after boost) bleeds off at this rate, no coasting
+const TURN_SCRUB = 0.15;     // fraction of forward speed lost per second at full steering
+const SPEED_SOFT_CAP = 420;  // px/s: anything faster is pulled back down
+const WALL_BOUNCE = 0.25;    // walls/fences: normal restitution for rockets (damped, not elastic)
+// v0.6.1 remount fix
+const MIN_ON_FOOT_TIME = 1.5; // s: no remount until the tumble is over AND this long has passed since the knockoff
+const ROCKET_MIN_DIST = 120;  // px: a knocked-away rocket should come to rest at least this far from its rider
 const FUEL_MAX = 100, FUEL_BURN = 40, FUEL_REGEN = 10;
 const CABLE_SPEED = 1200, CABLE_MAX = 360, CABLE_ANGLE = 1.0;
 const RIDER_R = 14, INVULN = 2;
@@ -837,6 +848,7 @@ function knockOff(o, by, how) {
     k.vx = o.vx * 1.1; k.vy = o.vy * 1.1;
     if (by) { const dx = by.x - o.x, dy = by.y - o.y, d = hyp(dx, dy) || 1; o.vx = o.vx * 0.3 + dx / d * 280; o.vy = o.vy * 0.3 + dy / d * 280; }
   }
+  kickRocketAway(o);
   k.spin = rand(-8, 8);
   if (by && state === 'play') by.score++;
   o.spin = rand(-10, 10);
@@ -851,6 +863,29 @@ function knockOff(o, by, how) {
     if (by && by.isPlayer) shake = 6; else if (o.isPlayer) shake = 10;
     if (o.isPlayer || by && by.isPlayer || onScreen(o.x, o.y)) sfx.knock();
   }
+}
+// v0.6.1: the empty rocket must really separate from its rider. Predict where both come to rest
+// (rider: tumble drag ~0.35 x velocity; empty rocket: drag 0.9/s -> 1.11 x velocity) and make sure
+// that's >= ~160 px apart along a direction that isn't straight into a wall, fence or post.
+function restClear(x, y, ex, ey) {
+  if (ex < 40 || ey < 40 || ex > WORLD_W - 40 || ey > WORLD_H - 40) return false;
+  for (const f of fences) if (segsCross(x, y, ex, ey, f.x1, f.y1, f.x2, f.y2) || segDist(ex, ey, f.x1, f.y1, f.x2, f.y2) < 30) return false;
+  for (const p of posts) if (hyp(p.x - ex, p.y - ey) < p.r + 30) return false;
+  return true;
+}
+function kickRocketAway(o) {
+  const k = o.rk, RD = 0.35, KD = 1 / 0.9, WANT = 165;
+  const rx = o.x + o.vx * RD, ry = o.y + o.vy * RD;          // where the rider will end up
+  let sx = k.vx * KD - o.vx * RD, sy = k.vy * KD - o.vy * RD;  // predicted rocket offset from the rider
+  const s0 = hyp(sx, sy), a0 = s0 > 1 ? Math.atan2(sy, sx) : o.ang;
+  let best = null;
+  for (const da of [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8, 2.5, -2.5, Math.PI]) {
+    const a = a0 + da, d = Math.max(s0, WANT), ex = rx + Math.cos(a) * d, ey = ry + Math.sin(a) * d;
+    if (restClear(k.x, k.y, ex, ey)) { best = [a, d]; break; }
+  }
+  if (!best) { if (s0 >= WANT) return; best = [Math.atan2(WORLD_H / 2 - ry, WORLD_W / 2 - rx), WANT]; } // boxed in: aim for open space
+  if (best[0] === a0 && s0 >= WANT) return; // already flying clear: leave it alone
+  k.vx = (o.vx * RD + Math.cos(best[0]) * best[1]) / KD; k.vy = (o.vy * RD + Math.sin(best[0]) * best[1]) / KD;
 }
 function remount(r) {
   const k = r.rk;
@@ -909,11 +944,21 @@ function updateFoot(r, c, dt) {
     if (w.y < 20 || w.y > WORLD_H - 20) { w.vy = -w.vy * 0.5; w.y = clamp(w.y, 20, WORLD_H - 20); }
     pushOutPosts(w, 12, 0.4);
     collideFences(w, 10, -1, 0.4);
+    // v0.6.1: never let the empty rocket sit on (or bounce back onto) its rider; they have to walk to it
+    const sx = w.x - r.x, sy = w.y - r.y, sd = hyp(sx, sy);
+    if (sd < ROCKET_MIN_DIST) {
+      let ux = sd > 1 ? sx / sd : Math.cos(r.ang), uy = sd > 1 ? sy / sd : Math.sin(r.ang);
+      if ((w.x <= 21 && ux < 0) || (w.x >= WORLD_W - 21 && ux > 0)) { ux = 0; uy = uy >= 0 ? 1 : -1; }   // pinned on a wall: slide along it
+      if ((w.y <= 21 && uy < 0) || (w.y >= WORLD_H - 21 && uy > 0)) { uy = 0; ux = ux >= 0 ? 1 : -1; }
+      const va = w.vx * ux + w.vy * uy, vrel = (w.vx - r.vx) * ux + (w.vy - r.vy) * uy;
+      if (r.footT < MIN_ON_FOOT_TIME) { if (vrel < 80) { w.vx += (80 - vrel) * ux; w.vy += (80 - vrel) * uy; } } // early: push it clear
+      else if (va < 0) { w.vx -= va * ux; w.vy -= va * uy; }  // later: it may not drift back toward the rider
+    }
     if (hyp(w.vx, w.vy) > 40 && Math.random() < 0.3) particles.push({ x: w.x, y: w.y, vx: rand(-20, 20), vy: rand(-20, 20), life: 0.8, max: 0.8, color: '#666' });
   }
   if (r.footT >= RECALL_TIME && !w.homing) recallRocket(r);
   // remount by touching the rocket
-  if (r.tumble <= 0 && !tiedDown(r) && hyp(w.x - r.x, w.y - r.y) < RIDER_R + 12 && (state === 'play' || state === 'title')) remount(r);
+  if (r.tumble <= 0 && r.footT >= MIN_ON_FOOT_TIME && !tiedDown(r) && hyp(w.x - r.x, w.y - r.y) < RIDER_R + 12 && (state === 'play' || state === 'title')) remount(r);
 }
 function updateRider(r, c, dt) {
   r.px = r.x; r.py = r.y;
@@ -934,18 +979,34 @@ function updateRider(r, c, dt) {
   let sp = (r.boosting ? BOOST_SPEED : BASE_SPEED) * ALT_SPEED[L];
   if (latchedPost) sp *= 1.15;
   if (r.stun > 0) sp *= 0.35;
-  const dvx = Math.cos(r.ang) * sp, dvy = Math.sin(r.ang) * sp;
-  const k = Math.min(1, GRIP * dt * (latchedPost ? 2 : 1));
-  r.vx += (dvx - r.vx) * k; r.vy += (dvy - r.vy) * k;
+  if (latchedPost) { // swinging on a post: keep the v0.6 feel (cable tension does the steering)
+    const dvx = Math.cos(r.ang) * sp, dvy = Math.sin(r.ang) * sp, k = Math.min(1, GRIP * dt * 2);
+    r.vx += (dvx - r.vx) * k; r.vy += (dvy - r.vy) * k;
+  } else { // v0.6.1 atmospheric flight: strong sideways grip, thrust up to cruise, air drag above it
+    // grip swings the velocity round to the heading (keeping its speed, like banking into a turn);
+    // anything pointing backwards (after a bump) is just damped away instead
+    const v0 = hyp(r.vx, r.vy), va = Math.atan2(r.vy, r.vx), e = angDiff(r.ang, va), gk = 1 - Math.exp(-LATERAL_GRIP * dt);
+    const hx = Math.cos(r.ang), hy = Math.sin(r.ang), rot = v0 > 1 && Math.abs(e) < 1.6;
+    let fwd, lat = 0, dir = 0;
+    if (rot) { dir = va + e * gk; fwd = v0; }
+    else { fwd = r.vx * hx + r.vy * hy; lat = (-r.vx * hy + r.vy * hx) * (1 - gk); }
+    if (fwd < sp) fwd += (sp - fwd) * Math.min(1, (r.boosting ? BOOST_ACCEL : THRUST_ACCEL) * dt);
+    else fwd += (sp - fwd) * (1 - Math.exp(-AIR_DRAG * dt));
+    fwd *= 1 - TURN_SCRUB * Math.min(1, Math.abs(c.turn)) * dt;
+    if (rot) { r.vx = Math.cos(dir) * fwd; r.vy = Math.sin(dir) * fwd; }
+    else { r.vx = hx * fwd - hy * lat; r.vy = hy * fwd + hx * lat; }
+    const v = hyp(r.vx, r.vy);
+    if (v > SPEED_SOFT_CAP) { const nv = v - (v - SPEED_SOFT_CAP) * Math.min(1, 3 * dt); r.vx *= nv / v; r.vy *= nv / v; }
+  }
   r.x += r.vx * dt; r.y += r.vy * dt;
   applyCableConstraints(r);
   // walls
   let hit = false;
-  if (r.x < RIDER_R) { r.x = RIDER_R; r.vx = Math.abs(r.vx) * 0.5; hit = true; }
-  if (r.x > WORLD_W - RIDER_R) { r.x = WORLD_W - RIDER_R; r.vx = -Math.abs(r.vx) * 0.5; hit = true; }
-  if (r.y < RIDER_R) { r.y = RIDER_R; r.vy = Math.abs(r.vy) * 0.5; hit = true; }
-  if (r.y > WORLD_H - RIDER_R) { r.y = WORLD_H - RIDER_R; r.vy = -Math.abs(r.vy) * 0.5; hit = true; }
-  if (collideFences(r, RIDER_R, lvl(r), 0.5)) { hit = true; if (r.isPlayer && state === 'play' && performance.now() - lastWallSfx > 250) msg('FENCE!', '#ccc'); }
+  if (r.x < RIDER_R) { r.x = RIDER_R; r.vx = Math.abs(r.vx) * WALL_BOUNCE; hit = true; }
+  if (r.x > WORLD_W - RIDER_R) { r.x = WORLD_W - RIDER_R; r.vx = -Math.abs(r.vx) * WALL_BOUNCE; hit = true; }
+  if (r.y < RIDER_R) { r.y = RIDER_R; r.vy = Math.abs(r.vy) * WALL_BOUNCE; hit = true; }
+  if (r.y > WORLD_H - RIDER_R) { r.y = WORLD_H - RIDER_R; r.vy = -Math.abs(r.vy) * WALL_BOUNCE; hit = true; }
+  if (collideFences(r, RIDER_R, lvl(r), WALL_BOUNCE)) { hit = true; if (r.isPlayer && state === 'play' && performance.now() - lastWallSfx > 250) msg('FENCE!', '#ccc'); }
   if (hit) {
     r.ang = Math.atan2(r.vy, r.vx); r.vx *= 0.6; r.vy *= 0.6; r.stun = Math.max(r.stun, 0.25);
     for (let s = 0; s < 2; s++) if (r.cables[s] && r.cables[s].state === 'latched') retract(r, r.cables[s]);
@@ -1436,7 +1497,7 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.6  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.6.1  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   txt('Grapple posts to whip around corners.', VW / 2, VH * 0.52, 14 * sc, '#ccc', 'center');
   txt('Lasso rivals to yank them off their rockets!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE them: clotheslines, tie-ups!', VW / 2, VH * 0.52 + 36 * sc, 14 * sc, '#f93', 'center');
