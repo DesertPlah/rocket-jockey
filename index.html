@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.8</title>
+<title>Rocket Jockey v0.9</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -59,7 +59,19 @@ const LONG_CABLE_MULT = 1.35, LONG_CABLE_TIME = 10; // C: +35% cable range for 1
 const GRIP_TIME = 15;             // G: one-hit shield (absorbs one yank or clothesline), up to 15 s
 const TURBO_MULT = 1.15, TURBO_TIME = 6;            // T: +15% cruise speed for 6 s
 // F: instantly refills the boost meter
+// ---------- v0.9 AI tuning (one block for later difficulty scaling) ----------
 const AI_PU_CHANCE = 0.35, AI_PU_RANGE = 450;       // AI: sometimes detours to a nearby pickup when not busy
+const AI_ERR = 0.18;                 // aim noise (radians)
+const AI_REACT = [0.12, 0.4];        // reaction delay before committing to a new mode
+const AI_RETARGET = [2.2, 5.0];      // seconds between target picks
+const AI_FIRE_COOL = [1.5, 3.0];     // cooldown after firing a cable
+const AI_HOLD_POST = [2.5, 5.5];     // how long to keep swinging on a post
+const AI_TIE_CHANCE = 0.72;          // P(tie) when both cables latched to different anchors
+const AI_POST_RANGE = 440;           // seek posts within this for swing / clothesline / leash
+const AI_HOOK_FRAC = 0.92;           // fire when target within this fraction of cableMax
+const AI_PLAYER_BIAS = 0.45;         // P(prefer player as target) when player is riding
+const AI_SEEK_POST = 0.2;           // P(switch to swing mode) when a post is nearby and not busy
+const AI_ZONE_YANK = 0.42;           // base preference for middle yanks (rest = nose/tail latch)
 const PU_TYPES = { F: { name: 'FUEL', color: '#ffaa33' }, C: { name: 'LONG CABLE', color: '#33ccff' }, G: { name: 'GRIP', color: '#66ff66' }, T: { name: 'TURBO', color: '#ff55ff' } };
 // v0.8 hit zones on occupied rockets: NOSE (front 30%) / MIDDLE = rider (40%) / TAIL (rear 30%)
 const ZONE_NOSE = 0.3, ZONE_TAIL = 0.3;   // fractions of the rocket length; the middle 40% yanks
@@ -88,7 +100,6 @@ const ROCKET_MIN_DIST = 120;  // px: a knocked-away rocket should come to rest a
 const FUEL_MAX = 100, FUEL_BURN = 40, FUEL_REGEN = 10;
 const CABLE_SPEED = 1200, CABLE_MAX = 360, CABLE_ANGLE = 1.0;
 const RIDER_R = 14, INVULN = 2;
-const AI_ERR = 0.18;
 // v0.4 swing caps: a post latch auto-releases after this many full turns around the post, or this many seconds
 const SWING_MAX_ROTATIONS = 2.5;
 const SWING_MAX_TIME = 9;
@@ -297,7 +308,7 @@ function makeRider(i) {
     // the rocket is its own object; while riding it just follows the rider
     rk: { x: 0, y: 0, vx: 0, vy: 0, ang: 0, spin: 0, homing: false },
     tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null, alt: 1, altV: 1,
-    ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0 },
+    ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0, mode: 'hunt', modeT: 0, react: 0, zone: 'mid', wantLatch: [false, false], postHold: [0, 0], seekPost: null },
     pu: { cable: 0, grip: 0, turbo: 0 },   // v0.7 active power-up timers (s)
     kos: 0, tricks: 0, lastBy: null, lastByT: -99, lastKO: -99, chain: 0, entangled: 0, anchored: 0, // v0.8 scoring / credit
   };
@@ -667,6 +678,8 @@ function playerFoot() {
 }
 function aiFoot(r) {
   let gx = r.rk.x, gy = r.rk.y;
+  // if tied down, wait it out (can't remount anyway)
+  if (tiedDown(r)) return { mx: 0, my: 0 };
   // crude path around a fence that's in the way: head for its nearer end
   for (const f of fences) {
     if (!segsCross(r.x, r.y, gx, gy, f.x1, f.y1, f.x2, f.y2)) continue;
@@ -680,44 +693,240 @@ function aiFoot(r) {
   if (d < 3) return { mx: 0, my: 0 };
   return { mx: dx / d, my: dy / d };
 }
+// who has a live cable / binding on this rider?
+function aiHooker(r) {
+  for (const o of riders) {
+    if (o === r) continue;
+    for (const k of o.cables) {
+      if (!k || k.state !== 'latched' || !k.target) continue;
+      if ((k.target.kind === 'live' || k.target.kind === 'foot' || k.target.kind === 'rocket') && k.target.r === r) return o;
+    }
+  }
+  for (const t of tethers) {
+    for (const e of [t.a, t.b]) if ((e.kind === 'live' || e.kind === 'foot') && e.r === r) return t.owner || null;
+  }
+  return null;
+}
+function aiPickZone(r, t, dist) {
+  const toT = Math.atan2(t.y - r.y, t.x - r.x);
+  const approach = Math.abs(angDiff(toT, t.ang)); // 0 = from behind (tail), PI = head-on (nose)
+  const broad = Math.min(Math.abs(angDiff(toT, t.ang + Math.PI / 2)), Math.abs(angDiff(toT, t.ang - Math.PI / 2))) < 0.7;
+  if (dist < 240 && (broad || Math.random() < AI_ZONE_YANK)) return 'mid';
+  if (approach < 0.85) return Math.random() < 0.75 ? 'tail' : 'mid';
+  if (approach > 2.25) return Math.random() < 0.55 ? 'nose' : 'mid';
+  // mix: sometimes latch for a bind setup, sometimes yank
+  if (Math.random() < AI_ZONE_YANK) return 'mid';
+  return Math.random() < 0.5 ? 'nose' : 'tail';
+}
+function aiNearestPost(r, maxD) {
+  let best = null, bd = maxD || AI_POST_RANGE;
+  for (const p of posts) {
+    const d = hyp(p.x - r.x, p.y - r.y);
+    if (d < bd && d > 70) { bd = d; best = p; }
+  }
+  return best;
+}
+function aiFreeSide(r) {
+  for (let s = 0; s < 2; s++) if (!r.cables[s] || r.cables[s].state === 'retract') return s;
+  return -1;
+}
+function aiSideToward(r, ax, ay) {
+  const rel = angDiff(Math.atan2(ay - r.y, ax - r.x), r.ang);
+  if (rel < -0.15 && rel > -2.1) return 0;
+  if (rel > 0.15 && rel < 2.1) return 1;
+  return Math.abs(rel) < 0.15 ? (Math.random() < 0.5 ? 0 : 1) : -1;
+}
 function aiControl(r, dt) {
-  const ai = r.ai, c = { turn: 0, boost: false, fire: [false, false], hold: [false, false], aim: [null, null], alt: 0 };
-  ai.retarget -= dt; ai.cool -= dt; ai.altCool -= dt;
+  const ai = r.ai, c = { turn: 0, boost: false, fire: [false, false], hold: [false, false], aim: [null, null], alt: 0, tie: false };
+  ai.retarget -= dt; ai.cool -= dt; ai.altCool -= dt; ai.react -= dt; ai.modeT += dt;
+  for (let s = 0; s < 2; s++) if (ai.postHold[s] > 0) ai.postHold[s] -= dt;
+
+  // ---- pick / refresh a target (player + other AI) ----
   if (!ai.target || !ai.target.onRocket || ai.retarget <= 0) {
     const cands = riders.filter(o => o !== r && o.onRocket);
     const p = riders[0];
-    if (p !== r && p.onRocket && Math.random() < 0.6) ai.target = p;
+    if (p !== r && p.onRocket && Math.random() < AI_PLAYER_BIAS) ai.target = p;
     else ai.target = cands.length ? cands[(Math.random() * cands.length) | 0] : null;
-    ai.retarget = rand(3, 7);
+    ai.retarget = rand(AI_RETARGET[0], AI_RETARGET[1]);
     ai.wx = rand(300, WORLD_W - 300); ai.wy = rand(300, WORLD_H - 300);
   }
   const t = ai.target && ai.target.onRocket ? ai.target : null;
   let tx = ai.wx, ty = ai.wy, dist = 1e9;
-  if (t) { tx = t.x + t.vx * 0.5; ty = t.y + t.vy * 0.5; dist = hyp(t.x - r.x, t.y - r.y); }
+  if (t) { tx = t.x + t.vx * 0.45; ty = t.y + t.vy * 0.45; dist = hyp(t.x - r.x, t.y - r.y); }
+
+  // ---- mode selection (with reaction delay so it's beatable) ----
+  const hooker = aiHooker(r);
+  const latchedKinds = r.cables.map(k => k && k.state === 'latched' ? k.target.kind : null);
+  const hasPost = latchedKinds.includes('post');
+  const hasLive = latchedKinds.includes('live');
+  const nLatch = latchedKinds.filter(Boolean).length;
+  let want = ai.mode;
+  if (hooker) want = 'escape';
+  else if (riderCanTie(r)) want = 'tieup';
+  else if (hasPost) want = 'swing';
+  else if (hasLive && aiFreeSide(r) >= 0) want = 'tieup';
+  else if (ai.mode === 'swing' && !hasPost) {
+    // keep seeking the post for a few seconds before giving up (don't drop swing on frame 1)
+    if (ai.modeT > 4.5 || !ai.seekPost) {
+      want = (t && dist < cableMax(r) * 1.15) ? 'lineup' : 'hunt';
+      ai.seekPost = null;
+      ai.react = rand(2.0, 3.5); // cool-down before seeking another post
+    } else want = 'swing';
+  } else if (ai.mode !== 'swing' && ai.mode !== 'tieup' && ai.react <= 0) {
+    const np = aiNearestPost(r, AI_POST_RANGE);
+    if (np && (!t || dist > 220) && Math.random() < AI_SEEK_POST) { want = 'swing'; ai.seekPost = np; }
+    else if (t && dist < cableMax(r) * 1.15) want = 'lineup';
+    else want = 'hunt';
+  }
+  if (want !== ai.mode && ai.react <= 0) {
+    ai.mode = want; ai.modeT = 0; ai.react = rand(AI_REACT[0], AI_REACT[1]);
+    if (ai.mode === 'lineup' && t) ai.zone = aiPickZone(r, t, dist);
+    if (ai.mode === 'swing' && !ai.seekPost) ai.seekPost = aiNearestPost(r, AI_POST_RANGE);
+  }
+
   let desired = Math.atan2(ty - r.y, tx - r.x);
-  // v0.7: now and then, when not busy with a close target, detour to a nearby pickup
+
+  // ---- power-up detour (same as v0.7/v0.8) ----
   ai.puCool -= dt;
   if (ai.puCool <= 0 && !ai.pu) {
     ai.puCool = rand(2, 4);
-    if ((!t || dist > 300) && Math.random() < AI_PU_CHANCE) {
+    if ((!t || dist > 300) && ai.mode === 'hunt' && Math.random() < AI_PU_CHANCE) {
       let bd = AI_PU_RANGE;
       for (const q of pickups) { const d = hyp(q.x - r.x, q.y - r.y); if (d < bd) { bd = d; ai.pu = q; ai.puT = 5; } }
     }
   }
-  if (ai.pu) { // stick with the detour until it's taken, a close fight starts, or 5 s pass
+  if (ai.pu) {
     ai.puT -= dt;
-    if (!pickups.includes(ai.pu) || (t && dist < 250) || ai.puT <= 0) { ai.pu = null; ai.puCool = rand(2, 4); }
+    if (!pickups.includes(ai.pu) || (t && dist < 250) || ai.puT <= 0 || ai.mode === 'escape') { ai.pu = null; ai.puCool = rand(2, 4); }
     else desired = Math.atan2(ai.pu.y - r.y, ai.pu.x - r.x);
   }
+
+  // ---- mode steering ----
+  if (ai.mode === 'escape' && hooker) {
+    // break free: boost away, turn off the tow line, fire a mid yank back when lined up
+    const away = Math.atan2(r.y - hooker.y, r.x - hooker.x);
+    desired = away + rand(-0.3, 0.3);
+    c.boost = r.fuel > 15;
+    const hd = hyp(hooker.x - r.x, hooker.y - r.y);
+    if (ai.cool <= 0 && hd < cableMax(r) * AI_HOOK_FRAC && hooker.onRocket && hooker.inv <= 0) {
+      const side = aiSideToward(r, hooker.x, hooker.y);
+      if (side >= 0 && (!r.cables[side] || r.cables[side].state === 'retract')) {
+        const ft = hd / CABLE_SPEED;
+        const [zx, zy] = zoneAimOffset(hooker, 'mid');
+        const ax = hooker.x + zx + (hooker.vx - r.vx) * ft, ay = hooker.y + zy + (hooker.vy - r.vy) * ft;
+        c.fire[side] = true; c.aim[side] = Math.atan2(ay - r.y, ax - r.x) + gauss() * AI_ERR;
+        ai.wantLatch[side] = false; ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]); ai.zone = 'mid';
+      }
+    }
+  } else if (ai.mode === 'swing') {
+    const pk = r.cables.find(k => k && k.state === 'latched' && k.target.kind === 'post');
+    const post = pk ? pk.target.p : ai.seekPost;
+    if (pk) {
+      // circle the post so the live cable sweeps toward enemies
+      const away = Math.atan2(r.y - post.y, r.x - post.x);
+      let sgn = 1;
+      if (t) sgn = Math.sign(angDiff(Math.atan2(t.y - post.y, t.x - post.x), away) || 1);
+      desired = away + sgn * 1.35;
+      c.boost = hyp(r.vx, r.vy) < BASE_SPEED * 0.85 && r.fuel > 25;
+      // second cable: try to leash a nearby rider or clothesline post-to-post
+      if (ai.cool <= 0 && aiFreeSide(r) >= 0) {
+        const side = aiFreeSide(r);
+        let aimX = null, aimY = null, latch = true, zone = null;
+        if (t && hyp(t.x - r.x, t.y - r.y) < cableMax(r) * AI_HOOK_FRAC && t.inv <= 0) {
+          zone = aiPickZone(r, t, hyp(t.x - r.x, t.y - r.y));
+          const [zx, zy] = zoneAimOffset(t, zone);
+          const ft = hyp(t.x - r.x, t.y - r.y) / CABLE_SPEED;
+          aimX = t.x + zx + (t.vx - r.vx) * ft; aimY = t.y + zy + (t.vy - r.vy) * ft;
+          latch = zone !== 'mid';
+        } else {
+          const other = posts.find(p => p !== post && hyp(p.x - r.x, p.y - r.y) < cableMax(r) * 0.9);
+          if (other) { aimX = other.x; aimY = other.y; latch = true; }
+        }
+        if (aimX != null) {
+          const sd = aiSideToward(r, aimX, aimY);
+          if (sd === side || (sd < 0 && side >= 0)) {
+            const use = side;
+            c.fire[use] = true; c.aim[use] = Math.atan2(aimY - r.y, aimX - r.x) + gauss() * AI_ERR;
+            ai.wantLatch[use] = latch; if (latch) { c.hold[use] = true; ai.postHold[use] = rand(AI_HOLD_POST[0], AI_HOLD_POST[1]); }
+            ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+          }
+        }
+      }
+    } else if (post) {
+      // approach the post, then fire a held cable at it
+      const dPost = hyp(post.x - r.x, post.y - r.y);
+      const tang = Math.atan2(post.y - r.y, post.x - r.x) + 0.9; // approach off-center so we can swing
+      desired = dPost > cableMax(r) * 0.75 ? Math.atan2(post.y - r.y, post.x - r.x) : tang;
+      if (ai.cool <= 0 && dPost < cableMax(r) * 0.85) {
+        const side = aiSideToward(r, post.x, post.y);
+        if (side >= 0 && (!r.cables[side] || r.cables[side].state === 'retract')) {
+          c.fire[side] = true; c.aim[side] = Math.atan2(post.y - r.y, post.x - r.x) + gauss() * AI_ERR * 0.5;
+          c.hold[side] = true; // must hold through flight or the post glance-retracts
+          ai.wantLatch[side] = true; ai.postHold[side] = rand(AI_HOLD_POST[0], AI_HOLD_POST[1]);
+          ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+        }
+      }
+    } else { ai.mode = 'hunt'; ai.seekPost = null; }
+  } else if (ai.mode === 'tieup') {
+    if (riderCanTie(r) && Math.random() < AI_TIE_CHANCE) { c.tie = true; ai.mode = 'hunt'; ai.react = rand(AI_REACT[0], AI_REACT[1]); }
+    else if (aiFreeSide(r) >= 0) {
+      // already have one latch: get a second useful one (post or live)
+      const side = aiFreeSide(r);
+      const existing = r.cables.find(k => k && k.state === 'latched');
+      let aimX = null, aimY = null, latch = true, zone = null;
+      if (t && hyp(t.x - r.x, t.y - r.y) < cableMax(r) * AI_HOOK_FRAC && t.inv <= 0
+          && !(existing && existing.target.kind === 'live' && existing.target.r === t)) {
+        zone = Math.random() < 0.35 ? 'mid' : (Math.random() < 0.5 ? 'nose' : 'tail');
+        const [zx, zy] = zoneAimOffset(t, zone);
+        const ft = hyp(t.x - r.x, t.y - r.y) / CABLE_SPEED;
+        aimX = t.x + zx + (t.vx - r.vx) * ft; aimY = t.y + zy + (t.vy - r.vy) * ft;
+        latch = zone !== 'mid';
+      } else {
+        const post = aiNearestPost(r, cableMax(r) * 0.95);
+        if (post && !(existing && existing.target.kind === 'post' && existing.target.p === post)) {
+          aimX = post.x; aimY = post.y; latch = true;
+        }
+      }
+      if (aimX != null && ai.cool <= 0) {
+        const sd = aiSideToward(r, aimX, aimY);
+        if (sd === side || sd < 0) {
+          c.fire[side] = true; c.aim[side] = Math.atan2(aimY - r.y, aimX - r.x) + gauss() * AI_ERR;
+          ai.wantLatch[side] = latch; if (latch) { c.hold[side] = true; ai.postHold[side] = rand(AI_HOLD_POST[0], AI_HOLD_POST[1]); }
+          ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+        }
+      }
+      if (existing && existing.target.kind === 'live') {
+        // stay roughly near the hooked rider so the second cable can reach
+        const o = existing.target.r;
+        desired = Math.atan2(o.y - r.y, o.x - r.x);
+      } else if (t) desired = Math.atan2(ty - r.y, tx - r.x);
+    } else if (nLatch >= 2 && riderCanTie(r)) c.tie = true;
+    else { ai.mode = 'hunt'; }
+  } else if (ai.mode === 'lineup' && t) {
+    // approach from an angle that favors the chosen zone
+    const zone = ai.zone || 'mid';
+    const along = zone === 'nose' ? 1 : zone === 'tail' ? -1 : (Math.random() < 0.5 ? 1 : -1);
+    const ox = t.x - Math.cos(t.ang) * along * 140;
+    const oy = t.y - Math.sin(t.ang) * along * 140;
+    // for mid, come in from the side
+    if (zone === 'mid') {
+      const sx = -Math.sin(t.ang) * (Math.random() < 0.5 ? 1 : -1);
+      const sy = Math.cos(t.ang) * (Math.random() < 0.5 ? 1 : -1);
+      desired = Math.atan2((t.y + sy * 90) - r.y, (t.x + sx * 90) - r.x);
+    } else desired = Math.atan2(oy - r.y, ox - r.x);
+    if (dist < 200) desired = Math.atan2(ty - r.y, tx - r.x); // final close: aim at them
+  }
+
   // wall avoidance
   const lx = r.x + r.vx * 0.9, ly = r.y + r.vy * 0.9, m = 170;
   if (lx < m || lx > WORLD_W - m || ly < m || ly > WORLD_H - m) desired = Math.atan2(WORLD_H / 2 - r.y, WORLD_W / 2 - r.x);
-  // post avoidance
+  // post avoidance (don't slam into the post we're swinging on)
   for (const p of posts) {
+    if (hasPost && r.cables.some(k => k && k.state === 'latched' && k.target.kind === 'post' && k.target.p === p)) continue;
     const dx = p.x - r.x, dy = p.y - r.y, d = hyp(dx, dy);
     if (d < 110 + p.r) { const rel = angDiff(Math.atan2(dy, dx), r.ang); if (Math.abs(rel) < 0.6) { desired = r.ang - Math.sign(rel || 1) * 1.2; break; } }
   }
-  // fence avoidance: hop over a low fence (altitude on only), otherwise turn away
+  // fence avoidance
   const fx = r.x + r.vx * 0.7, fy = r.y + r.vy * 0.7;
   for (const f of fences) {
     if (!fenceBlocks(f, lvl(r)) || !segsCross(r.x, r.y, fx, fy, f.x1, f.y1, f.x2, f.y2)) continue;
@@ -725,35 +934,81 @@ function aiControl(r, dt) {
     else { const mx = (f.x1 + f.x2) / 2 - r.x, my = (f.y1 + f.y2) / 2 - r.y; desired = r.ang - Math.sign(angDiff(Math.atan2(my, mx), r.ang) || 1) * 1.3; }
     break;
   }
-  // altitude: match the target's level when chasing, with occasional random changes
   if (ALTITUDE_ENABLED && ai.altCool <= 0 && !c.alt) {
-    let want = t ? lvl(t) : r.alt;
-    if (Math.random() < 0.15) want = (Math.random() * 3) | 0;
-    if (want !== r.alt) c.alt = Math.sign(want - r.alt);
+    let wantA = t ? lvl(t) : r.alt;
+    if (Math.random() < 0.15) wantA = (Math.random() * 3) | 0;
+    if (wantA !== r.alt) c.alt = Math.sign(wantA - r.alt);
     ai.altCool = rand(0.8, 1.6);
   }
   c.turn = clamp(angDiff(desired, r.ang) * 2.5, -1, 1);
-  if (ai.boosting) { if (r.fuel < 10 || dist < 250) ai.boosting = false; }
-  else if (dist > 450 && dist < 1e8 && r.fuel > 40) ai.boosting = true;
-  c.boost = ai.boosting;
-  // fire at target
-  if (t && ai.cool <= 0 && dist < cableMax(r) * 0.85 && t.inv <= 0) {
-    const a = Math.atan2(t.y - r.y, t.x - r.x), rel = angDiff(a, r.ang);
-    let side = -1;
-    if (rel < -0.25 && rel > -1.9) side = 0; else if (rel > 0.25 && rel < 1.9) side = 1;
-    if (side >= 0 && !r.cables[side]) {
-      const ft = dist / CABLE_SPEED;
-      const [zx, zy] = zoneAimOffset(t);
-      const ax = t.x + zx + (t.vx - r.vx) * ft, ay = t.y + zy + (t.vy - r.vy) * ft;
-      c.fire[side] = true; c.aim[side] = Math.atan2(ay - r.y, ax - r.x) + gauss() * AI_ERR;
-      ai.cool = rand(3, 5.5);
+  if (ai.mode !== 'escape') {
+    if (ai.boosting) { if (r.fuel < 10 || dist < 250) ai.boosting = false; }
+    else if (dist > 450 && dist < 1e8 && r.fuel > 40) ai.boosting = true;
+    c.boost = c.boost || ai.boosting;
+  }
+
+  // ---- opportunistic post snag while hunting (sets up swing / clothesline) ----
+  if ((ai.mode === 'hunt' || ai.mode === 'lineup') && ai.cool <= 0 && (!t || dist > 320) && Math.random() < 0.1) {
+    const np = aiNearestPost(r, cableMax(r) * 0.8);
+    const side = np ? aiFreeSide(r) : -1;
+    if (np && side >= 0) {
+      const sd = aiSideToward(r, np.x, np.y);
+      if (sd === side || sd < 0) {
+        c.fire[side] = true; c.aim[side] = Math.atan2(np.y - r.y, np.x - r.x) + gauss() * AI_ERR * 0.4;
+        c.hold[side] = true; ai.wantLatch[side] = true;
+        ai.postHold[side] = rand(AI_HOLD_POST[0], AI_HOLD_POST[1]);
+        ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+        ai.mode = 'swing'; ai.seekPost = np; ai.modeT = 0;
+      }
     }
   }
+  // ---- hunt / lineup: fire intentional zone shots ----
+  if ((ai.mode === 'hunt' || ai.mode === 'lineup') && t && ai.cool <= 0 && dist < cableMax(r) * AI_HOOK_FRAC && t.inv <= 0) {
+    const side = aiSideToward(r, t.x, t.y);
+    if (side >= 0 && (!r.cables[side] || r.cables[side].state === 'retract')) {
+      const zone = ai.mode === 'lineup' ? (ai.zone || aiPickZone(r, t, dist)) : aiPickZone(r, t, dist);
+      ai.zone = zone;
+      const ft = dist / CABLE_SPEED;
+      const [zx, zy] = zoneAimOffset(t, zone);
+      const ax = t.x + zx + (t.vx - r.vx) * ft, ay = t.y + zy + (t.vy - r.vy) * ft;
+      c.fire[side] = true; c.aim[side] = Math.atan2(ay - r.y, ax - r.x) + gauss() * AI_ERR;
+      // hold for nose/tail so we latch (AI also gets aiCtl free latch; hold still needed for posts later)
+      ai.wantLatch[side] = zone !== 'mid';
+      ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+    }
+  }
+
+  // ---- hold management: keep posts / drag targets latched through the same hold path as the player ----
+  for (let s = 0; s < 2; s++) {
+    const k = r.cables[s];
+    // IMPORTANT: on the fire frame the cable doesn't exist yet (created in updateRider after we return).
+    // Do NOT clear wantLatch here or the post glance-retracts on the next frames.
+    if (!k) { if (c.fire[s] && ai.wantLatch[s]) c.hold[s] = true; continue; }
+    if (k.state === 'fly' && ai.wantLatch[s]) c.hold[s] = true;
+    if (k.state === 'latched') {
+      if (k.target.kind === 'post') {
+        // hold while the timer runs (set when we fired at the post); then release so we don't spin forever
+        if (ai.postHold[s] <= 0 && ai.mode === 'tieup') ai.postHold[s] = 1.2; // brief hold to finish a tie
+        c.hold[s] = ai.postHold[s] > 0;
+      } else if (k.target.kind === 'live') {
+        c.hold[s] = true; // updateCable uses aiHold for AI release timing; keep hold asserted
+        if (ai.mode === 'tieup') k.aiHold = Math.max(k.aiHold || 0, 2.5); // hang on longer to set up a bind
+      } else if (k.target.kind === 'foot' || k.target.kind === 'rocket') c.hold[s] = true;
+    }
+    if (k.state === 'retract') ai.wantLatch[s] = false;
+  }
+
+  // opportunistic tie if somehow both latched
+  if (!c.tie && riderCanTie(r) && Math.random() < AI_TIE_CHANCE) c.tie = true;
+
   return c;
 }
 
 // ---------- cables ----------
 let forceZone = null; // test hook: 'nose' | 'mid' | 'tail' forces the zone of the next rider hits
+let aiAll = false; // test hook: when true, the player is also AI-controlled
+const aiStats = { nose: 0, mid: 0, tail: 0, posts: 0, ties: 0, binds: 0, yanks: 0 }; // v0.9 headless counters
+function resetAiStats() { aiStats.nose = aiStats.mid = aiStats.tail = aiStats.posts = aiStats.ties = aiStats.binds = aiStats.yanks = 0; }
 function hitZone(o, x, y) { // where a cable tip at (x, y) hits rider o's rocket: 'nose' | 'mid' | 'tail' | null
   const hx = Math.cos(o.ang), hy = Math.sin(o.ang), dx = x - o.x, dy = y - o.y;
   const along = dx * hx + dy * hy, perp = -dx * hy + dy * hx;
@@ -762,7 +1017,14 @@ function hitZone(o, x, y) { // where a cable tip at (x, y) hits rider o's rocket
   const u = (along + HIT_HALF_LEN) / (2 * HIT_HALF_LEN); // 0 = tail end, 1 = nose end
   return u > 1 - ZONE_NOSE ? 'nose' : u < ZONE_TAIL ? 'tail' : 'mid';
 }
-function zoneAimOffset(o) { const u = rand(-1, 1) * HIT_HALF_LEN * 0.95; return [Math.cos(o.ang) * u, Math.sin(o.ang) * u]; } // aim anywhere along the rocket (no middle bias)
+function zoneAimOffset(o, zone) { // optional zone: 'nose'|'mid'|'tail' (AI); omit for random (player auto-aim)
+  let u;
+  if (zone === 'nose') u = HIT_HALF_LEN * rand(0.5, 0.92);
+  else if (zone === 'tail') u = -HIT_HALF_LEN * rand(0.5, 0.92);
+  else if (zone === 'mid') u = HIT_HALF_LEN * rand(-0.28, 0.28);
+  else u = rand(-1, 1) * HIT_HALF_LEN * 0.95; // no middle bias for the player
+  return [Math.cos(o.ang) * u, Math.sin(o.ang) * u];
+}
 function autoAim(r, s) {
   const base = r.ang + (s ? 1 : -1) * CABLE_ANGLE;
   let best = null, bestScore = 1e9;
@@ -805,6 +1067,7 @@ function latchCable(r, k, target) {
     k.L = clamp(hyp(r.x - o.x, r.y - o.y), 60, LIVE_ROPE_MAX); k.age = 0; k.aiHold = rand(1.5, 3.5);
     noteHit(o, r); o.entangled = ENTANGLE_GRACE;
     award(r, PTS_HOOK, 'HOOK', o.x, o.y);
+    if (!r.isPlayer || aiAll) { if (target.zone === 'nose') aiStats.nose++; else if (target.zone === 'tail') aiStats.tail++; }
     if (state === 'play') {
       const zn = target.zone === 'nose' ? 'NOSE' : 'TAIL';
       if (r.isPlayer) msg('HOOKED ' + o.name + "'S " + zn + '!', '#fc0');
@@ -813,6 +1076,7 @@ function latchCable(r, k, target) {
   }
   if (target.kind === 'post') { // swing tracking (caps) + live-cable clothesline bookkeeping
     k.swept = 0; k.age = 0; k.lastA = Math.atan2(r.y - o.y, r.x - o.x); k.immune = new Map(); k.sides = new Map();
+    if (!r.isPlayer || aiAll) aiStats.posts++;
   }
   if (r.isPlayer) {
     sfx.latch();
@@ -927,11 +1191,12 @@ function releaseCablesOn(pred) { // retract any latched cable whose target match
 }
 
 // ---------- tie-offs / tethers ----------
-function canTie() {
-  if (!player || !player.onRocket || state !== 'play') return false;
-  const [a, b] = player.cables;
+function riderCanTie(r) {
+  if (!r || !r.onRocket) return false;
+  const [a, b] = r.cables;
   return !!(a && b && a.state === 'latched' && b.state === 'latched' && !sameAnchor(a.target, b.target));
 }
+function canTie() { return !!(player && state === 'play' && riderCanTie(player)); }
 function tetherKind(a, b) {
   const ks = [a.kind, b.kind].sort().join('-');
   return { 'post-post': 'clothes', 'foot-post': 'tied', 'foot-rocket': 'tangled', 'post-rocket': 'anchored', 'rocket-rocket': 'lashed', 'foot-foot': 'bound',
@@ -968,9 +1233,10 @@ function doTie(r) {
   else msg('TIED ' + t.a.r.name + ' TO ' + t.b.r.name + '!', '#f93');
   // v0.8 trick points
   const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
-  if (t.kind === 'binding' || t.kind === 'bound') { award(r, PTS_BIND, 'BIND', mx, my); r.tricks++; }
-  else if (t.kind === 'tied' || t.kind === 'tangled') { award(r, PTS_TIE, 'TIE-UP', mx, my); r.tricks++; }
-  else if (t.kind === 'anchored' || t.kind === 'leash' || t.kind === 'lashed') { award(r, PTS_TIE, 'ANCHOR', mx, my); r.tricks++; }
+  if (t.kind === 'binding' || t.kind === 'bound') { award(r, PTS_BIND, 'BIND', mx, my); r.tricks++; if (!r.isPlayer || aiAll) { aiStats.ties++; aiStats.binds++; } }
+  else if (t.kind === 'tied' || t.kind === 'tangled') { award(r, PTS_TIE, 'TIE-UP', mx, my); r.tricks++; if (!r.isPlayer || aiAll) aiStats.ties++; }
+  else if (t.kind === 'anchored' || t.kind === 'leash' || t.kind === 'lashed') { award(r, PTS_TIE, 'ANCHOR', mx, my); r.tricks++; if (!r.isPlayer || aiAll) aiStats.ties++; }
+  else if ((!r.isPlayer || aiAll) && t.kind === 'clothes') { aiStats.ties++; }
   for (const e of [t.a, t.b]) if (e.kind !== 'post') noteHit(e.r, r);
 }
 function snapTether(t, loud) {
@@ -1078,6 +1344,7 @@ function knockOff(o, by, how) {
     if (credit) {
       credit.kos++;
       const clo = how === 'clothes';
+      if ((!credit.isPlayer || aiAll) && how === 'yank') { aiStats.yanks++; aiStats.mid++; }
       award(credit, clo ? PTS_CLOTHES : PTS_KO, clo ? 'CLOTHESLINE' : 'KNOCKOFF', o.x, o.y);
       credit.chain = gameT - credit.lastKO <= COMBO_WINDOW ? credit.chain + 1 : 1; credit.lastKO = gameT;
       if (credit.chain > 1) award(credit, PTS_COMBO * (credit.chain - 1), 'COMBO', o.x, o.y - 18);
@@ -1203,7 +1470,7 @@ function updateRider(r, c, dt) {
   r.px = r.x; r.py = r.y;
   if (!r.onRocket) { updateFoot(r, c, dt); return; }
   r.inv = Math.max(0, r.inv - dt); r.stun = Math.max(0, r.stun - dt); r.cableCool = Math.max(0, r.cableCool - dt);
-  if (r.isPlayer && c.tie && canTie()) doTie(r);
+  if (c.tie && riderCanTie(r)) doTie(r);
   if (c.alt) changeAlt(r, c.alt);
   r.altV += clamp(r.alt - r.altV, -dt / ALT_TIME, dt / ALT_TIME);
   const L = lvl(r);
@@ -1325,8 +1592,8 @@ function update(dt) {
   const human = state === 'play';
   for (const r of riders) {
     let c;
-    if (r.onRocket) c = (r.isPlayer && human) ? playerControl(r) : aiControl(r, dt);
-    else c = (r.isPlayer && human) ? playerFoot() : aiFoot(r);
+    if (r.onRocket) c = (r.isPlayer && human && !aiAll) ? playerControl(r) : aiControl(r, dt);
+    else c = (r.isPlayer && human && !aiAll) ? playerFoot() : aiFoot(r);
     updateRider(r, c, dt);
   }
   updateTethers(dt);
@@ -1775,7 +2042,7 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.8  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.9  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   txt('Grapple posts to whip around corners.', VW / 2, VH * 0.52, 14 * sc, '#ccc', 'center');
   txt('Hit the RIDER to yank them off; hook a NOSE or TAIL to tow!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE them: clotheslines, tie-ups!', VW / 2, VH * 0.52 + 36 * sc, 14 * sc, '#f93', 'center');
@@ -1826,10 +2093,12 @@ requestAnimationFrame(frame);
 
 // debug/test hook
 window.RJ = { get state() { return state; }, get riders() { return riders; }, get player() { return player; },
-  get timeLeft() { return timeLeft; }, set timeLeft(v) { timeLeft = v; }, posts, tethers, knockOff, addTether, canTie, btns,
+  get timeLeft() { return timeLeft; }, set timeLeft(v) { timeLeft = v; }, posts, tethers, knockOff, addTether, canTie, riderCanTie, btns,
   get msgs() { return msgs.map(m => m.text); }, clearMsgs() { msgs.length = 0; }, fences, lvl, canReach, altOn: ALTITUDE_ENABLED, cam, pops, hitZone, get forceZone() { return forceZone; }, set forceZone(v) { forceZone = v; },
-  get gameT() { return gameT; }, get results() { return results; }, endRound, doTie,
-  pickups, puRespawn, spawnPickup, cableMax, PU: { POWERUP_MAX, POWERUP_RESPAWN, POWERUP_CLEAR, LONG_CABLE_MULT, LONG_CABLE_TIME, GRIP_TIME, TURBO_MULT, TURBO_TIME, CABLE_MAX, BASE_SPEED } };
+  get gameT() { return gameT; }, get results() { return results; }, endRound, doTie, startGame,
+  pickups, puRespawn, spawnPickup, cableMax, aiStats, resetAiStats, zoneAimOffset, aiPickZone, aiHooker, get aiAll() { return aiAll; }, set aiAll(v) { aiAll = !!v; },
+  PU: { POWERUP_MAX, POWERUP_RESPAWN, POWERUP_CLEAR, LONG_CABLE_MULT, LONG_CABLE_TIME, GRIP_TIME, TURBO_MULT, TURBO_TIME, CABLE_MAX, BASE_SPEED },
+  AI: { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_PLAYER_BIAS, AI_SEEK_POST, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE } };
 })();
 </script>
 </body>
