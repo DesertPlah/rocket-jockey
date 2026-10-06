@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.9.1</title>
+<title>Rocket Jockey v0.9.2</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -59,32 +59,64 @@ const LONG_CABLE_MULT = 1.35, LONG_CABLE_TIME = 10; // C: +35% cable range for 1
 const GRIP_TIME = 15;             // G: one-hit shield (absorbs one yank or clothesline), up to 15 s
 const TURBO_MULT = 1.15, TURBO_TIME = 6;            // T: +15% cruise speed for 6 s
 // F: instantly refills the boost meter
-// ---------- v0.9 AI tuning (one block for later difficulty scaling) ----------
-const AI_PU_CHANCE = 0.35, AI_PU_RANGE = 450;       // AI: sometimes detours to a nearby pickup when not busy
-const AI_ERR = 0.26;                 // aim noise (radians) (v0.9: 0.18)
-const AI_REACT = [0.12, 0.4];        // reaction delay before committing to a new mode
-const AI_RETARGET = [2.2, 5.0];      // seconds between target picks
-const AI_FIRE_COOL = [4.4, 7.0];     // s cooldown after firing a cable (v0.9: 1.5-3; they now engage far more, see AI_FOLLOWUP)
-const AI_HOLD_POST = [2.5, 5.5];     // how long to keep swinging on a post
-const AI_TIE_CHANCE = 0.72;          // P(tie) when both cables latched to different anchors
-const AI_POST_RANGE = 440;           // seek posts within this for swing / clothesline / leash
-const AI_HOOK_FRAC = 0.92;           // fire when target within this fraction of cableMax
-const AI_ZONE_YANK = 0.42;           // base preference for middle yanks (rest = nose/tail latch)
-// v0.9.1: decisions happen on a "think" tick (not every frame), targets are scored, swings only near enemies
-const AI_THINK = [0.45, 0.9];        // s between big decisions (target pick, go swing, snag a post)
-const AI_SWING_ENEMY = 380;          // only go swing on a post if an enemy rider is within this of the post
-const AI_SWING_IDLE = 1.4;           // s with no enemy near the swing circle -> let go of the post
-const AI_PLAYER_PULL = 150;          // px: the player counts as this much closer when picking a target
-const AI_CROWD = 400;                // px penalty per other AI already chasing the same target (spread out)
-const AI_REVENGE = 450;              // px bonus to chase whoever hit / hooked you in the last few s
-const AI_FOLLOWUP = [0.25, 0.7];    // s: cable cooldown right after a live hook lands (time to tie it off)
-const AI_STICKY = 250;               // px: only switch target if the new one is this much better
-// per-rider personalities (multipliers / overrides on the knobs above). GOLD = the v0.9 baseline.
-const AI_PERSONA = {
-  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3 }, // hooks a lot, goes for yanks
-  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6 }, // latches noses/tails, ties up, swings
-  GOLD:  { tag: 'RIVAL',     yank: AI_ZONE_YANK, cool: 1.0, tie: AI_TIE_CHANCE, seek: 0.20, pull: 1.0, bind: 0.45 },   // seek = P(go swing) per think tick when an enemy is near a post
+// ---------- v0.9.2 difficulty + AI tuning (scale knobs; personalities stay) ----------
+const DIFF_KEY = 'rj_difficulty';
+const DIFF_NAMES = ['Easy', 'Normal', 'Hard'];
+const DIFF_PRESETS = {
+  // Easy ≈ v0.9.1 feel (Paul's aggressive playtests crushed this)
+  Easy: {
+    AI_ERR: 0.26, AI_REACT: [0.12, 0.4], AI_RETARGET: [2.2, 5.0], AI_FIRE_COOL: [4.4, 7.0],
+    AI_HOLD_POST: [2.5, 5.5], AI_TIE_CHANCE: 0.72, AI_POST_RANGE: 440, AI_HOOK_FRAC: 0.92,
+    AI_ZONE_YANK: 0.42, AI_PU_CHANCE: 0.35, AI_PU_RANGE: 450, AI_THINK: [0.45, 0.9],
+    AI_SWING_ENEMY: 380, AI_SWING_IDLE: 1.4, AI_PLAYER_PULL: 150, AI_CROWD: 400,
+    AI_REVENGE: 450, AI_FOLLOWUP: [0.25, 0.7], AI_STICKY: 250
+  },
+  // Normal: competitive — less aim noise, faster reactions, stickier focus, more fire/tie
+  Normal: {
+    AI_ERR: 0.16, AI_REACT: [0.08, 0.25], AI_RETARGET: [2.6, 5.2], AI_FIRE_COOL: [3.2, 5.2],
+    AI_HOLD_POST: [2.3, 5.0], AI_TIE_CHANCE: 0.82, AI_POST_RANGE: 460, AI_HOOK_FRAC: 0.96,
+    AI_ZONE_YANK: 0.45, AI_PU_CHANCE: 0.40, AI_PU_RANGE: 480, AI_THINK: [0.32, 0.65],
+    AI_SWING_ENEMY: 400, AI_SWING_IDLE: 1.2, AI_PLAYER_PULL: 210, AI_CROWD: 380,
+    AI_REVENGE: 500, AI_FOLLOWUP: [0.18, 0.5], AI_STICKY: 340
+  },
+  // Hard: often threatens a win — tight aim, snappy decisions, aggressive hook/tie/fire
+  Hard: {
+    AI_ERR: 0.08, AI_REACT: [0.04, 0.14], AI_RETARGET: [3.0, 5.8], AI_FIRE_COOL: [2.2, 3.8],
+    AI_HOLD_POST: [2.0, 4.5], AI_TIE_CHANCE: 0.90, AI_POST_RANGE: 500, AI_HOOK_FRAC: 0.99,
+    AI_ZONE_YANK: 0.48, AI_PU_CHANCE: 0.45, AI_PU_RANGE: 520, AI_THINK: [0.22, 0.48],
+    AI_SWING_ENEMY: 420, AI_SWING_IDLE: 1.0, AI_PLAYER_PULL: 280, AI_CROWD: 350,
+    AI_REVENGE: 550, AI_FOLLOWUP: [0.12, 0.35], AI_STICKY: 420
+  }
 };
+let difficulty = 'Easy';
+let AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE;
+let AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE;
+let AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_FOLLOWUP, AI_STICKY;
+// per-rider personalities (multipliers / overrides). GOLD tracks current difficulty knobs.
+const AI_PERSONA = {
+  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3 },
+  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6 },
+  GOLD:  { tag: 'RIVAL',     yank: 0.42, cool: 1.0, tie: 0.72, seek: 0.20, pull: 1.0, bind: 0.45 },
+};
+function applyDifficulty(name) {
+  if (!DIFF_PRESETS[name]) name = 'Easy';
+  difficulty = name;
+  const P = DIFF_PRESETS[name];
+  AI_ERR = P.AI_ERR; AI_REACT = P.AI_REACT; AI_RETARGET = P.AI_RETARGET; AI_FIRE_COOL = P.AI_FIRE_COOL;
+  AI_HOLD_POST = P.AI_HOLD_POST; AI_TIE_CHANCE = P.AI_TIE_CHANCE; AI_POST_RANGE = P.AI_POST_RANGE;
+  AI_HOOK_FRAC = P.AI_HOOK_FRAC; AI_ZONE_YANK = P.AI_ZONE_YANK; AI_PU_CHANCE = P.AI_PU_CHANCE;
+  AI_PU_RANGE = P.AI_PU_RANGE; AI_THINK = P.AI_THINK; AI_SWING_ENEMY = P.AI_SWING_ENEMY;
+  AI_SWING_IDLE = P.AI_SWING_IDLE; AI_PLAYER_PULL = P.AI_PLAYER_PULL; AI_CROWD = P.AI_CROWD;
+  AI_REVENGE = P.AI_REVENGE; AI_FOLLOWUP = P.AI_FOLLOWUP; AI_STICKY = P.AI_STICKY;
+  AI_PERSONA.GOLD.yank = AI_ZONE_YANK; AI_PERSONA.GOLD.tie = AI_TIE_CHANCE;
+  try { localStorage.setItem(DIFF_KEY, name); } catch (e) {}
+}
+function loadDifficulty() {
+  let n = 'Easy';
+  try { n = localStorage.getItem(DIFF_KEY) || 'Easy'; } catch (e) {}
+  applyDifficulty(DIFF_PRESETS[n] ? n : 'Easy');
+}
+loadDifficulty();
 const PU_TYPES = { F: { name: 'FUEL', color: '#ffaa33' }, C: { name: 'LONG CABLE', color: '#33ccff' }, G: { name: 'GRIP', color: '#66ff66' }, T: { name: 'TURBO', color: '#ff55ff' } };
 // v0.8 hit zones on occupied rockets: NOSE (front 30%) / MIDDLE = rider (40%) / TAIL (rear 30%)
 const ZONE_NOSE = 0.3, ZONE_TAIL = 0.3;   // fractions of the rocket length; the middle 40% yanks
@@ -571,15 +603,57 @@ function goFullscreen() {
     }
   } catch (e) {}
 }
+function diffBtnLayout(forState) {
+  const sc = clamp(VH / 390, 0.8, 1.6);
+  const bw = 108 * sc, bh = 38 * sc, gap = 12 * sc;
+  const total = DIFF_NAMES.length * bw + (DIFF_NAMES.length - 1) * gap;
+  const x0 = VW / 2 - total / 2;
+  const y = forState === 'over' ? VH * 0.78 : VH * 0.72;
+  return DIFF_NAMES.map((name, i) => ({ name, x: x0 + i * (bw + gap), y, w: bw, h: bh }));
+}
+function hitDiffBtn(x, y, forState) {
+  for (const b of diffBtnLayout(forState || state)) {
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.name;
+  }
+  return null;
+}
+function drawDiffPicker(forState, now) {
+  const sc = clamp(VH / 390, 0.8, 1.6);
+  const btns = diffBtnLayout(forState);
+  txt('DIFFICULTY', VW / 2, btns[0].y - 16 * sc, 12 * sc, '#8ab', 'center', false);
+  for (const b of btns) {
+    const on = b.name === difficulty;
+    const col = b.name === 'Easy' ? '80,200,120' : b.name === 'Normal' ? '255,200,60' : '255,90,90';
+    ctx.fillStyle = on ? 'rgba(' + col + ',0.35)' : 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = on ? 'rgba(' + col + ',0.95)' : 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = on ? 2.5 : 1.5;
+    const r = 8 * sc;
+    ctx.beginPath();
+    ctx.moveTo(b.x + r, b.y); ctx.lineTo(b.x + b.w - r, b.y); ctx.quadraticCurveTo(b.x + b.w, b.y, b.x + b.w, b.y + r);
+    ctx.lineTo(b.x + b.w, b.y + b.h - r); ctx.quadraticCurveTo(b.x + b.w, b.y + b.h, b.x + b.w - r, b.y + b.h);
+    ctx.lineTo(b.x + r, b.y + b.h); ctx.quadraticCurveTo(b.x, b.y + b.h, b.x, b.y + b.h - r);
+    ctx.lineTo(b.x, b.y + r); ctx.quadraticCurveTo(b.x, b.y, b.x + r, b.y); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    txt(b.name.toUpperCase(), b.x + b.w / 2, b.y + b.h / 2, 15 * sc, on ? '#fff' : '#abc', 'center', false);
+  }
+}
 function handleTap() {
   ensureAudio();
   if (state === 'title') { goFullscreen(); startGame(); }
   else if (state === 'over' && overT > 1.2) { startGame(); }
 }
+function handlePointer(x, y) {
+  ensureAudio();
+  if (state === 'title' || (state === 'over' && overT > 1.2)) {
+    const hit = hitDiffBtn(x, y, state);
+    if (hit) { applyDifficulty(hit); return; }
+  }
+  handleTap();
+}
 
 function onTouchStart(e) {
   e.preventDefault(); isTouch = true;
-  if (state !== 'play') { handleTap(); return; }
+  if (state !== 'play') { const t = e.changedTouches[0]; handlePointer(t.clientX, t.clientY); return; }
   ensureAudio();
   for (const t of e.changedTouches) {
     const x = t.clientX, y = t.clientY;
@@ -624,7 +698,7 @@ cv.addEventListener('touchcancel', onTouchEnd, { passive: false });
 document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
-cv.addEventListener('mousedown', e => { if (!isTouch || state !== 'play') handleTap(); });
+cv.addEventListener('mousedown', e => { if (!isTouch || state !== 'play') handlePointer(e.clientX, e.clientY); });
 
 window.addEventListener('keydown', e => {
   const c = e.code;
@@ -635,6 +709,9 @@ window.addEventListener('keydown', e => {
     if (c === 'KeyT') tieQ = true;
     if (ALTITUDE_ENABLED && (c === 'KeyR' || c === 'PageUp')) { altQ += 1; e.preventDefault(); }
     if (ALTITUDE_ENABLED && (c === 'KeyF' || c === 'PageDown')) { altQ -= 1; e.preventDefault(); }
+    if (c === 'Digit1' || c === 'Numpad1') applyDifficulty('Easy');
+    if (c === 'Digit2' || c === 'Numpad2') applyDifficulty('Normal');
+    if (c === 'Digit3' || c === 'Numpad3') applyDifficulty('Hard');
     if (c === 'Space' || c === 'Enter') handleTap();
   }
   keys[c] = true;
@@ -1984,6 +2061,7 @@ function drawHUD(now) {
   // timer
   const t = Math.ceil(timeLeft), mm = Math.floor(t / 60), ss = t % 60;
   txt(mm + ':' + (ss < 10 ? '0' : '') + ss, VW / 2, 20 * sc, 26 * sc, t <= 30 ? '#f44' : '#fff', 'center');
+  txt(difficulty.toUpperCase(), VW / 2, 40 * sc, 11 * sc, difficulty === 'Hard' ? '#f88' : difficulty === 'Normal' ? '#fc8' : '#8c8', 'center', false);
   // messages
   let my = 50 * sc;
   for (const m of msgs) { ctx.globalAlpha = clamp(m.t, 0, 1); txt(m.text, VW / 2, my, 16 * sc, m.color, 'center'); my += 20 * sc; }
@@ -2094,15 +2172,15 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.9.1  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
-  txt('Grapple posts to whip around corners.', VW / 2, VH * 0.52, 14 * sc, '#ccc', 'center');
-  txt('Hit the RIDER to yank them off; hook a NOSE or TAIL to tow!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
-  txt('Hook two things, then TIE them: clotheslines, tie-ups!', VW / 2, VH * 0.52 + 36 * sc, 14 * sc, '#f93', 'center');
-  txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.52 + 58 * sc, 12 * sc, '#8ab', 'center');
-  txt('SCORING: KO +' + PTS_KO + '  CLOTHESLINE +' + PTS_CLOTHES + '  BIND +' + PTS_BIND + '  TIE/ANCHOR +' + PTS_TIE + '  HOOK +' + PTS_HOOK + '  COMBO +' + PTS_COMBO + '  DRAG +1/' + DRAG_EVERY + 's  PICKUP +' + PTS_PICKUP + '  FALL -' + PTS_FALL,
-    VW / 2, VH * 0.52 + 75 * sc, 9.5 * sc, '#9c9', 'center', false);
-  if (ALTITUDE_ENABLED) txt(isTouch ? 'UP / DN: altitude (cables reach 1 level; LOW fences only stop LOW)' : 'R / F: altitude (cables reach 1 level; LOW fences only stop LOW)', VW / 2, VH * 0.52 + 75 * sc, 12 * sc, '#b9a0ff', 'center');
-  if (Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO START' : 'CLICK OR PRESS SPACE TO START', VW / 2, VH * 0.9, 22 * sc, '#fff', 'center');
+  txt('v0.9.2  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('Grapple posts to whip around corners.  Hit RIDER to yank; NOSE/TAIL to tow!', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
+  txt('Hook two things, then TIE: clotheslines & tie-ups!', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#f93', 'center');
+  txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.48 + 34 * sc, 11 * sc, '#8ab', 'center');
+  txt('SCORING: KO +' + PTS_KO + '  CLOTHES +' + PTS_CLOTHES + '  BIND +' + PTS_BIND + '  TIE +' + PTS_TIE + '  HOOK +' + PTS_HOOK + '  COMBO +' + PTS_COMBO + '  FALL -' + PTS_FALL,
+    VW / 2, VH * 0.48 + 50 * sc, 9 * sc, '#9c9', 'center', false);
+  if (ALTITUDE_ENABLED) txt(isTouch ? 'UP / DN: altitude (cables reach 1 level; LOW fences only stop LOW)' : 'R / F: altitude (cables reach 1 level; LOW fences only stop LOW)', VW / 2, VH * 0.48 + 64 * sc, 11 * sc, '#b9a0ff', 'center');
+  drawDiffPicker('title', now);
+  if (Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO START' : 'CLICK OR PRESS SPACE TO START', VW / 2, VH * 0.9, 18 * sc, '#fff', 'center');
 }
 function drawResults(now) {
   ctx.fillStyle = 'rgba(0,0,10,0.75)'; ctx.fillRect(0, 0, VW, VH);
@@ -2121,7 +2199,8 @@ function drawResults(now) {
     cols.forEach((c, j) => txt(vals[j], cx + c[1] * sc, y, (j === 2 ? 18 : 16) * sc, r.color, c[2]));
     y += rowH;
   });
-  if (overT > 1.2 && Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO RESTART' : 'CLICK OR SPACE TO RESTART', VW / 2, VH * 0.9, 20 * sc, '#fff', 'center');
+  drawDiffPicker('over', now);
+  if (overT > 1.2 && Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO RESTART' : 'CLICK OR SPACE TO RESTART', VW / 2, VH * 0.92, 18 * sc, '#fff', 'center');
 }
 
 // ---------- main loop ----------
@@ -2151,7 +2230,8 @@ window.RJ = { get state() { return state; }, get riders() { return riders; }, ge
   sim(secs, each) { const n = Math.round(secs / STEP); for (let i = 0; i < n && state === 'play'; i++) { update(STEP); if (each) each(STEP); } return state; }, // test hook: fast headless sim
   pickups, puRespawn, spawnPickup, cableMax, aiStats, resetAiStats, zoneAimOffset, aiPickZone, aiHooker, get aiAll() { return aiAll; }, set aiAll(v) { aiAll = !!v; },
   PU: { POWERUP_MAX, POWERUP_RESPAWN, POWERUP_CLEAR, LONG_CABLE_MULT, LONG_CABLE_TIME, GRIP_TIME, TURBO_MULT, TURBO_TIME, CABLE_MAX, BASE_SPEED },
-  AI: { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE, AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_STICKY, AI_FOLLOWUP, AI_PERSONA } };
+  get difficulty() { return difficulty; }, set difficulty(v) { applyDifficulty(v); }, applyDifficulty, DIFF_PRESETS, DIFF_NAMES,
+  get AI() { return { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE, AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_STICKY, AI_FOLLOWUP, AI_PERSONA }; } };
 })();
 </script>
 </body>
