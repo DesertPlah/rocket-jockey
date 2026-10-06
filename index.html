@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.9</title>
+<title>Rocket Jockey v0.9.1</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -61,17 +61,30 @@ const TURBO_MULT = 1.15, TURBO_TIME = 6;            // T: +15% cruise speed for 
 // F: instantly refills the boost meter
 // ---------- v0.9 AI tuning (one block for later difficulty scaling) ----------
 const AI_PU_CHANCE = 0.35, AI_PU_RANGE = 450;       // AI: sometimes detours to a nearby pickup when not busy
-const AI_ERR = 0.18;                 // aim noise (radians)
+const AI_ERR = 0.26;                 // aim noise (radians) (v0.9: 0.18)
 const AI_REACT = [0.12, 0.4];        // reaction delay before committing to a new mode
 const AI_RETARGET = [2.2, 5.0];      // seconds between target picks
-const AI_FIRE_COOL = [1.5, 3.0];     // cooldown after firing a cable
+const AI_FIRE_COOL = [4.4, 7.0];     // s cooldown after firing a cable (v0.9: 1.5-3; they now engage far more, see AI_FOLLOWUP)
 const AI_HOLD_POST = [2.5, 5.5];     // how long to keep swinging on a post
 const AI_TIE_CHANCE = 0.72;          // P(tie) when both cables latched to different anchors
 const AI_POST_RANGE = 440;           // seek posts within this for swing / clothesline / leash
 const AI_HOOK_FRAC = 0.92;           // fire when target within this fraction of cableMax
-const AI_PLAYER_BIAS = 0.45;         // P(prefer player as target) when player is riding
-const AI_SEEK_POST = 0.2;           // P(switch to swing mode) when a post is nearby and not busy
 const AI_ZONE_YANK = 0.42;           // base preference for middle yanks (rest = nose/tail latch)
+// v0.9.1: decisions happen on a "think" tick (not every frame), targets are scored, swings only near enemies
+const AI_THINK = [0.45, 0.9];        // s between big decisions (target pick, go swing, snag a post)
+const AI_SWING_ENEMY = 380;          // only go swing on a post if an enemy rider is within this of the post
+const AI_SWING_IDLE = 1.4;           // s with no enemy near the swing circle -> let go of the post
+const AI_PLAYER_PULL = 150;          // px: the player counts as this much closer when picking a target
+const AI_CROWD = 400;                // px penalty per other AI already chasing the same target (spread out)
+const AI_REVENGE = 450;              // px bonus to chase whoever hit / hooked you in the last few s
+const AI_FOLLOWUP = [0.25, 0.7];    // s: cable cooldown right after a live hook lands (time to tie it off)
+const AI_STICKY = 250;               // px: only switch target if the new one is this much better
+// per-rider personalities (multipliers / overrides on the knobs above). GOLD = the v0.9 baseline.
+const AI_PERSONA = {
+  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3 }, // hooks a lot, goes for yanks
+  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6 }, // latches noses/tails, ties up, swings
+  GOLD:  { tag: 'RIVAL',     yank: AI_ZONE_YANK, cool: 1.0, tie: AI_TIE_CHANCE, seek: 0.20, pull: 1.0, bind: 0.45 },   // seek = P(go swing) per think tick when an enemy is near a post
+};
 const PU_TYPES = { F: { name: 'FUEL', color: '#ffaa33' }, C: { name: 'LONG CABLE', color: '#33ccff' }, G: { name: 'GRIP', color: '#66ff66' }, T: { name: 'TURBO', color: '#ff55ff' } };
 // v0.8 hit zones on occupied rockets: NOSE (front 30%) / MIDDLE = rider (40%) / TAIL (rear 30%)
 const ZONE_NOSE = 0.3, ZONE_TAIL = 0.3;   // fractions of the rocket length; the middle 40% yanks
@@ -308,7 +321,7 @@ function makeRider(i) {
     // the rocket is its own object; while riding it just follows the rider
     rk: { x: 0, y: 0, vx: 0, vy: 0, ang: 0, spin: 0, homing: false },
     tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null, alt: 1, altV: 1,
-    ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0, mode: 'hunt', modeT: 0, react: 0, zone: 'mid', wantLatch: [false, false], postHold: [0, 0], seekPost: null },
+    ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0, mode: 'hunt', modeT: 0, react: 0, zone: 'mid', wantLatch: [false, false], postHold: [0, 0], seekPost: null, think: rand(0, 0.5), swingIdle: 0, p: AI_PERSONA[d.name] || AI_PERSONA.GOLD },
     pu: { cable: 0, grip: 0, turbo: 0 },   // v0.7 active power-up timers (s)
     kos: 0, tricks: 0, lastBy: null, lastByT: -99, lastKO: -99, chain: 0, entangled: 0, anchored: 0, // v0.8 scoring / credit
   };
@@ -319,7 +332,7 @@ function spawnRider(r, first) {
   for (let k = 0; k < 40; k++) {
     const x = rand(250, WORLD_W - 250), y = rand(250, WORLD_H - 250);
     let md = 1e9;
-    for (const o of riders) if (o !== r && (o.onRocket || first)) md = Math.min(md, hyp(o.x - x, o.y - y));
+    for (const o of riders) if (o !== r && (o.onRocket || first) && o.placed) md = Math.min(md, hyp(o.x - x, o.y - y));
     let okPost = true;
     for (const p of posts) if (hyp(p.x - x, p.y - y) < p.r + 70) okPost = false;
     for (const f of fences) if (segDist(x, y, f.x1, f.y1, f.x2, f.y2) < 90) okPost = false;
@@ -327,7 +340,7 @@ function spawnRider(r, first) {
     if (md > bestD) { bestD = md; best = { x, y }; }
   }
   if (!best) best = { x: WORLD_W / 2, y: WORLD_H / 2 };
-  r.x = best.x; r.y = best.y; r.px = r.x; r.py = r.y;
+  r.x = best.x; r.y = best.y; r.px = r.x; r.py = r.y; r.placed = true;
   r.ang = Math.atan2(WORLD_H / 2 - r.y, WORLD_W / 2 - r.x) + rand(-0.5, 0.5);
   r.vx = Math.cos(r.ang) * BASE_SPEED * 0.5; r.vy = Math.sin(r.ang) * BASE_SPEED * 0.5;
   r.onRocket = true; r.inv = first ? 1 : INVULN; r.stun = 0; r.tumble = 0; r.footT = 0; r.alt = r.altV = 1;
@@ -711,11 +724,12 @@ function aiPickZone(r, t, dist) {
   const toT = Math.atan2(t.y - r.y, t.x - r.x);
   const approach = Math.abs(angDiff(toT, t.ang)); // 0 = from behind (tail), PI = head-on (nose)
   const broad = Math.min(Math.abs(angDiff(toT, t.ang + Math.PI / 2)), Math.abs(angDiff(toT, t.ang - Math.PI / 2))) < 0.7;
-  if (dist < 240 && (broad || Math.random() < AI_ZONE_YANK)) return 'mid';
+  const yk = r.ai.p ? r.ai.p.yank : AI_ZONE_YANK;
+  if (dist < 240 && (broad || Math.random() < yk)) return 'mid';
   if (approach < 0.85) return Math.random() < 0.75 ? 'tail' : 'mid';
   if (approach > 2.25) return Math.random() < 0.55 ? 'nose' : 'mid';
   // mix: sometimes latch for a bind setup, sometimes yank
-  if (Math.random() < AI_ZONE_YANK) return 'mid';
+  if (Math.random() < yk) return 'mid';
   return Math.random() < 0.5 ? 'nose' : 'tail';
 }
 function aiNearestPost(r, maxD) {
@@ -723,6 +737,35 @@ function aiNearestPost(r, maxD) {
   for (const p of posts) {
     const d = hyp(p.x - r.x, p.y - r.y);
     if (d < bd && d > 70) { bd = d; best = p; }
+  }
+  return best;
+}
+function aiEnemyNear(r, x, y, R) { // closest enemy rider on a rocket within R of (x, y)
+  let best = null, bd = R;
+  for (const o of riders) { if (o === r || !o.onRocket || o.inv > 0) continue; const d = hyp(o.x - x, o.y - y); if (d < bd) { bd = d; best = o; } }
+  return best;
+}
+function aiTargetCost(r, o) {
+  const P = r.ai.p || AI_PERSONA.GOLD;
+  let cost = hyp(o.x - r.x, o.y - r.y);
+  if (o.isPlayer) cost -= AI_PLAYER_PULL * P.pull;
+  for (const q of riders) if (q !== r && !q.isPlayer && q.onRocket && q.ai.target === o) cost += AI_CROWD;
+  if (r.lastBy === o && gameT - r.lastByT < 6) cost -= AI_REVENGE;
+  if (o.inv > 0) cost += 200;
+  return cost;
+}
+function aiPickTarget(r) {
+  let best = null, bc = 1e9;
+  for (const o of riders) { if (o === r || !o.onRocket) continue; const c = aiTargetCost(r, o) + rand(-120, 120); if (c < bc) { bc = c; best = o; } }
+  const cur = r.ai.target;
+  if (cur && cur.onRocket && cur !== best && aiTargetCost(r, cur) < bc + AI_STICKY) return cur; // hysteresis: no zig-zagging
+  return best;
+}
+function aiSwingPost(r) { // a post in reach that has an enemy close enough to be swept by the live cable
+  let best = null, bd = Math.min(AI_POST_RANGE, cableMax(r) * 1.1);
+  for (const p of posts) {
+    const d = hyp(p.x - r.x, p.y - r.y); if (d >= bd || d < 70) continue;
+    if (aiEnemyNear(r, p.x, p.y, AI_SWING_ENEMY)) { bd = d; best = p; }
   }
   return best;
 }
@@ -738,15 +781,14 @@ function aiSideToward(r, ax, ay) {
 }
 function aiControl(r, dt) {
   const ai = r.ai, c = { turn: 0, boost: false, fire: [false, false], hold: [false, false], aim: [null, null], alt: 0, tie: false };
-  ai.retarget -= dt; ai.cool -= dt; ai.altCool -= dt; ai.react -= dt; ai.modeT += dt;
+  ai.retarget -= dt; ai.cool -= dt; ai.altCool -= dt; ai.react -= dt; ai.modeT += dt; ai.think -= dt;
+  const P = ai.p || AI_PERSONA.GOLD, thinkNow = ai.think <= 0;
+  if (thinkNow) ai.think = rand(AI_THINK[0], AI_THINK[1]);
   for (let s = 0; s < 2; s++) if (ai.postHold[s] > 0) ai.postHold[s] -= dt;
 
   // ---- pick / refresh a target (player + other AI) ----
-  if (!ai.target || !ai.target.onRocket || ai.retarget <= 0) {
-    const cands = riders.filter(o => o !== r && o.onRocket);
-    const p = riders[0];
-    if (p !== r && p.onRocket && Math.random() < AI_PLAYER_BIAS) ai.target = p;
-    else ai.target = cands.length ? cands[(Math.random() * cands.length) | 0] : null;
+  if (!ai.target || !ai.target.onRocket || ai.retarget <= 0) { // v0.9.1: scored pick (near, spread out, a bit of player pull, revenge)
+    ai.target = aiPickTarget(r);
     ai.retarget = rand(AI_RETARGET[0], AI_RETARGET[1]);
     ai.wx = rand(300, WORLD_W - 300); ai.wy = rand(300, WORLD_H - 300);
   }
@@ -760,6 +802,9 @@ function aiControl(r, dt) {
   const hasPost = latchedKinds.includes('post');
   const hasLive = latchedKinds.includes('live');
   const nLatch = latchedKinds.filter(Boolean).length;
+  // v0.9.1: a live hook just landed -> quick follow-up shot (the player can fire the 2nd cable right away too)
+  if (hasLive && !ai.hadLive) ai.cool = Math.min(ai.cool, rand(AI_FOLLOWUP[0], AI_FOLLOWUP[1]));
+  ai.hadLive = hasLive;
   let want = ai.mode;
   if (hooker) want = 'escape';
   else if (riderCanTie(r)) want = 'tieup';
@@ -767,21 +812,23 @@ function aiControl(r, dt) {
   else if (hasLive && aiFreeSide(r) >= 0) want = 'tieup';
   else if (ai.mode === 'swing' && !hasPost) {
     // keep seeking the post for a few seconds before giving up (don't drop swing on frame 1)
-    if (ai.modeT > 4.5 || !ai.seekPost) {
+    if (ai.modeT > 3 || !ai.seekPost || !aiEnemyNear(r, ai.seekPost.x, ai.seekPost.y, AI_SWING_ENEMY + 150)) {
       want = (t && dist < cableMax(r) * 1.15) ? 'lineup' : 'hunt';
       ai.seekPost = null;
       ai.react = rand(2.0, 3.5); // cool-down before seeking another post
     } else want = 'swing';
   } else if (ai.mode !== 'swing' && ai.mode !== 'tieup' && ai.react <= 0) {
-    const np = aiNearestPost(r, AI_POST_RANGE);
-    if (np && (!t || dist > 220) && Math.random() < AI_SEEK_POST) { want = 'swing'; ai.seekPost = np; }
+    // v0.9.1: this used to roll the post dice EVERY FRAME -> riders lived on posts. Now: a think-tick decision,
+    // and only when the swing would actually sweep an enemy.
+    const np = thinkNow && (!t || dist > 200) && Math.random() < P.seek ? aiSwingPost(r) : null;
+    if (np) { want = 'swing'; ai.seekPost = np; }
     else if (t && dist < cableMax(r) * 1.15) want = 'lineup';
     else want = 'hunt';
   }
   if (want !== ai.mode && ai.react <= 0) {
     ai.mode = want; ai.modeT = 0; ai.react = rand(AI_REACT[0], AI_REACT[1]);
     if (ai.mode === 'lineup' && t) ai.zone = aiPickZone(r, t, dist);
-    if (ai.mode === 'swing' && !ai.seekPost) ai.seekPost = aiNearestPost(r, AI_POST_RANGE);
+    if (ai.mode === 'swing' && !ai.seekPost) ai.seekPost = aiSwingPost(r) || aiNearestPost(r, AI_POST_RANGE);
   }
 
   let desired = Math.atan2(ty - r.y, tx - r.x);
@@ -815,7 +862,7 @@ function aiControl(r, dt) {
         const [zx, zy] = zoneAimOffset(hooker, 'mid');
         const ax = hooker.x + zx + (hooker.vx - r.vx) * ft, ay = hooker.y + zy + (hooker.vy - r.vy) * ft;
         c.fire[side] = true; c.aim[side] = Math.atan2(ay - r.y, ax - r.x) + gauss() * AI_ERR;
-        ai.wantLatch[side] = false; ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]); ai.zone = 'mid';
+        ai.wantLatch[side] = false; ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]) * P.cool; ai.zone = 'mid';
       }
     }
   } else if (ai.mode === 'swing') {
@@ -824,8 +871,11 @@ function aiControl(r, dt) {
     if (pk) {
       // circle the post so the live cable sweeps toward enemies
       const away = Math.atan2(r.y - post.y, r.x - post.x);
+      const foe = aiEnemyNear(r, post.x, post.y, pk.L + 140) || t;
+      ai.swingIdle = aiEnemyNear(r, post.x, post.y, pk.L + 200) ? 0 : ai.swingIdle + dt;
+      if (ai.swingIdle > AI_SWING_IDLE) { ai.postHold = [0, 0]; ai.swingIdle = 0; } // nobody to sweep: let go (hold logic below)
       let sgn = 1;
-      if (t) sgn = Math.sign(angDiff(Math.atan2(t.y - post.y, t.x - post.x), away) || 1);
+      if (foe) sgn = Math.sign(angDiff(Math.atan2(foe.y - post.y, foe.x - post.x), away) || 1);
       desired = away + sgn * 1.35;
       c.boost = hyp(r.vx, r.vy) < BASE_SPEED * 0.85 && r.fuel > 25;
       // second cable: try to leash a nearby rider or clothesline post-to-post
@@ -848,7 +898,7 @@ function aiControl(r, dt) {
             const use = side;
             c.fire[use] = true; c.aim[use] = Math.atan2(aimY - r.y, aimX - r.x) + gauss() * AI_ERR;
             ai.wantLatch[use] = latch; if (latch) { c.hold[use] = true; ai.postHold[use] = rand(AI_HOLD_POST[0], AI_HOLD_POST[1]); }
-            ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+            ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]) * P.cool;
           }
         }
       }
@@ -863,25 +913,27 @@ function aiControl(r, dt) {
           c.fire[side] = true; c.aim[side] = Math.atan2(post.y - r.y, post.x - r.x) + gauss() * AI_ERR * 0.5;
           c.hold[side] = true; // must hold through flight or the post glance-retracts
           ai.wantLatch[side] = true; ai.postHold[side] = rand(AI_HOLD_POST[0], AI_HOLD_POST[1]);
-          ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+          ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]) * P.cool;
         }
       }
     } else { ai.mode = 'hunt'; ai.seekPost = null; }
   } else if (ai.mode === 'tieup') {
-    if (riderCanTie(r) && Math.random() < AI_TIE_CHANCE) { c.tie = true; ai.mode = 'hunt'; ai.react = rand(AI_REACT[0], AI_REACT[1]); }
+    if (riderCanTie(r) && Math.random() < P.tie) { c.tie = true; ai.mode = 'hunt'; ai.react = rand(AI_REACT[0], AI_REACT[1]); }
     else if (aiFreeSide(r) >= 0) {
       // already have one latch: get a second useful one (post or live)
       const side = aiFreeSide(r);
       const existing = r.cables.find(k => k && k.state === 'latched');
       let aimX = null, aimY = null, latch = true, zone = null;
-      if (t && hyp(t.x - r.x, t.y - r.y) < cableMax(r) * AI_HOOK_FRAC && t.inv <= 0
+      const leashPost = existing && existing.target.kind !== 'post' ? aiNearestPost(r, cableMax(r) * 0.9) : null;
+      if (leashPost && Math.random() > P.bind) { aimX = leashPost.x; aimY = leashPost.y; latch = true; }
+      else if (t && hyp(t.x - r.x, t.y - r.y) < cableMax(r) * AI_HOOK_FRAC && t.inv <= 0
           && !(existing && existing.target.kind === 'live' && existing.target.r === t)) {
         zone = Math.random() < 0.35 ? 'mid' : (Math.random() < 0.5 ? 'nose' : 'tail');
         const [zx, zy] = zoneAimOffset(t, zone);
         const ft = hyp(t.x - r.x, t.y - r.y) / CABLE_SPEED;
         aimX = t.x + zx + (t.vx - r.vx) * ft; aimY = t.y + zy + (t.vy - r.vy) * ft;
         latch = zone !== 'mid';
-      } else {
+      } else if (aimX == null) {
         const post = aiNearestPost(r, cableMax(r) * 0.95);
         if (post && !(existing && existing.target.kind === 'post' && existing.target.p === post)) {
           aimX = post.x; aimY = post.y; latch = true;
@@ -892,13 +944,13 @@ function aiControl(r, dt) {
         if (sd === side || sd < 0) {
           c.fire[side] = true; c.aim[side] = Math.atan2(aimY - r.y, aimX - r.x) + gauss() * AI_ERR;
           ai.wantLatch[side] = latch; if (latch) { c.hold[side] = true; ai.postHold[side] = rand(AI_HOLD_POST[0], AI_HOLD_POST[1]); }
-          ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+          ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]) * P.cool;
         }
       }
       if (existing && existing.target.kind === 'live') {
-        // stay roughly near the hooked rider so the second cable can reach
-        const o = existing.target.r;
-        desired = Math.atan2(o.y - r.y, o.x - r.x);
+        // drift toward the nearest post (leash) while keeping the hooked rider in tow
+        const o = existing.target.r, lp = aiNearestPost(r, 600);
+        desired = lp ? Math.atan2(lp.y - r.y, lp.x - r.x) : Math.atan2(o.y - r.y, o.x - r.x);
       } else if (t) desired = Math.atan2(ty - r.y, tx - r.x);
     } else if (nLatch >= 2 && riderCanTie(r)) c.tie = true;
     else { ai.mode = 'hunt'; }
@@ -948,8 +1000,8 @@ function aiControl(r, dt) {
   }
 
   // ---- opportunistic post snag while hunting (sets up swing / clothesline) ----
-  if ((ai.mode === 'hunt' || ai.mode === 'lineup') && ai.cool <= 0 && (!t || dist > 320) && Math.random() < 0.1) {
-    const np = aiNearestPost(r, cableMax(r) * 0.8);
+  if ((ai.mode === 'hunt' || ai.mode === 'lineup') && ai.cool <= 0 && thinkNow && (!t || dist > 200) && Math.random() < P.seek) {
+    const np = aiSwingPost(r);
     const side = np ? aiFreeSide(r) : -1;
     if (np && side >= 0) {
       const sd = aiSideToward(r, np.x, np.y);
@@ -957,7 +1009,7 @@ function aiControl(r, dt) {
         c.fire[side] = true; c.aim[side] = Math.atan2(np.y - r.y, np.x - r.x) + gauss() * AI_ERR * 0.4;
         c.hold[side] = true; ai.wantLatch[side] = true;
         ai.postHold[side] = rand(AI_HOLD_POST[0], AI_HOLD_POST[1]);
-        ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+        ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]) * P.cool;
         ai.mode = 'swing'; ai.seekPost = np; ai.modeT = 0;
       }
     }
@@ -974,7 +1026,7 @@ function aiControl(r, dt) {
       c.fire[side] = true; c.aim[side] = Math.atan2(ay - r.y, ax - r.x) + gauss() * AI_ERR;
       // hold for nose/tail so we latch (AI also gets aiCtl free latch; hold still needed for posts later)
       ai.wantLatch[side] = zone !== 'mid';
-      ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]);
+      ai.cool = rand(AI_FIRE_COOL[0], AI_FIRE_COOL[1]) * P.cool;
     }
   }
 
@@ -999,7 +1051,7 @@ function aiControl(r, dt) {
   }
 
   // opportunistic tie if somehow both latched
-  if (!c.tie && riderCanTie(r) && Math.random() < AI_TIE_CHANCE) c.tie = true;
+  if (!c.tie && riderCanTie(r) && Math.random() < P.tie) c.tie = true;
 
   return c;
 }
@@ -2042,7 +2094,7 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.9  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.9.1  ROCKET WAR', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   txt('Grapple posts to whip around corners.', VW / 2, VH * 0.52, 14 * sc, '#ccc', 'center');
   txt('Hit the RIDER to yank them off; hook a NOSE or TAIL to tow!', VW / 2, VH * 0.52 + 18 * sc, 14 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE them: clotheslines, tie-ups!', VW / 2, VH * 0.52 + 36 * sc, 14 * sc, '#f93', 'center');
@@ -2095,10 +2147,11 @@ requestAnimationFrame(frame);
 window.RJ = { get state() { return state; }, get riders() { return riders; }, get player() { return player; },
   get timeLeft() { return timeLeft; }, set timeLeft(v) { timeLeft = v; }, posts, tethers, knockOff, addTether, canTie, riderCanTie, btns,
   get msgs() { return msgs.map(m => m.text); }, clearMsgs() { msgs.length = 0; }, fences, lvl, canReach, altOn: ALTITUDE_ENABLED, cam, pops, hitZone, get forceZone() { return forceZone; }, set forceZone(v) { forceZone = v; },
-  get gameT() { return gameT; }, get results() { return results; }, endRound, doTie, startGame,
+  get gameT() { return gameT; }, get results() { return results; }, endRound, doTie, startGame, tiedDown,
+  sim(secs, each) { const n = Math.round(secs / STEP); for (let i = 0; i < n && state === 'play'; i++) { update(STEP); if (each) each(STEP); } return state; }, // test hook: fast headless sim
   pickups, puRespawn, spawnPickup, cableMax, aiStats, resetAiStats, zoneAimOffset, aiPickZone, aiHooker, get aiAll() { return aiAll; }, set aiAll(v) { aiAll = !!v; },
   PU: { POWERUP_MAX, POWERUP_RESPAWN, POWERUP_CLEAR, LONG_CABLE_MULT, LONG_CABLE_TIME, GRIP_TIME, TURBO_MULT, TURBO_TIME, CABLE_MAX, BASE_SPEED },
-  AI: { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_PLAYER_BIAS, AI_SEEK_POST, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE } };
+  AI: { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE, AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_STICKY, AI_FOLLOWUP, AI_PERSONA } };
 })();
 </script>
 </body>
