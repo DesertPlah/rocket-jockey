@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.9.5</title>
+<title>Rocket Jockey v0.9.6</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -75,7 +75,9 @@ const DIFF_PRESETS = {
     // v0.9.4 ball and chain: plan odds once a bomb is in hand (the rest = fling), how often to go after YOU, how hard to shake one off
     AI_BOMB_CHAIN: 0.40, AI_BOMB_MINE: 0.25, AI_BOMB_YOU: 0.0, AI_CHAIN_ESCAPE: 0.45,
     // v0.9.5 rocket theft: per-think odds to go for an on-foot rider's empty rocket, range, px bias toward YOUR rocket, tie-off odds
-    AI_STEAL_CHANCE: 0.012, AI_STEAL_RANGE: 450, AI_STEAL_YOU: 0, AI_STEAL_TIE: 0.25
+    AI_STEAL_CHANCE: 0.012, AI_STEAL_RANGE: 450, AI_STEAL_YOU: 0, AI_STEAL_TIE: 0.25,
+    // v0.9.6 ROCKETBALL: shot aim noise (px at the goal mouth), odds to go for a ball / hook a carried ball / defend, ball search range
+    AI_BALL_ERR: 175, AI_BALL_CHASE: 0.4, AI_BALL_STEAL: 0.25, AI_BALL_DEFEND: 0.15, AI_BALL_RANGE: 1200
   },
   // Normal: competitive — less aim noise, faster reactions, stickier focus, more fire/tie
   Normal: {
@@ -86,7 +88,8 @@ const DIFF_PRESETS = {
     AI_REVENGE: 500, AI_FOLLOWUP: [0.18, 0.5], AI_STICKY: 340,
     AI_BOMB_CHANCE: 0.35, AI_BOMB_RANGE: 460, AI_BOMB_ACC: 0.32, AI_BOMB_LEAD: 0.7, AI_BOMB_TIE: 0.33, AI_BOMB_PANIC: 0.8, AI_BOMB_DODGE: 0.6, AI_BOMB_MAXD: 480,
     AI_BOMB_CHAIN: 0.55, AI_BOMB_MINE: 0.25, AI_BOMB_YOU: 0.3, AI_CHAIN_ESCAPE: 0.7,
-    AI_STEAL_CHANCE: 0.07, AI_STEAL_RANGE: 650, AI_STEAL_YOU: 250, AI_STEAL_TIE: 0.4
+    AI_STEAL_CHANCE: 0.07, AI_STEAL_RANGE: 650, AI_STEAL_YOU: 250, AI_STEAL_TIE: 0.4,
+    AI_BALL_ERR: 90, AI_BALL_CHASE: 0.75, AI_BALL_STEAL: 0.4, AI_BALL_DEFEND: 0.25, AI_BALL_RANGE: 1700
   },
   // Hard: often threatens a win — tight aim, snappy decisions, aggressive hook/tie/fire
   Hard: {
@@ -97,7 +100,8 @@ const DIFF_PRESETS = {
     AI_REVENGE: 550, AI_FOLLOWUP: [0.12, 0.35], AI_STICKY: 420,
     AI_BOMB_CHANCE: 0.5, AI_BOMB_RANGE: 540, AI_BOMB_ACC: 0.2, AI_BOMB_LEAD: 1.0, AI_BOMB_TIE: 0.4, AI_BOMB_PANIC: 1.0, AI_BOMB_DODGE: 0.85, AI_BOMB_MAXD: 420,
     AI_BOMB_CHAIN: 0.68, AI_BOMB_MINE: 0.22, AI_BOMB_YOU: 0.55, AI_CHAIN_ESCAPE: 0.92,
-    AI_STEAL_CHANCE: 0.16, AI_STEAL_RANGE: 800, AI_STEAL_YOU: 400, AI_STEAL_TIE: 0.55
+    AI_STEAL_CHANCE: 0.16, AI_STEAL_RANGE: 800, AI_STEAL_YOU: 400, AI_STEAL_TIE: 0.55,
+    AI_BALL_ERR: 40, AI_BALL_CHASE: 0.92, AI_BALL_STEAL: 0.55, AI_BALL_DEFEND: 0.35, AI_BALL_RANGE: 2400
   }
 };
 let difficulty = 'Easy';
@@ -107,11 +111,12 @@ let AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENG
 let AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD; // v0.9.3
 let AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE; // v0.9.4
 let AI_STEAL_CHANCE, AI_STEAL_RANGE, AI_STEAL_YOU, AI_STEAL_TIE; // v0.9.5
+let AI_BALL_ERR, AI_BALL_CHASE, AI_BALL_STEAL, AI_BALL_DEFEND, AI_BALL_RANGE; // v0.9.6
 // per-rider personalities (multipliers / overrides). GOLD tracks current difficulty knobs.
 const AI_PERSONA = {
-  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3,  bomb: 1.25, btie: 0.75, steal: 0.15 },
-  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6,  bomb: 1.0,  btie: 1.3,  steal: 1.0 },
-  GOLD:  { tag: 'RIVAL',     yank: 0.42, cool: 1.0, tie: 0.72, seek: 0.20, pull: 1.0, bind: 0.45, bomb: 1.0,  btie: 1.0,  steal: 1.25 },
+  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3,  bomb: 1.25, btie: 0.75, steal: 0.15, brawl: 0.9,  chase: 0.65, defend: 0.5, longShot: 0.85, weave: 0 },
+  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6,  bomb: 1.0,  btie: 1.3,  steal: 1.0,  brawl: 0.3,  chase: 1.0,  defend: 0.6, longShot: 1.15, weave: 1 },
+  GOLD:  { tag: 'RIVAL',     yank: 0.42, cool: 1.0, tie: 0.72, seek: 0.20, pull: 1.0, bind: 0.45, bomb: 1.0,  btie: 1.0,  steal: 1.25, brawl: 0.55, chase: 0.9,  defend: 1.0, longShot: 1.0,  weave: 0 },
 };
 function applyDifficulty(name) {
   if (!DIFF_PRESETS[name]) name = 'Easy';
@@ -127,6 +132,7 @@ function applyDifficulty(name) {
   AI_BOMB_TIE = P.AI_BOMB_TIE; AI_BOMB_PANIC = P.AI_BOMB_PANIC; AI_BOMB_DODGE = P.AI_BOMB_DODGE; AI_BOMB_MAXD = P.AI_BOMB_MAXD;
   AI_BOMB_CHAIN = P.AI_BOMB_CHAIN; AI_BOMB_MINE = P.AI_BOMB_MINE; AI_BOMB_YOU = P.AI_BOMB_YOU; AI_CHAIN_ESCAPE = P.AI_CHAIN_ESCAPE;
   AI_STEAL_CHANCE = P.AI_STEAL_CHANCE; AI_STEAL_RANGE = P.AI_STEAL_RANGE; AI_STEAL_YOU = P.AI_STEAL_YOU; AI_STEAL_TIE = P.AI_STEAL_TIE;
+  AI_BALL_ERR = P.AI_BALL_ERR; AI_BALL_CHASE = P.AI_BALL_CHASE; AI_BALL_STEAL = P.AI_BALL_STEAL; AI_BALL_DEFEND = P.AI_BALL_DEFEND; AI_BALL_RANGE = P.AI_BALL_RANGE;
   AI_PERSONA.GOLD.yank = AI_ZONE_YANK; AI_PERSONA.GOLD.tie = AI_TIE_CHANCE;
   try { localStorage.setItem(DIFF_KEY, name); } catch (e) {}
 }
@@ -136,6 +142,29 @@ function loadDifficulty() {
   applyDifficulty(DIFF_PRESETS[n] ? n : 'Easy');
 }
 loadDifficulty();
+// ---------- v0.9.6 game modes: ROCKET WAR (unchanged) / ROCKETBALL ----------
+const MODE_KEY = 'rj_mode', MODES = ['war', 'ball'], MODE_LABEL = { war: 'ROCKET WAR', ball: 'ROCKETBALL' };
+let gameMode = 'war';
+function applyMode(m) { if (!MODES.includes(m)) m = 'war'; gameMode = m; try { localStorage.setItem(MODE_KEY, m); } catch (e) {} }
+(function loadMode() { let m = 'war'; try { m = localStorage.getItem(MODE_KEY) || 'war'; } catch (e) {} gameMode = MODES.includes(m) ? m : 'war'; })();
+function isBall() { return gameMode === 'ball'; }
+// ROCKETBALL tuning. Balls live in the bombs[] list (flag ball:true) so they reuse the exact hook / reel / swing / fling code,
+// but never light, never explode, can't be tied, and bounce off rockets. Bombs and power-ups are OFF in this mode.
+const BALL_MAX = 2;               // loose + carried balls on the field at once
+const BALL_EVERY = [2.5, 4];      // s: a dispenser drops a new ball this long after the field drops below BALL_MAX
+const BALL_FLY_TIME = 1.5;        // s: a flung ball flies with low drag this long (bombs: 1.2), then skids
+const BALL_BUMP = 1.7;            // restitution-ish kick when a rocket bumps a loose / flying ball
+const GOAL_HALF = 190;            // px: half the goal mouth (380 px wide)
+const GOAL_DEPTH = 150;           // px: goal box depth from the side wall (the mouth line is at this x; deep enough to fly a dangling ball in)
+const PTS_GOAL = 25, PTS_ASSIST = 8, PTS_BALL_STEAL = 3, ASSIST_WINDOW = 12;
+const RB_KO_MULT = 0.5;           // KOs are a smaller side score in ROCKETBALL (KO +5, clothesline +10, combos halved)
+const goals = [ // left + right wall, centred. side = which wall (-1 left, +1 right); x = the mouth line
+  { side: -1, x: GOAL_DEPTH, cy: WORLD_H / 2, flash: 0, color: '#ff66ff', name: 'WEST' },
+  { side: 1, x: WORLD_W - GOAL_DEPTH, cy: WORLD_H / 2, flash: 0, color: '#66ffcc', name: 'EAST' },
+];
+const goalPosts = goals.flatMap(g => [-1, 1].map(d => ({ x: g.x, y: g.cy + d * (GOAL_HALF + 6), r: 15, ph: 0, gp: true, g })));
+function inGoal(x, y) { for (const g of goals) if (Math.abs(y - g.cy) < GOAL_HALF && (g.side < 0 ? x < g.x : x > g.x)) return g; return null; }
+let goalBanner = null, lastGoal = null;
 const PU_TYPES = { F: { name: 'FUEL', color: '#ffaa33' }, C: { name: 'LONG CABLE', color: '#33ccff' }, G: { name: 'GRIP', color: '#66ff66' }, T: { name: 'TURBO', color: '#ff55ff' } };
 // v0.8 hit zones on occupied rockets: NOSE (front 30%) / MIDDLE = rider (40%) / TAIL (rear 30%)
 const ZONE_NOSE = 0.3, ZONE_TAIL = 0.3;   // fractions of the rocket length; the middle 40% yanks
@@ -453,7 +482,8 @@ function makeRider(i) {
     tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null, alt: 1, altV: 1,
     ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0, mode: 'hunt', modeT: 0, react: 0, zone: 'mid', wantLatch: [false, false], postHold: [0, 0], seekPost: null, think: rand(0, 0.5), swingIdle: 0, p: AI_PERSONA[d.name] || AI_PERSONA.GOLD },
     pu: { cable: 0, grip: 0, turbo: 0 },   // v0.7 active power-up timers (s)
-    log: { swings: 0, clothes: 0, ties: 0, chains: 0, mines: 0, bombKOs: 0, stolen: 0 }, // v0.9.4 trick log
+    log: { swings: 0, clothes: 0, ties: 0, chains: 0, mines: 0, bombKOs: 0, stolen: 0, goals: 0, assists: 0, ballSteals: 0, ballKOs: 0 }, // v0.9.4 trick log (v0.9.6 + ROCKETBALL)
+    goals: 0,
     kos: 0, tricks: 0, lastBy: null, lastByT: -99, lastKO: -99, chain: 0, entangled: 0, anchored: 0, // v0.8 scoring / credit
   };
 }
@@ -484,9 +514,16 @@ function resetWorld() {
   for (const r of riders) spawnRider(r, true);
   particles.length = 0; msgs.length = 0; tethers.length = 0;
   pickups.length = 0; puRespawn.length = 0; pops.length = 0;
-  for (let i = 0; i < POWERUP_MAX; i++) spawnPickup();
+  if (!isBall()) for (let i = 0; i < POWERUP_MAX; i++) spawnPickup(); // v0.9.6: no power-ups in ROCKETBALL
   bombs.length = 0; blasts.length = 0;
   for (const d of dispensers) { d.cool = rand(1.5, 4); d.nextA = rand(0, TAU); d.flash = 0; }
+  // v0.9.6: goal-mouth posts exist only in ROCKETBALL (hookable, so you can swing round the goal)
+  for (let i = posts.length - 1; i >= 0; i--) if (posts[i].gp) posts.splice(i, 1);
+  goalBanner = null; lastGoal = null; for (const g of goals) g.flash = 0;
+  if (isBall()) {
+    for (const p of goalPosts) posts.push(p);
+    dispensers.forEach((d, i) => { d.cool = i === 0 ? 1.0 : rand(BALL_EVERY[0], BALL_EVERY[1]) + 1; d.nextA = Math.atan2(WORLD_H / 2 - d.y, WORLD_W / 2 - d.x) + rand(-0.6, 0.6); });
+  }
   cam.x = player.x; cam.y = player.y;
 }
 
@@ -531,6 +568,7 @@ function updatePickups(dt) {
       }
     }
   }
+  if (isBall()) { puRespawn.length = 0; return; } // v0.9.6
   for (let i = puRespawn.length - 1; i >= 0; i--) {
     puRespawn[i] -= dt;
     if (puRespawn[i] <= 0 && pickups.length < POWERUP_MAX) { if (spawnPickup()) puRespawn.splice(i, 1); else puRespawn[i] = 0.5; }
@@ -630,7 +668,7 @@ function msg(text, color) { msgs.push({ text, color: color || '#fff', t: 2 }); i
 
 // ---------- state ----------
 let state = 'title'; // title | play | over
-let timeLeft = ROUND_TIME, overT = 0, results = [];
+let timeLeft = ROUND_TIME, overT = 0, results = [], resultsMode = 'war';
 const cam = { x: WORLD_W / 2, y: WORLD_H / 2, scale: 1 };
 let shake = 0;
 
@@ -706,13 +744,43 @@ function goFullscreen() {
     }
   } catch (e) {}
 }
-function diffBtnLayout(forState) {
+// v0.9.6: one row = [ROCKET WAR][ROCKETBALL]  [EASY][NORMAL][HARD] (mode on the left, difficulty on the right)
+function pickerRow(forState) {
   const sc = clamp(VH / 390, 0.8, 1.6);
-  const bw = 108 * sc, bh = 38 * sc, gap = 12 * sc;
-  const total = DIFF_NAMES.length * bw + (DIFF_NAMES.length - 1) * gap;
-  const x0 = VW / 2 - total / 2;
+  const mw = 128 * sc, dw = 96 * sc, bh = 38 * sc, gap = 10 * sc, mid = 30 * sc;
+  const total = 2 * mw + gap + mid + 3 * dw + 2 * gap, x0 = VW / 2 - total / 2;
   const y = forState === 'over' ? VH * 0.78 : VH * 0.72;
-  return DIFF_NAMES.map((name, i) => ({ name, x: x0 + i * (bw + gap), y, w: bw, h: bh }));
+  return { sc, mw, dw, bh, gap, mid, x0, y, dx0: x0 + 2 * mw + gap + mid };
+}
+function modeBtnLayout(forState) {
+  const L = pickerRow(forState);
+  return MODES.map((name, i) => ({ name, label: MODE_LABEL[name], x: L.x0 + i * (L.mw + L.gap), y: L.y, w: L.mw, h: L.bh }));
+}
+function hitModeBtn(x, y, forState) {
+  for (const b of modeBtnLayout(forState || state)) if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.name;
+  return null;
+}
+function diffBtnLayout(forState) {
+  const L = pickerRow(forState);
+  return DIFF_NAMES.map((name, i) => ({ name, x: L.dx0 + i * (L.dw + L.gap), y: L.y, w: L.dw, h: L.bh }));
+}
+function roundBtn(b, on, col, label, size, sc) {
+  ctx.fillStyle = on ? 'rgba(' + col + ',0.35)' : 'rgba(255,255,255,0.06)';
+  ctx.strokeStyle = on ? 'rgba(' + col + ',0.95)' : 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = on ? 2.5 : 1.5;
+  const r = 8 * sc;
+  ctx.beginPath();
+  ctx.moveTo(b.x + r, b.y); ctx.lineTo(b.x + b.w - r, b.y); ctx.quadraticCurveTo(b.x + b.w, b.y, b.x + b.w, b.y + r);
+  ctx.lineTo(b.x + b.w, b.y + b.h - r); ctx.quadraticCurveTo(b.x + b.w, b.y + b.h, b.x + b.w - r, b.y + b.h);
+  ctx.lineTo(b.x + r, b.y + b.h); ctx.quadraticCurveTo(b.x, b.y + b.h, b.x, b.y + b.h - r);
+  ctx.lineTo(b.x, b.y + r); ctx.quadraticCurveTo(b.x, b.y, b.x + r, b.y); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  txt(label, b.x + b.w / 2, b.y + b.h / 2, size, on ? '#fff' : '#abc', 'center', false);
+}
+function drawModePicker(forState, now) {
+  const sc = clamp(VH / 390, 0.8, 1.6), mb = modeBtnLayout(forState);
+  txt('MODE', (mb[0].x + mb[1].x + mb[1].w) / 2, mb[0].y - 16 * sc, 12 * sc, '#8ab', 'center', false);
+  for (const b of mb) roundBtn(b, b.name === gameMode, b.name === 'ball' ? '255,120,255' : '0,220,255', b.label, 14 * sc, sc);
 }
 function hitDiffBtn(x, y, forState) {
   for (const b of diffBtnLayout(forState || state)) {
@@ -723,7 +791,8 @@ function hitDiffBtn(x, y, forState) {
 function drawDiffPicker(forState, now) {
   const sc = clamp(VH / 390, 0.8, 1.6);
   const btns = diffBtnLayout(forState);
-  txt('DIFFICULTY', VW / 2, btns[0].y - 16 * sc, 12 * sc, '#8ab', 'center', false);
+  drawModePicker(forState, now); // v0.9.6
+  txt('DIFFICULTY', (btns[0].x + btns[2].x + btns[2].w) / 2, btns[0].y - 16 * sc, 12 * sc, '#8ab', 'center', false);
   for (const b of btns) {
     const on = b.name === difficulty;
     const col = b.name === 'Easy' ? '80,200,120' : b.name === 'Normal' ? '255,200,60' : '255,90,90';
@@ -750,6 +819,8 @@ function handlePointer(x, y) {
   if (state === 'title' || (state === 'over' && overT > 1.2)) {
     const hit = hitDiffBtn(x, y, state);
     if (hit) { applyDifficulty(hit); return; }
+    const hm = hitModeBtn(x, y, state); // v0.9.6
+    if (hm) { setMode(hm); return; }
   }
   handleTap();
 }
@@ -815,6 +886,7 @@ window.addEventListener('keydown', e => {
     if (c === 'Digit1' || c === 'Numpad1') applyDifficulty('Easy');
     if (c === 'Digit2' || c === 'Numpad2') applyDifficulty('Normal');
     if (c === 'Digit3' || c === 'Numpad3') applyDifficulty('Hard');
+    if (c === 'KeyM' && state !== 'play') setMode(gameMode === 'war' ? 'ball' : 'war'); // v0.9.6
     if (c === 'Space' || c === 'Enter') handleTap();
   }
   keys[c] = true;
@@ -827,15 +899,17 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---------- game flow ----------
+function setMode(m) { applyMode(m); if (state === 'title') resetWorld(); }
 function startGame() {
   resetWorld();
   state = 'play'; timeLeft = ROUND_TIME; overT = 0;
   fireQ[0] = fireQ[1] = false; tieQ = false; altQ = 0;
+  if (isBall()) msg('ROCKETBALL! HOOK THE BALL, FLING IT IN A GOAL!', '#f8f'); else
   msg('GO! YANK THEM OFF!', '#fc0');
   sfx.start();
 }
 function endRound() {
-  state = 'over'; overT = 0;
+  state = 'over'; overT = 0; resultsMode = gameMode; // v0.9.6: the results show the mode that was played (even if you switch the picker)
   results = riders.slice().sort((a, b) => (b.score - a.score) || (a.falls - b.falls));
   sfx.end();
 }
@@ -975,6 +1049,7 @@ function aiControl(r, dt) {
     ai.retarget = rand(AI_RETARGET[0], AI_RETARGET[1]);
     ai.wx = rand(300, WORLD_W - 300); ai.wy = rand(300, WORLD_H - 300);
   }
+  if (isBall()) aiBallTarget(r, thinkNow); // v0.9.6: contest the ball carrier (RED most)
   const t = ai.target && ai.target.onRocket ? ai.target : null;
   let tx = ai.wx, ty = ai.wy, dist = 1e9;
   if (t) { tx = t.x + t.vx * 0.45; ty = t.y + t.vy * 0.45; dist = hyp(t.x - r.x, t.y - r.y); }
@@ -1169,7 +1244,7 @@ function aiControl(r, dt) {
   }
 
   // ---- v0.9.3 bombs: dodge / carry (fling, stick, mine) / go grab one ----
-  desired = aiBombs(r, c, t, dist, desired, thinkNow, dt);
+  desired = isBall() ? aiBall(r, c, t, dist, desired, thinkNow, dt) : aiBombs(r, c, t, dist, desired, thinkNow, dt); // v0.9.6
   // ---- v0.9.5 rocket theft: hook the empty rocket, tow it away from its owner, maybe tie it to a post ----
   ai.dropRocket = null;
   if (ai.mode === 'steal' && ai.steal) {
@@ -1206,7 +1281,7 @@ function aiControl(r, dt) {
   }
 
   // wall avoidance
-  const lx = r.x + r.vx * 0.9, ly = r.y + r.vy * 0.9, m = 170;
+  const gr = isBall() && ai.goalRun, lx = r.x + r.vx * (gr ? 0.35 : 0.9), ly = r.y + r.vy * (gr ? 0.35 : 0.9), m = gr ? 60 : 170; // v0.9.6: a goal run may go close to the end wall
   if (lx < m || lx > WORLD_W - m || ly < m || ly > WORLD_H - m) desired = Math.atan2(WORLD_H / 2 - r.y, WORLD_W / 2 - r.x);
   // post avoidance (don't slam into the post we're swinging on)
   for (const p of posts) {
@@ -1299,7 +1374,8 @@ let aiAll = false; // test hook: when true, the player is also AI-controlled
 const aiStats = { nose: 0, mid: 0, tail: 0, posts: 0, ties: 0, binds: 0, yanks: 0, // v0.9 headless counters
   bombGrabs: 0, bombFlings: 0, bombSticks: 0, bombMines: 0, bombKOs: 0, bombSelfKOs: 0, bombImpacts: 0, bombDodges: 0, bombsSpawned: 0, bombBlasts: 0, bombAimedFlings: 0, // v0.9.3
   chainKOs: 0, mineKOs: 0, flingKOs: 0, chainPasses: 0, chainShakes: 0, chainRams: 0, chainYou: 0, planChain: 0, planMine: 0, planFling: 0, planFail: 0, // v0.9.4
-  stealTries: 0, stealHooks: 0, thefts: 0, theftsYou: 0, theftTies: 0, stealBreaks: 0 }; // v0.9.5
+  stealTries: 0, stealHooks: 0, thefts: 0, theftsYou: 0, theftTies: 0, stealBreaks: 0, // v0.9.5
+  ballsSpawned: 0, ballGrabs: 0, ballFlings: 0, ballShots: 0, ballSteals: 0, goals: 0, assists: 0, carrierKOs: 0, ballDefends: 0, dunks: 0 }; // v0.9.6
 function resetAiStats() { for (const k in aiStats) aiStats[k] = 0; }
 function hitZone(o, x, y) { // where a cable tip at (x, y) hits rider o's rocket: 'nose' | 'mid' | 'tail' | null
   const hx = Math.cos(o.ang), hy = Math.sin(o.ang), dx = x - o.x, dy = y - o.y;
@@ -1537,7 +1613,8 @@ function payTheft(thief, o, tie, x, y) {
 // states: 'loose' (lying around / skidding), 'held' (dangling on a cable), 'flung' (flying after you let go),
 //         'tied' (mine on a post, or stuck onto a rider / rocket)
 const bombs = [], blasts = [];
-function bombGrabbable(b, r) { // v0.9.4: the rider a bomb is chained to may hook it themselves (then fling it or tie it on someone else)
+ function bombGrabbable(b, r) { // v0.9.4: the rider a bomb is chained to may hook it themselves (then fling it or tie it on someone else)
+  if (b.ball) return b.state === 'loose' || b.state === 'flung' || (!!r && b.state === 'held' && b.holder !== r); // v0.9.6: hook a carried ball = steal it
   return b.state === 'loose' || b.state === 'flung' || (!!r && b.state === 'tied' && !!b.stuck && b.stuck.kind === 'live' && b.stuck.r === r);
 }
 function chainVictim(b) { return b && b.state === 'tied' && b.stuck && b.stuck.kind === 'live' ? b.stuck.r : null; } // v0.9.4
@@ -1552,6 +1629,7 @@ function spawnBomb(d) {
   return b;
 }
 function grabBomb(r, k, b) {
+  if (b.ball) { grabBall(r, k, b); return; } // v0.9.6
   if (b.state === 'tied' && b.tether) { const j = tethers.indexOf(b.tether); if (j >= 0) tethers.splice(j, 1); // v0.9.4: unhooked your own ball and chain
     if (r.isPlayer && state === 'play') msg('GOT THE BOMB OFF YOU! FLING IT OR TIE IT ON SOMEONE', '#fc0'); b.fuse = Math.max(b.fuse, CHAIN_PASS_FUSE); }
   b.state = 'held'; b.holder = r; b.owner = r; b.stuck = null; b.mine = false; b.tether = null;
@@ -1577,7 +1655,11 @@ function bombReleaseVel(b, r) { // velocity a dangling bomb leaves with if you l
 }
 function flingBomb(b) {
   const r = b.holder;
-  if (r) {
+  if (r && b.ball) { // v0.9.6: same release physics as a bomb; a carrier knocked off just drops it (keeps its momentum)
+    [b.vx, b.vy] = bombReleaseVel(b, r); b.dropped = !r.onRocket;
+    if (r.onRocket) { if (!r.isPlayer || aiAll) { aiStats.ballFlings++; if (r.ai.ballShot) aiStats.ballShots++; } if (state === 'play' && (r.isPlayer || onScreen(b.x, b.y))) sfx.fling(); }
+    r.ai.ballShot = false;
+  } else if (r) {
     [b.vx, b.vy] = bombReleaseVel(b, r);
     if (r.onRocket) {
       if (!r.isPlayer || aiAll) { aiStats.bombFlings++; if (r.ai.bombAimed) aiStats.bombAimedFlings++; }
@@ -1652,6 +1734,17 @@ function explodeBomb(b, impact) {
 }
 function updateBombs(dt) {
   // dispensers
+  for (const g of goals) g.flash = Math.max(0, g.flash - dt);
+  if (goalBanner) { goalBanner.t -= dt; if (goalBanner.t <= 0) goalBanner = null; }
+  if (isBall()) { // v0.9.6: ball dispensers: keep up to BALL_MAX balls in play, one drop at a time
+    let dropped = false;
+    for (const d of dispensers) {
+      d.flash = Math.max(0, d.flash - dt); d.cool -= dt;
+      if (d.cool > 0) continue;
+      if (!dropped && bombs.length < BALL_MAX) { spawnBall(d); dropped = true; d.cool = rand(BALL_EVERY[0], BALL_EVERY[1]) + 3; for (const e of dispensers) if (e !== d) e.cool = Math.max(e.cool, rand(BALL_EVERY[0], BALL_EVERY[1])); }
+      else d.cool = 0.5;
+    }
+  } else
   for (const d of dispensers) {
     d.flash = Math.max(0, d.flash - dt);
     d.cool -= dt;
@@ -1667,7 +1760,8 @@ function updateBombs(dt) {
     // state bookkeeping
     if (b.state === 'held' && !bombHolderCable(b)) flingBomb(b);            // let go (or cable lost) -> it flies
     if (b.state === 'tied' && !tethers.includes(b.tether)) { b.state = 'loose'; b.tether = null; b.stuck = null; b.mine = false; }
-    if (b.lit) {
+    if (b.ball) {} // v0.9.6: balls never light or fizzle
+    else if (b.lit) {
       const prev = b.fuse; b.fuse -= dt;
       const per = 0.06 + 0.36 * clamp(b.fuse / BOMB_FUSE, 0, 1);              // blink speeds up as the fuse runs down
       b.blink += dt; if (b.blink >= per) { b.blink = 0; b.on = !b.on; if (b.on && state === 'play' && ((b.holder && b.holder.isPlayer) || (b.fuse < 2 && onScreen(b.x, b.y)))) sfx.fuse(); }
@@ -1678,7 +1772,7 @@ function updateBombs(dt) {
     let drag = BOMB_GROUND_DRAG;
     if (b.state === 'held') drag = BOMB_HELD_DRAG;
     else if (b.state === 'tied') drag = b.mine ? MINE_DRAG : CHAIN_DRAG; // v0.9.4: chained / mined bombs swing on their tether
-    else if (b.state === 'flung') { b.flungT += dt; drag = b.flungT < BOMB_FLY_TIME ? BOMB_FLY_DRAG : BOMB_GROUND_DRAG; }
+    else if (b.state === 'flung') { b.flungT += dt; drag = b.flungT < (b.ball ? BALL_FLY_TIME : BOMB_FLY_TIME) ? BOMB_FLY_DRAG : BOMB_GROUND_DRAG; }
     const g = Math.exp(-drag * dt); b.vx *= g; b.vy *= g;
     b.x += b.vx * dt; b.y += b.vy * dt;
     b.rot += b.spin * dt + hyp(b.vx, b.vy) * dt / (BOMB_R * 2);
@@ -1692,6 +1786,7 @@ function updateBombs(dt) {
     collideFences(b, BOMB_R, -1, 0.5);
     pushOutPosts(b, BOMB_R, 0.5);
     if (b.state === 'flung' && hyp(b.vx, b.vy) < 60) b.state = 'loose';
+    if (b.ball) { updateBall(b, dt); continue; } // v0.9.6: bounce off rockets, goals
     // flung bomb hits something hard -> boom (never its own thrower)
     if (b.state === 'flung') {
       let boom = false;
@@ -1719,6 +1814,164 @@ function updateBombs(dt) {
     }
   }
   for (let i = blasts.length - 1; i >= 0; i--) { blasts[i].t += dt; if (blasts[i].t >= blasts[i].max) blasts.splice(i, 1); }
+}
+// ---------- v0.9.6 ROCKETBALL ----------
+function spawnBall(d) {
+  const a = d.nextA, x = d.x + Math.cos(a) * (DISP_R + BOMB_R + 3), y = d.y + Math.sin(a) * (DISP_R + BOMB_R + 3), sp = rand(120, 180);
+  const b = { ball: true, x, y, px: x, py: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, state: 'loose', lit: false, fuse: 99, idle: 0, t: rand(0, 3),
+    rot: rand(0, TAU), spin: rand(-3, 3), owner: null, prevOwner: null, prevT: -99, holder: null, tether: null, stuck: null, mine: false, arm: 0, fx: x, fy: y, flungT: 0, wasFlung: false, disp: d, blink: 0 };
+  bombs.push(b); aiStats.ballsSpawned++;
+  d.nextA = Math.atan2(WORLD_H / 2 - d.y, WORLD_W / 2 - d.x) + rand(-1.2, 1.2); d.flash = 0.35;
+  spawnParts(x, y, 10, '#fff', 120, 0.35);
+  if (state === 'play' && onScreen(d.x, d.y)) sfx.dispense();
+  return b;
+}
+function touchBall(b, r) { // ownership: the last rider to hook (or fling) it; the one before that may get an assist
+  if (b.owner && b.owner !== r) { b.prevOwner = b.owner; b.prevT = gameT; }
+  b.owner = r; b.ownT = gameT;
+}
+function grabBall(r, k, b) {
+  const from = b.state === 'held' && b.holder && b.holder !== r ? b.holder : null;
+  if (from) { // hooked a ball someone else is carrying: it's yours now (their cable lets go; the ball doesn't move)
+    const hk = bombHolderCable(b); if (hk) { retract(from, hk); hk.flash = 0.3; }
+    r.log.ballSteals++; award(r, PTS_BALL_STEAL, 'BALL STEAL', b.x, b.y); noteHit(from, r);
+    if (!r.isPlayer || aiAll) aiStats.ballSteals++;
+    if (state === 'play') { if (r.isPlayer) msg('STOLE THE BALL FROM ' + from.name + '!', '#fc0'); else if (from.isPlayer) msg(r.name + ' STOLE YOUR BALL!', '#f44'); }
+  }
+  touchBall(b, r);
+  b.state = 'held'; b.holder = r; b.stuck = null; b.tether = null; b.dropped = false;
+  k.L = clamp(hyp(r.x - b.x, r.y - b.y), 40, cableMax(r));
+  if (!r.isPlayer || aiAll) aiStats.ballGrabs++;
+  if (r.isPlayer && state === 'play' && !from) msg('GOT THE BALL!', '#fff');
+  spawnParts(b.x, b.y, 8, '#fff', 120, 0.3);
+}
+function updateBall(b, dt) {
+  // rockets bump loose / flying balls (soccer): the ball bounces off the rocket
+  if (b.state === 'loose' || b.state === 'flung') for (const o of riders) {
+    if (!o.onRocket) continue;
+    const dx = b.x - o.x, dy = b.y - o.y, d = hyp(dx, dy);
+    if (!(d < RIDER_R + BOMB_R) || d === 0) continue;
+    const nx = dx / d, ny = dy / d; b.x = o.x + nx * (RIDER_R + BOMB_R); b.y = o.y + ny * (RIDER_R + BOMB_R);
+    const vn = (b.vx - o.vx) * nx + (b.vy - o.vy) * ny; if (vn < 0) { b.vx -= BALL_BUMP * vn * nx; b.vy -= BALL_BUMP * vn * ny; }
+    if (!b.owner) touchBall(b, o); // an unclaimed ball belongs to whoever first touches it
+  }
+  const g = inGoal(b.x, b.y);
+  if (g) scoreGoal(b, g);
+}
+function scoreGoal(b, g) {
+  const s = b.owner, dunk = b.state === 'held';
+  removeBomb(b);
+  g.flash = 1.4;
+  spawnParts(b.x, b.y, 40, s ? s.color : '#fff', 380, 0.9); spawnParts(b.x, b.y, 24, '#fff', 260, 0.6); spawnParts(b.x, b.y, 20, g.color, 300, 0.8);
+  lastGoal = { by: s ? s.name : null, goal: g.name, x: b.x, y: b.y, t: gameT, dunk, assist: null };
+  if (!s) { if (state === 'play') msg('GOAL - NOBODY CLAIMED IT', '#aaa'); return; }
+  s.goals++; s.log.goals++; s.tricks++;
+  if (!s.isPlayer || aiAll) { aiStats.goals++; if (dunk) aiStats.dunks++; }
+  award(s, PTS_GOAL, dunk ? 'GOAL (DUNK)' : 'GOAL', b.x, b.y);
+  const a = b.prevOwner;
+  if (a && a !== s && gameT - b.prevT <= ASSIST_WINDOW) { a.log.assists++; award(a, PTS_ASSIST, 'ASSIST', b.x, b.y - 20); lastGoal.assist = a.name; if (!a.isPlayer || aiAll) aiStats.assists++; }
+  if (state === 'play') {
+    goalBanner = { text: 'GOAL! ' + s.name, color: s.color, t: 2.4, sub: (dunk ? 'DUNKED IT  ' : '') + '+' + PTS_GOAL + (lastGoal.assist ? '   ASSIST ' + lastGoal.assist + ' +' + PTS_ASSIST : '') };
+    const near = onScreen(b.x, b.y);
+    if (near || s.isPlayer) { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.14, 'square', 0.07), i * 80)); noise(0.6, 0.25, 1200); }
+    if (s.isPlayer || near) shake = Math.max(shake, 7);
+  }
+  for (const d of dispensers) d.cool = Math.max(d.cool, 1.5);
+}
+function ballOf(r) { return bombs.find(b => b.ball && b.state === 'held' && b.holder === r) || null; }
+function ballCarriers() { const out = []; for (const b of bombs) if (b.ball && b.state === 'held' && b.holder) out.push(b.holder); return out; }
+// ---- v0.9.6 ROCKETBALL AI ----
+function aiBallTarget(r, thinkNow) { // contest a carrier: knock them off (they drop it) or hook the ball off them
+  const ai = r.ai, P = ai.p || AI_PERSONA.GOLD;
+  if (ballOf(r)) { ai.contest = null; return; }
+  if (ai.contest && (!ai.contest.onRocket || !ballOf(ai.contest))) ai.contest = null;
+  if (!ai.contest && thinkNow) {
+    let best = null, bd = AI_BALL_RANGE;
+    for (const o of ballCarriers()) { if (o === r || !o.onRocket) continue; const d = hyp(o.x - r.x, o.y - r.y); if (d < bd) { bd = d; best = o; } }
+    if (best && Math.random() < 0.35 + 0.6 * P.brawl) ai.contest = best;
+  }
+  if (ai.contest) {
+    ai.target = ai.contest; ai.retarget = Math.max(ai.retarget, 0.5);
+    if (P.brawl >= 0.6 && thinkNow && hyp(ai.contest.x - r.x, ai.contest.y - r.y) < cableMax(r)) { ai.cool = Math.min(ai.cool, 0.35); ai.zone = 'mid'; } // RED: quick yank shots at the carrier
+  }
+}
+function aiGoalLine(b, r, g, aimY, tol) { // would the ball, let go right now, roll into goal g (near aimY)?
+  const [vx, vy] = bombReleaseVel(b, r), sp = hyp(vx, vy);
+  if (sp < 170 || (g.side < 0 ? vx > -50 : vx < 50)) return false;
+  const tt = (g.x - b.x) / vx, cy = b.y + vy * tt; if (!(tt > 0)) return false;
+  if (Math.abs(cy - aimY) > tol || Math.abs(cy - g.cy) > GOAL_HALF - 12) return false;
+  const travel = hyp(g.x - b.x, cy - b.y), reach = sp * 1.3 * ((r.ai.p && r.ai.p.longShot) || 1);
+  if (travel > reach * 0.92) return false;
+  if (cableBlocked(-1, b.x, b.y, g.x, cy)) return false;
+  for (const p of posts) if (!p.gp && segDist(p.x, p.y, b.x, b.y, g.x, cy) < p.r + BOMB_R + 2) return false;
+  for (const o of riders) if (o !== r && o.onRocket && segDist(o.x, o.y, b.x, b.y, g.x, cy) < RIDER_R + BOMB_R + 6 && hyp(o.x - b.x, o.y - b.y) > 30) return false; // someone in the way
+  return true;
+}
+function aiBall(r, c, t, dist, desired, thinkNow, dt) {
+  const ai = r.ai, P = ai.p || AI_PERSONA.GOLD;
+  let s = -1;
+  for (let i = 0; i < 2; i++) { const k = r.cables[i]; if (k && k.state === 'latched' && k.target.kind === 'bomb') s = i; }
+  if (s < 0) { ai.bombRelease = false; ai.carryT = 0; ai.shotErr = null; ai.goalRun = false; }
+  const b = s >= 0 ? r.cables[s].target.b : null;
+  if (b) { // carrying: run at a goal, let go when the ball's flight line is in
+    ai.ballGoal = null;
+    if (ai.bombRelease) return desired;
+    ai.carryT += dt; ai.goalRun = true;
+    if (ai.shotErr == null) { ai.shotErr = clamp(gauss() * AI_BALL_ERR, -GOAL_HALF * 1.3, GOAL_HALF * 1.3); ai.goalPick = hyp(goals[0].x - r.x, goals[0].cy - r.y) < hyp(goals[1].x - r.x, goals[1].cy - r.y) ? goals[0] : goals[1]; }
+    const g = ai.goalPick, aimY = g.cy + ai.shotErr, dG = hyp(g.x - r.x, aimY - r.y);
+    if (aiGoalLine(b, r, g, aimY, 28 + AI_BALL_ERR * 0.15)) { ai.bombRelease = true; ai.ballShot = true; return desired; }
+    // aim point a little past the mouth; GREEN weaves so the ball whips out
+    let d = Math.atan2(aimY - r.y, g.x - g.side * 30 - r.x);
+    if (P.weave && dG > 450) d += Math.sin(gameT * 3.2 + r.id) * 0.45;
+    c.boost = r.fuel > 15 && dG < 1100;
+    if (ai.carryT > 10) { ai.bombRelease = true; ai.ballShot = false; } // stuck: dump it
+    return d;
+  }
+  ai.goalRun = false;
+  if (ai.mode === 'escape') return desired;
+  if (ai.contest && P.brawl >= 0.6) { ai.ballGoal = null; return desired; } // RED: go knock the carrier off (hunt/lineup yanks), don't fish for the ball
+  // go for a ball (loose / flying; or the one a rival carries: hook it right off them)
+  if (ai.ballGoal) {
+    const g = ai.ballGoal; ai.ballGoalT -= dt; ai.ballShotCool = Math.max(0, (ai.ballShotCool || 0) - dt);
+    if (!bombs.includes(g) || ai.ballGoalT <= 0 || (g.state === 'held' && (g.holder === r || !ai.ballSteal))) ai.ballGoal = null;
+    else {
+      const side = aiFreeSide(r), d = hyp(g.x - r.x, g.y - r.y), toB = Math.atan2(g.y + g.vy * 0.3 - r.y, g.x + g.vx * 0.3 - r.x);
+      if (side >= 0 && d < cableMax(r) * 0.85 && r.cableCool <= 0 && !ai.ballShotCool && (!r.cables[side] || r.cables[side].state === 'retract')) {
+        const sd = aiSideToward(r, g.x, g.y);
+        if (sd === side || sd < 0) {
+          const ft = d / CABLE_SPEED;
+          c.fire[side] = true; c.aim[side] = Math.atan2(g.y + (g.vy - r.vy) * ft - r.y, g.x + (g.vx - r.vx) * ft - r.x) + gauss() * AI_ERR * 0.5;
+          c.hold[side] = true; ai.wantLatch[side] = true; ai.ballShotCool = rand(0.35, 0.7);
+        }
+      }
+      return d > cableMax(r) * 0.6 ? toB : toB + ((side === 0 ? 1 : -1) * 0.6);
+    }
+  }
+  if (thinkNow && !ai.ballGoal) {
+    let best = null, bs = AI_BALL_RANGE;
+    for (const q of bombs) {
+      if (!q.ball || (q.state === 'held' && q.holder === r)) continue;
+      const d = hyp(q.x - r.x, q.y - r.y) + (q.state === 'held' ? 250 : 0); if (d < bs) { bs = d; best = q; }
+    }
+    if (best && Math.random() < AI_BALL_CHASE * P.chase) {
+      ai.ballGoal = best; ai.ballGoalT = 6; ai.ballSteal = best.state === 'held' ? Math.random() < AI_BALL_STEAL : true;
+      if (best.state === 'held' && !ai.ballSteal) ai.ballGoal = null;
+    }
+  }
+  // defend: a rival carrier closing on a goal and nobody's on them -> sit in front of that goal mouth
+  if (ai.defend) {
+    ai.defend.t -= dt; const o = ai.defend.o, g = ai.defend.g;
+    if (ai.defend.t <= 0 || !o.onRocket || !ballOf(o)) ai.defend = null;
+    else { const px = g.x - g.side * 260, py = g.cy + clamp(o.y - g.cy, -GOAL_HALF, GOAL_HALF) * 0.6, d = hyp(px - r.x, py - r.y);
+      return d > 120 ? Math.atan2(py - r.y, px - r.x) : Math.atan2(o.y - r.y, o.x - r.x); }
+  } else if (thinkNow && !ai.contest && Math.random() < AI_BALL_DEFEND * P.defend) {
+    for (const o of ballCarriers()) {
+      if (o === r) continue;
+      const g = hyp(goals[0].x - o.x, goals[0].cy - o.y) < hyp(goals[1].x - o.x, goals[1].cy - o.y) ? goals[0] : goals[1];
+      if (hyp(g.x - o.x, g.cy - o.y) < 1200 && hyp(g.x - r.x, g.cy - r.y) < hyp(g.x - o.x, g.cy - o.y) + 300) { ai.defend = { o, g, t: 4 }; if (!r.isPlayer || aiAll) aiStats.ballDefends++; break; }
+    }
+  }
+  return desired;
 }
 // v0.9.4 BALL AND CHAIN: the victim can shake it off (boost hard and/or swing on a post) or pass it on (bump someone).
 // returns true if the bomb is no longer chained (skip the rest of this frame's update for it)
@@ -1917,7 +2170,8 @@ function riderCanTie(r) {
   if (!r || !r.onRocket) return false;
   const [a, b] = r.cables;
   return !!(a && b && a.state === 'latched' && b.state === 'latched' && !sameAnchor(a.target, b.target)
-    && !(a.target.kind === 'bomb' && b.target.kind === 'bomb')); // v0.9.3: can't tie two bombs together
+    && !(a.target.kind === 'bomb' && b.target.kind === 'bomb') // v0.9.3: can't tie two bombs together
+    && !(a.target.kind === 'bomb' && a.target.b.ball) && !(b.target.kind === 'bomb' && b.target.b.ball)); // v0.9.6: balls are carried / flung, not tied
 }
 function canTie() { return !!(player && state === 'play' && riderCanTie(player)); }
 function tetherKind(a, b) {
@@ -2072,6 +2326,7 @@ function swingClotheslines(dt) {
 function knockOff(o, by, how, src) {
   if ((how === 'yank' || how === 'clothes' || how === 'bomb') && gripAbsorb(o, by)) return false; // v0.7 GRIP shield (v0.9.3: also soaks one bomb)
   const credit = creditFor(o, by); // v0.8: who caused this fall (direct hit, or the last cable/rope/binding on them within 3 s)
+  const hadBall = isBall() && !!ballOf(o); // v0.9.6: a carrier knocked off drops the ball (cables go -> it flies off with its momentum)
   o.onRocket = false; o.falls++; o.cables = [null, null]; o.killer = credit; o.boosting = false;
   o.theftTow = o.theftTie = false; // v0.9.5: one theft payout per knockoff
   o.tumble = TUMBLE_TIME; o.footT = 0; o.stun = 0; o.inv = 0; o.cableCool = 0;
@@ -2098,9 +2353,11 @@ function knockOff(o, by, how, src) {
       if ((!credit.isPlayer || aiAll) && how === 'yank') { aiStats.yanks++; aiStats.mid++; }
       if ((!credit.isPlayer || aiAll) && how === 'bomb') aiStats.bombKOs++;
       if (how === 'bomb') credit.log.bombKOs++; else if (clo) credit.log.clothes++; // v0.9.4 trick log
-      award(credit, clo ? PTS_CLOTHES : PTS_KO, clo ? 'CLOTHESLINE' : how === 'bomb' ? 'BOMBED' : 'KNOCKOFF', o.x, o.y);
+      const km = isBall() ? RB_KO_MULT : 1; // v0.9.6: KOs are the side score in ROCKETBALL
+      award(credit, (clo ? PTS_CLOTHES : PTS_KO) * km, clo ? 'CLOTHESLINE' : how === 'bomb' ? 'BOMBED' : 'KNOCKOFF', o.x, o.y);
       credit.chain = gameT - credit.lastKO <= COMBO_WINDOW ? credit.chain + 1 : 1; credit.lastKO = gameT;
-      if (credit.chain > 1) award(credit, PTS_COMBO * (credit.chain - 1), 'COMBO', o.x, o.y - 18);
+      if (credit.chain > 1) award(credit, Math.round(PTS_COMBO * (credit.chain - 1) * km), 'COMBO', o.x, o.y - 18);
+      if (hadBall) { credit.log.ballKOs++; if (!credit.isPlayer || aiAll) aiStats.carrierKOs++; }
     }
     award(o, -PTS_FALL, 'FALL', o.x, o.y + 34);
   }
@@ -2122,6 +2379,7 @@ function knockOff(o, by, how, src) {
       else if (o.isPlayer) { msg('YANKED BY ' + (by ? by.name : '???') + '!', '#f44'); }
       else if (by) msg(by.name + ' YANKED ' + o.name, '#aaa');
     }
+    if (hadBall) { if (o.isPlayer) msg('YOU DROPPED THE BALL!', '#f44'); else if (credit && credit.isPlayer) msg(o.name + ' DROPPED THE BALL!', '#fc0'); }
     if (credit && credit.isPlayer) shake = 6; else if (o.isPlayer) shake = 10;
     if (o.isPlayer || credit && credit.isPlayer || onScreen(o.x, o.y)) sfx.knock();
   }
@@ -2560,19 +2818,20 @@ function drawTether(t, now) {
 
 // v0.9.3: 90s arcade bomb dispenser: hazard-striped ring, riveted octagon hopper, chute, red beacon, BOMBS stencil
 function drawDispenser(d, now) {
-  const x = d.x, y = d.y, R = d.r, tt = now / 1000, ready = d.cool < 1.5 && bombs.length < BOMB_MAX;
+  const BALL = isBall(), A = BALL ? '#ff66ff' : '#ffcc00', A2 = BALL ? '255,102,255' : '255,204,0'; // v0.9.6: ball dispensers are magenta
+  const x = d.x, y = d.y, R = d.r, tt = now / 1000, ready = d.cool < 1.5 && bombs.length < (BALL ? BALL_MAX : BOMB_MAX);
   ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.arc(x + 7, y + 7, R + 6, 0, TAU); ctx.fill();
   ctx.strokeStyle = 'rgba(0,255,255,' + (0.18 + 0.12 * Math.sin(tt * 3)) + ')'; ctx.lineWidth = 3; // hookable, like a post
   ctx.beginPath(); ctx.arc(x, y, R + 12, 0, TAU); ctx.stroke();
   for (let i = 0; i < 12; i++) { // hazard ring
-    ctx.strokeStyle = i % 2 ? '#111' : '#ffcc00'; ctx.lineWidth = 7;
+    ctx.strokeStyle = i % 2 ? '#111' : A; ctx.lineWidth = 7;
     ctx.beginPath(); ctx.arc(x, y, R + 3, i * TAU / 12 + tt * 0.6, (i + 1) * TAU / 12 + tt * 0.6); ctx.stroke();
   }
   // chute toward where the next bomb pops out
   ctx.save(); ctx.translate(x, y); ctx.rotate(d.nextA);
   ctx.fillStyle = '#2a2f3a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
   ctx.fillRect(R - 6, -7, 14, 14); ctx.strokeRect(R - 6, -7, 14, 14);
-  ctx.fillStyle = d.flash > 0 ? '#ffcc33' : '#111'; ctx.fillRect(R + 3, -5, 4, 10);
+  ctx.fillStyle = d.flash > 0 ? A : '#111'; ctx.fillRect(R + 3, -5, 4, 10);
   ctx.restore();
   // riveted octagon body
   ctx.fillStyle = '#4b5468'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2.5;
@@ -2580,20 +2839,47 @@ function drawDispenser(d, now) {
   ctx.fillStyle = '#9aa3b8'; for (let i = 0; i < 8; i++) { const a = i * TAU / 8 + TAU / 16; ctx.fillRect(x + Math.cos(a) * (R - 5) - 1.5, y + Math.sin(a) * (R - 5) - 1.5, 3, 3); }
   // hatch with a countdown arc and a bomb icon
   ctx.fillStyle = '#12141c'; ctx.beginPath(); ctx.arc(x, y, R * 0.62, 0, TAU); ctx.fill();
-  const prog = clamp(1 - d.cool / BOMB_EVERY[0], 0, 1);
-  ctx.strokeStyle = ready ? (Math.floor(now / 120) % 2 ? '#ff3322' : '#ffcc33') : '#ff7a22'; ctx.lineWidth = 3;
+  const prog = clamp(1 - d.cool / (BALL ? BALL_EVERY[0] : BOMB_EVERY[0]), 0, 1);
+  ctx.strokeStyle = ready ? (Math.floor(now / 120) % 2 ? (BALL ? '#fff' : '#ff3322') : A) : (BALL ? '#a4a' : '#ff7a22'); ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(x, y, R * 0.62 - 2, -Math.PI / 2, -Math.PI / 2 + TAU * prog); ctx.stroke();
+  if (BALL) { ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y + 1, 6, 0, TAU); ctx.fill(); ctx.stroke(); }
+  else {
   ctx.fillStyle = '#000'; ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.arc(x, y + 1, 6, 0, TAU); ctx.fill(); ctx.stroke();
-  ctx.strokeStyle = '#c96'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 3, y - 4); ctx.quadraticCurveTo(x + 6, y - 9, x + 9, y - 7); ctx.stroke();
+  ctx.strokeStyle = '#c96'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 3, y - 4); ctx.quadraticCurveTo(x + 6, y - 9, x + 9, y - 7); ctx.stroke(); }
   // rotating beacon
   const on = ready ? Math.floor(now / 150) % 2 : Math.floor(now / 600) % 2;
-  ctx.fillStyle = on ? '#ff2a1a' : '#601010'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+  ctx.fillStyle = on ? (BALL ? '#ff66ff' : '#ff2a1a') : (BALL ? '#502050' : '#601010'); ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.arc(x - R * 0.55, y - R * 0.55, 5, 0, TAU); ctx.fill(); ctx.stroke();
-  if (on && ready) { ctx.fillStyle = 'rgba(255,40,20,0.25)'; ctx.beginPath(); ctx.arc(x - R * 0.55, y - R * 0.55, 13, 0, TAU); ctx.fill(); }
-  txt('BOMBS', x, y + R + 20, 11, '#ffcc00', 'center');
+  if (on && ready) { ctx.fillStyle = BALL ? 'rgba(255,102,255,0.25)' : 'rgba(255,40,20,0.25)'; ctx.beginPath(); ctx.arc(x - R * 0.55, y - R * 0.55, 13, 0, TAU); ctx.fill(); }
+  txt(BALL ? 'BALLS' : 'BOMBS', x, y + R + 20, 11, A, 'center');
+}
+function drawBall(b, now) { // v0.9.6: big white ball with an owner-coloured ring (who'd score if it went in now)
+  const x = b.x, y = b.y, R = BOMB_R + 2, oc = b.owner ? b.owner.color : '#ffffff';
+  ctx.fillStyle = 'rgba(255,255,255,' + (0.16 + 0.1 * Math.sin(b.t * 5)) + ')'; ctx.beginPath(); ctx.arc(x, y, R + 11, 0, TAU); ctx.fill();
+  ctx.strokeStyle = oc; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(x, y, R + 6, 0, TAU); ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.arc(x + 4, y + 4, R, 0, TAU); ctx.fill();
+  ctx.save(); ctx.translate(x, y); ctx.rotate(b.rot);
+  ctx.fillStyle = '#f4f4f4'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#222'; ctx.beginPath(); for (let i = 0; i < 5; i++) { const a = i * TAU / 5; ctx.lineTo(Math.cos(a) * R * 0.38, Math.sin(a) * R * 0.38); } ctx.closePath(); ctx.fill();
+  for (let i = 0; i < 5; i++) { const a = i * TAU / 5 + TAU / 10; ctx.beginPath(); ctx.arc(Math.cos(a) * R * 0.92, Math.sin(a) * R * 0.92, R * 0.24, 0, TAU); ctx.fill(); }
+  ctx.restore();
+  if (b.state === 'held' && b.holder) txt('BALL', x, y - R - 12, 10, oc, 'center');
+}
+function drawGoal(g, now) { // v0.9.6: netted box against the side wall, posts at the mouth, big GOAL lettering
+  const x0 = g.side < 0 ? 0 : g.x, w = GOAL_DEPTH, y0 = g.cy - GOAL_HALF, h = GOAL_HALF * 2, fl = g.flash > 0 && Math.floor(now / 90) % 2;
+  ctx.fillStyle = fl ? 'rgba(255,255,255,0.35)' : 'rgba(' + (g.side < 0 ? '255,102,255' : '102,255,204') + ',0.16)'; ctx.fillRect(x0, y0, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1;
+  for (let yy = y0; yy <= y0 + h; yy += 20) { ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x0 + w, yy); ctx.stroke(); }
+  for (let xx = x0; xx <= x0 + w; xx += 20) { ctx.beginPath(); ctx.moveTo(xx, y0); ctx.lineTo(xx, y0 + h); ctx.stroke(); }
+  ctx.strokeStyle = g.color; ctx.lineWidth = 6; ctx.beginPath();
+  ctx.moveTo(x0 + (g.side < 0 ? 0 : w), y0); ctx.lineTo(g.x, y0); ctx.lineTo(g.x, y0 + h); ctx.lineTo(x0 + (g.side < 0 ? 0 : w), y0 + h); ctx.stroke();
+  ctx.setLineDash([16, 12]); ctx.lineWidth = 4; ctx.strokeStyle = fl ? '#fff' : g.color; ctx.beginPath(); ctx.moveTo(g.x, y0); ctx.lineTo(g.x, y0 + h); ctx.stroke(); ctx.setLineDash([]);
+  ctx.save(); ctx.translate(x0 + w / 2, g.cy); ctx.rotate(g.side < 0 ? -Math.PI / 2 : Math.PI / 2);
+  txt('GOAL', 0, 0, 44, fl ? '#fff' : g.color, 'center'); ctx.restore();
 }
 function drawBomb(b, now) {
+  if (b.ball) { drawBall(b, now); return; } // v0.9.6
   const x = b.x, y = b.y, R = BOMB_R;
   const lit = b.lit, flash = lit && b.on;
   if (lit && b.fuse < 1.4 && b.state !== 'held') { // danger ring = blast radius
@@ -2654,6 +2940,7 @@ function render(now) {
   // walls (hazard stripes)
   ctx.lineWidth = 18; ctx.strokeStyle = '#fc0'; ctx.strokeRect(-9, -9, WORLD_W + 18, WORLD_H + 18);
   ctx.setLineDash([28, 28]); ctx.strokeStyle = '#111'; ctx.strokeRect(-9, -9, WORLD_W + 18, WORLD_H + 18); ctx.setLineDash([]);
+  if (isBall()) for (const g of goals) drawGoal(g, now); // v0.9.6
   // posts
   const tt = now / 1000;
   for (const p of posts) {
@@ -2664,7 +2951,7 @@ function render(now) {
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 7, 0, TAU); ctx.stroke();
     ctx.fillStyle = '#8a8fa0'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#d33'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 0.45, 0, TAU); ctx.fill();
+    ctx.fillStyle = p.gp ? p.g.color : '#d33'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 0.45, 0, TAU); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(p.x - p.r * 0.3, p.y - p.r * 0.3, p.r * 0.18, 0, TAU); ctx.fill();
   }
   // fences
@@ -2801,13 +3088,14 @@ function drawHUD(now) {
   if (ALTITUDE_ENABLED && !player.onRocket) txt('GROUND', ax + 1.5 * (aw + 3 * sc), fy + fh + 14 * sc, 10 * sc, '#aaa', 'center', false);
   // mini scoreboard
   let yy = fy + fh + 14 * sc;
-  for (const r of riders) { if (r.isPlayer) continue; txt(r.name + ' ' + r.score + (r.onRocket ? (ALTITUDE_ENABLED ? ' [' + 'LMH'[lvl(r)] + ']' : '') : ' (on foot)'), 12, yy, 12 * sc, r.color); yy += 15 * sc; }
+  for (const r of riders) { if (r.isPlayer) continue; txt(r.name + ' ' + r.score + (isBall() ? ' (' + r.goals + 'G)' : '') + (r.onRocket ? (ALTITUDE_ENABLED ? ' [' + 'LMH'[lvl(r)] + ']' : '') : ' (on foot)'), 12, yy, 12 * sc, r.color); yy += 15 * sc; }
   // timer
   const t = Math.ceil(timeLeft), mm = Math.floor(t / 60), ss = t % 60;
   txt(mm + ':' + (ss < 10 ? '0' : '') + ss, VW / 2, 20 * sc, 26 * sc, t <= 30 ? '#f44' : '#fff', 'center');
-  txt(difficulty.toUpperCase(), VW / 2, 40 * sc, 11 * sc, difficulty === 'Hard' ? '#f88' : difficulty === 'Normal' ? '#fc8' : '#8c8', 'center', false);
-  // messages
+  txt((isBall() ? 'ROCKETBALL  ' : '') + difficulty.toUpperCase(), VW / 2, 40 * sc, 11 * sc, difficulty === 'Hard' ? '#f88' : difficulty === 'Normal' ? '#fc8' : '#8c8', 'center', false);
   let my = 50 * sc;
+  if (isBall()) my = drawBallHUD(sc, now); // v0.9.6 goal ticker + ball indicator + GOAL! banner
+  // messages
   for (const m of msgs) { ctx.globalAlpha = clamp(m.t, 0, 1); txt(m.text, VW / 2, my, 16 * sc, m.color, 'center'); my += 20 * sc; }
   ctx.globalAlpha = 1;
   // on foot prompt
@@ -2842,6 +3130,8 @@ function drawHUD(now) {
     const bw = 160 * sc, bh = 7 * sc, bx = VW / 2 - bw / 2, by = VH * 0.3 + 32 * sc;
     ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
     ctx.fillStyle = '#ff7733'; ctx.fillRect(bx, by, bw * str, bh);
+  } else if (isBall() && ballOf(player)) { // v0.9.6
+    txt('YOU HAVE THE BALL: STEER AT A GOAL, LET GO TO FLING (OR FLY IT IN)', VW / 2, VH * 0.3, 13 * sc, Math.floor(now / 250) % 2 ? '#fff' : player.color, 'center');
   } else if (!canTie() && player.cables.some(k => k && k.state === 'latched' && k.target.kind === 'bomb')) { // v0.9.3
     const hb = player.cables.find(k => k && k.state === 'latched' && k.target.kind === 'bomb').target.b;
     txt('BOMB ' + hb.fuse.toFixed(1) + 's: HOOK A RIDER + TIE = BALL AND CHAIN  |  POST + TIE = MINE  |  LET GO = FLING', VW / 2, VH * 0.3, 13 * sc, hb.on ? '#ff5533' : '#ffcc33', 'center');
@@ -2852,6 +3142,33 @@ function drawHUD(now) {
   if (isTouch) drawTouch(sc, now);
   else txt(player.onRocket ? 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables (hold)  T tie' + (ALTITUDE_ENABLED ? '  R/F altitude' : '') : 'ARROWS/WASD run to your rocket', VW / 2, VH - 14, 12, '#678', 'center', false);
 }
+function drawBallHUD(sc, now) {
+  // goal ticker under the clock: YOU 1  RED 0  GREEN 2  GOLD 0
+  ctx.font = 'bold ' + (12 * sc) + 'px ' + FONT;
+  const parts = riders.map(r => (r.isPlayer ? 'YOU' : r.name) + ' ' + r.goals), wd = parts.map(p => ctx.measureText(p).width + 12 * sc), tw = wd.reduce((a, b) => a + b, 0);
+  let x = VW / 2 - tw / 2; const y = 55 * sc;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x - 6 * sc, y - 9 * sc, tw + 12 * sc, 18 * sc);
+  txt('GOALS', x - 10 * sc, y, 10 * sc, '#f8f', 'right', false);
+  riders.forEach((r, i) => { txt(parts[i], x + wd[i] / 2, y, 12 * sc, r.color, 'center', false); x += wd[i]; });
+  // who has the ball
+  const cs = ballCarriers(), loose = bombs.filter(b => b.ball && b.state !== 'held').length;
+  const line = cs.length ? 'BALL: ' + cs.map(r => r.isPlayer ? 'YOU' : r.name).join(' + ') + (loose ? '  (+' + loose + ' LOOSE)' : '') : loose ? loose + ' LOOSE BALL' + (loose > 1 ? 'S' : '') : 'NEXT BALL COMING...';
+  txt(line, VW / 2, y + 16 * sc, 11 * sc, cs.length ? cs[0].color : '#ddd', 'center', false);
+  // off-screen arrow to the nearest ball you don't have
+  let nb = null, nd = 1e9; for (const b of bombs) { if (!b.ball || b.holder === player) continue; const d = hyp(b.x - player.x, b.y - player.y); if (d < nd) { nd = d; nb = b; } }
+  if (nb && !onScreen(nb.x, nb.y) && player.onRocket) {
+    const s2 = cam.scale, a = Math.atan2(nb.y - cam.y, nb.x - cam.x), ex = VW / 2 + Math.cos(a) * Math.min(VW * 0.42, VH * 0.42 / Math.max(0.3, Math.abs(Math.sin(a))) ), ey = VH / 2 + Math.sin(a) * VH * 0.4;
+    ctx.save(); ctx.translate(ex, ey); ctx.rotate(a); ctx.fillStyle = nb.owner ? nb.owner.color : '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(14 * sc, 0); ctx.lineTo(-8 * sc, -9 * sc); ctx.lineTo(-3 * sc, 0); ctx.lineTo(-8 * sc, 9 * sc); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    txt('BALL', ex, ey - 16 * sc, 10 * sc, '#fff', 'center', false);
+  }
+  if (goalBanner) {
+    const a = clamp(goalBanner.t / 0.5, 0, 1), sz = Math.min(VW / 10, 46 * sc) * (1 + 0.15 * clamp(goalBanner.t - 1.9, 0, 0.5));
+    ctx.globalAlpha = a; drawBigTitle(goalBanner.text, VW / 2, VH * 0.42, sz);
+    txt(goalBanner.sub, VW / 2, VH * 0.42 + sz * 0.75, 15 * sc, goalBanner.color, 'center'); ctx.globalAlpha = 1;
+  }
+  return y + 32 * sc;
+}
 function drawMinimap(sc) {
   const w = 130 * sc, h = w * WORLD_H / WORLD_W, x = VW - w - 10, y = 10;
   ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, w, h);
@@ -2859,8 +3176,11 @@ function drawMinimap(sc) {
   const k = w / WORLD_W;
   ctx.fillStyle = '#0aa';
   for (const p of posts) if (!p.disp) ctx.fillRect(x + p.x * k - 1, y + p.y * k - 1, 2, 2);
-  for (const d of dispensers) { ctx.fillStyle = '#ffcc00'; ctx.fillRect(x + d.x * k - 3, y + d.y * k - 3, 6, 6); ctx.fillStyle = '#000'; ctx.fillRect(x + d.x * k - 1, y + d.y * k - 1, 2, 2); } // v0.9.3
-  for (const b of bombs) { ctx.fillStyle = b.lit ? (b.on ? '#ff3322' : '#ffcc33') : '#aa8800'; ctx.beginPath(); ctx.arc(x + b.x * k, y + b.y * k, 2, 0, TAU); ctx.fill(); }
+  for (const d of dispensers) { ctx.fillStyle = isBall() ? '#ff66ff' : '#ffcc00'; ctx.fillRect(x + d.x * k - 3, y + d.y * k - 3, 6, 6); ctx.fillStyle = '#000'; ctx.fillRect(x + d.x * k - 1, y + d.y * k - 1, 2, 2); } // v0.9.3
+  if (isBall()) for (const g of goals) { ctx.fillStyle = g.color; ctx.fillRect(x + (g.side < 0 ? 0 : g.x) * k, y + (g.cy - GOAL_HALF) * k, GOAL_DEPTH * k + 1, GOAL_HALF * 2 * k); } // v0.9.6
+  for (const b of bombs) {
+    if (b.ball) { ctx.fillStyle = '#fff'; ctx.strokeStyle = b.owner ? b.owner.color : '#000'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x + b.x * k, y + b.y * k, 3.5, 0, TAU); ctx.fill(); ctx.stroke(); continue; }
+    ctx.fillStyle = b.lit ? (b.on ? '#ff3322' : '#ffcc33') : '#aa8800'; ctx.beginPath(); ctx.arc(x + b.x * k, y + b.y * k, 2, 0, TAU); ctx.fill(); }
   ctx.fillStyle = '#0aa';
   for (const f of fences) { ctx.strokeStyle = f.tall ? '#ccd' : '#c8873e'; ctx.lineWidth = f.tall ? 2.5 : 1.5; ctx.beginPath(); ctx.moveTo(x + f.x1 * k, y + f.y1 * k); ctx.lineTo(x + f.x2 * k, y + f.y2 * k); ctx.stroke(); }
   for (const q of pickups) { ctx.fillStyle = PU_TYPES[q.type].color; const px = x + q.x * k, py = y + q.y * k; ctx.beginPath(); ctx.moveTo(px, py - 3); ctx.lineTo(px + 3, py); ctx.lineTo(px, py + 3); ctx.lineTo(px - 3, py); ctx.closePath(); ctx.fill(); }
@@ -2947,7 +3267,17 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.9.5  ROCKET WAR + ROCKET THEFT', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.9.6  ROCKET WAR + ROCKETBALL', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  if (isBall()) { // v0.9.6
+    txt('ROCKETBALL: hook a ball with <L / R>, hold to carry & swing it, let go to FLING.', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
+    txt('Get it in either GOAL: +' + PTS_GOAL + ' to whoever hooked it last (ASSIST +' + PTS_ASSIST + ').', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#f8f', 'center');
+    txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie  M mode', VW / 2, VH * 0.48 + 34 * sc, 11 * sc, '#8ab', 'center');
+    txt('Hook a carried ball to STEAL it (+' + PTS_BALL_STEAL + ').  Knock the carrier off and they drop it.  KO +' + PTS_KO * RB_KO_MULT + '  CLOTHES +' + PTS_CLOTHES * RB_KO_MULT + '  FALL -' + PTS_FALL + '.  No bombs.',
+      VW / 2, VH * 0.48 + 50 * sc, 9 * sc, '#9c9', 'center', false);
+    drawDiffPicker('title', now);
+    if (Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO START' : 'CLICK OR PRESS SPACE TO START', VW / 2, VH * 0.9, 18 * sc, '#fff', 'center');
+    return;
+  }
   txt('Grapple posts to whip around corners.  Hit RIDER to yank; NOSE/TAIL to tow!', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE: clotheslines & tie-ups!', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#f93', 'center');
   txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.48 + 34 * sc, 11 * sc, '#8ab', 'center');
@@ -2963,30 +3293,33 @@ function drawResults(now) {
   const sc = clamp(VH / 390, 0.8, 1.6);
   // v0.9.4: tighter layout so the trick log fits above the difficulty buttons on a landscape phone (~915x412)
   const btnTop = diffBtnLayout('over')[0].y - 24 * sc; // top of the DIFFICULTY label
-  drawBigTitle('ROUND OVER', VW / 2, VH * 0.09, Math.min(VW / 12, 34 * sc));
+  drawBigTitle(resultsMode === 'ball' ? 'ROCKETBALL OVER' : 'ROUND OVER', VW / 2, VH * 0.09, Math.min(VW / 12, 34 * sc));
   const place = results.indexOf(player) + 1;
   const tie = results.length > 1 && results[0].score === results[1].score && results[0].falls === results[1].falls && place <= 2;
   const ord = ['1ST', '2ND', '3RD', '4TH'][place - 1];
   txt(place === 1 && !tie ? 'YOU WIN!' : tie ? 'TIE FOR 1ST!' : 'YOU PLACED ' + ord, VW / 2, VH * 0.19, 18 * sc, place === 1 ? '#fc0' : '#fff', 'center');
   const cx = VW / 2, rowH = 19 * sc; let y = VH * 0.27;
-  const cols = [['RANK', -250, 'left'], ['RIDER', -195, 'left'], ['POINTS', 30, 'right'], ['KOs', 110, 'right'], ['TRICKS', 205, 'right'], ['FALLS', 290, 'right']];
-  for (const c of cols) txt(c[0], cx + c[1] * sc, y, 11 * sc, '#888', c[2], false);
+  const RB = resultsMode === 'ball'; // v0.9.6
+  const cols = RB ? [['RANK', -250, 'left'], ['RIDER', -195, 'left'], ['POINTS', 30, 'right'], ['GOALS', 110, 'right'], ['KOs', 205, 'right'], ['FALLS', 290, 'right']]
+    : [['RANK', -250, 'left'], ['RIDER', -195, 'left'], ['POINTS', 30, 'right'], ['KOs', 110, 'right'], ['TRICKS', 205, 'right'], ['FALLS', 290, 'right']];
+  for (const c of cols) txt(c[0], cx + c[1] * sc, y, 11 * sc, c[0] === 'GOALS' ? '#f8f' : '#888', c[2], false);
   y += rowH * 0.95;
   results.forEach((r, i) => {
-    const vals = [(i + 1) + '.', r.name, String(r.score), String(r.kos), String(r.tricks), String(r.falls)];
+    const vals = RB ? [(i + 1) + '.', r.name, String(r.score), String(r.goals), String(r.kos), String(r.falls)] : [(i + 1) + '.', r.name, String(r.score), String(r.kos), String(r.tricks), String(r.falls)];
     cols.forEach((c, j) => txt(vals[j], cx + c[1] * sc, y, (j === 2 ? 16 : 14) * sc, r.color, c[2], false));
     y += rowH;
   });
   // trick log: one compact line per rider, small columns
   const lh = clamp((btnTop - y - 4 * sc) / (results.length + 1), 9, 14 * sc), fs = Math.min(10 * sc, lh * 0.82);
   y += lh * 0.2;
-  const tcols = [['TRICK LOG', -250, 'left', null], ['SWINGS', -112, 'right', 'swings'], ['CLOTHES', -48, 'right', 'clothes'], ['TIES', 2, 'right', 'ties'],
+  const tcols = RB ? [['TRICK LOG', -250, 'left', null], ['GOALS', -112, 'right', 'goals'], ['ASSISTS', -40, 'right', 'assists'], ['BALL STEALS', 62, 'right', 'ballSteals'],
+    ['CARRIER KOs', 168, 'right', 'ballKOs'], ['SWINGS', 236, 'right', 'swings'], ['CLOTHES', 304, 'right', 'clothes']] : [['TRICK LOG', -250, 'left', null], ['SWINGS', -112, 'right', 'swings'], ['CLOTHES', -48, 'right', 'clothes'], ['TIES', 2, 'right', 'ties'],
     ['BALL+CHAIN', 86, 'right', 'chains'], ['MINES', 142, 'right', 'mines'], ['BOMB KOs', 212, 'right', 'bombKOs'], ['PASSED', 272, 'right', 'passes'], ['STOLEN', 334, 'right', 'stolen']]; // v0.9.5 + STOLEN
   ctx.fillStyle = 'rgba(8,10,24,0.92)'; ctx.fillRect(cx - 258 * sc, y - lh * 0.6, 600 * sc, lh * (results.length + 1) + lh * 0.2);
   for (const c of tcols) txt(c[0], cx + c[1] * sc, y, fs, c[0] === 'TRICK LOG' ? '#f93' : '#888', c[2], false);
   y += lh;
   results.forEach(r => {
-    tcols.forEach(c => txt(c[3] ? String(r.log[c[3]] || 0) : r.name, cx + c[1] * sc, y, fs, ((c[3] === 'chains' && r.log.chains) || (c[3] === 'stolen' && r.log.stolen)) ? '#fc0' : r.color, c[2], false));
+    tcols.forEach(c => txt(c[3] ? String(r.log[c[3]] || 0) : r.name, cx + c[1] * sc, y, fs, ((c[3] === 'chains' && r.log.chains) || (c[3] === 'stolen' && r.log.stolen) || (c[3] === 'goals' && r.log.goals)) ? '#fc0' : r.color, c[2], false));
     y += lh;
   });
   RESULTS_LAYOUT.logBottom = y - lh * 0.4; RESULTS_LAYOUT.btnTop = btnTop; RESULTS_LAYOUT.fs = fs;
@@ -3027,9 +3360,12 @@ window.RJ = { get state() { return state; }, get riders() { return riders; }, ge
   BOMB: { DISP_COUNT, DISP_R, BOMB_EVERY, BOMB_MAX, BOMB_DISP_LOOSE, BOMB_R, BOMB_FUSE, BOMB_IDLE_LIFE, BOMB_REEL_L, BOMB_FLING_MULT, BOMB_WHIP, BOMB_FLY_TIME, BOMB_FLY_DRAG, BOMB_GROUND_DRAG,
     BOMB_IMPACT_SPEED, BOMB_BLAST_R, BOMB_PUSH, BOMB_STICK_FUSE, BOMB_MINE_TIME, BOMB_MINE_ARM, BOMB_MINE_TRIGGER, BOMB_LONG_DIST, PTS_BOMB_TRICK, PTS_MINE_TRICK,
     PTS_CHAIN_TRICK, PTS_KO, CHAIN_L, CHAIN_REEL, CHAIN_SHAKE_BOOST, CHAIN_SHAKE_POST, CHAIN_PASS_GAP, CHAIN_PASS_FUSE, MINE_MAX_L, BLAST_RIDER_V, BLAST_ROCKET_V, ROCKET_SKID_T, ROCKET_SKID_DRAG },
+  get mode() { return gameMode; }, set mode(v) { applyMode(v); }, setMode, MODES, modeBtnLayout, diffBtnLayout, goals, goalPosts, spawnBall, scoreGoal, inGoal, ballOf, grabBall, bombReleaseVel,
+  get lastGoal() { return lastGoal; }, get goalBanner() { return goalBanner; }, get resultsMode() { return resultsMode; },
+  BALL: { BALL_MAX, BALL_EVERY, BALL_FLY_TIME, GOAL_HALF, GOAL_DEPTH, PTS_GOAL, PTS_ASSIST, PTS_BALL_STEAL, ASSIST_WINDOW, RB_KO_MULT },
   chainVictim, updateTethers, RESULTS_LAYOUT, stealInfo, stealCable, stealTie, remount, latchCable, STEAL: { STEAL_DIST, PTS_STEAL, PTS_STEAL_TIE, PTS_STEAL_TIE_BONUS, STEAL_TOW_MAX, STEAL_TIE_LIFE, STEAL_YANK }, get overT() { return overT; }, set overT(v) { overT = v; },
   get AI() { return { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE, AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_STICKY, AI_FOLLOWUP, AI_PERSONA,
-    AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD, AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE, AI_STEAL_CHANCE, AI_STEAL_RANGE, AI_STEAL_YOU, AI_STEAL_TIE }; } };
+    AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD, AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE, AI_STEAL_CHANCE, AI_STEAL_RANGE, AI_STEAL_YOU, AI_STEAL_TIE, AI_BALL_ERR, AI_BALL_CHASE, AI_BALL_STEAL, AI_BALL_DEFEND, AI_BALL_RANGE }; } };
 })();
 </script>
 </body>
