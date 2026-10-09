@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.9.3</title>
+<title>Rocket Jockey v0.9.4</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -71,7 +71,9 @@ const DIFF_PRESETS = {
     AI_SWING_ENEMY: 380, AI_SWING_IDLE: 1.4, AI_PLAYER_PULL: 150, AI_CROWD: 400,
     AI_REVENGE: 450, AI_FOLLOWUP: [0.25, 0.7], AI_STICKY: 250,
     // v0.9.3 bombs
-    AI_BOMB_CHANCE: 0.22, AI_BOMB_RANGE: 380, AI_BOMB_ACC: 0.5, AI_BOMB_LEAD: 0.3, AI_BOMB_TIE: 0.25, AI_BOMB_PANIC: 0.55, AI_BOMB_DODGE: 0.35, AI_BOMB_MAXD: 560
+    AI_BOMB_CHANCE: 0.22, AI_BOMB_RANGE: 380, AI_BOMB_ACC: 0.5, AI_BOMB_LEAD: 0.3, AI_BOMB_TIE: 0.25, AI_BOMB_PANIC: 0.55, AI_BOMB_DODGE: 0.35, AI_BOMB_MAXD: 560,
+    // v0.9.4 ball and chain: plan odds once a bomb is in hand (the rest = fling), how often to go after YOU, how hard to shake one off
+    AI_BOMB_CHAIN: 0.40, AI_BOMB_MINE: 0.25, AI_BOMB_YOU: 0.0, AI_CHAIN_ESCAPE: 0.45
   },
   // Normal: competitive — less aim noise, faster reactions, stickier focus, more fire/tie
   Normal: {
@@ -80,7 +82,8 @@ const DIFF_PRESETS = {
     AI_ZONE_YANK: 0.45, AI_PU_CHANCE: 0.40, AI_PU_RANGE: 480, AI_THINK: [0.32, 0.65],
     AI_SWING_ENEMY: 400, AI_SWING_IDLE: 1.2, AI_PLAYER_PULL: 210, AI_CROWD: 380,
     AI_REVENGE: 500, AI_FOLLOWUP: [0.18, 0.5], AI_STICKY: 340,
-    AI_BOMB_CHANCE: 0.35, AI_BOMB_RANGE: 460, AI_BOMB_ACC: 0.32, AI_BOMB_LEAD: 0.7, AI_BOMB_TIE: 0.33, AI_BOMB_PANIC: 0.8, AI_BOMB_DODGE: 0.6, AI_BOMB_MAXD: 480
+    AI_BOMB_CHANCE: 0.35, AI_BOMB_RANGE: 460, AI_BOMB_ACC: 0.32, AI_BOMB_LEAD: 0.7, AI_BOMB_TIE: 0.33, AI_BOMB_PANIC: 0.8, AI_BOMB_DODGE: 0.6, AI_BOMB_MAXD: 480,
+    AI_BOMB_CHAIN: 0.55, AI_BOMB_MINE: 0.25, AI_BOMB_YOU: 0.3, AI_CHAIN_ESCAPE: 0.7
   },
   // Hard: often threatens a win — tight aim, snappy decisions, aggressive hook/tie/fire
   Hard: {
@@ -89,7 +92,8 @@ const DIFF_PRESETS = {
     AI_ZONE_YANK: 0.48, AI_PU_CHANCE: 0.45, AI_PU_RANGE: 520, AI_THINK: [0.22, 0.48],
     AI_SWING_ENEMY: 420, AI_SWING_IDLE: 1.0, AI_PLAYER_PULL: 280, AI_CROWD: 350,
     AI_REVENGE: 550, AI_FOLLOWUP: [0.12, 0.35], AI_STICKY: 420,
-    AI_BOMB_CHANCE: 0.5, AI_BOMB_RANGE: 540, AI_BOMB_ACC: 0.2, AI_BOMB_LEAD: 1.0, AI_BOMB_TIE: 0.4, AI_BOMB_PANIC: 1.0, AI_BOMB_DODGE: 0.85, AI_BOMB_MAXD: 420
+    AI_BOMB_CHANCE: 0.5, AI_BOMB_RANGE: 540, AI_BOMB_ACC: 0.2, AI_BOMB_LEAD: 1.0, AI_BOMB_TIE: 0.4, AI_BOMB_PANIC: 1.0, AI_BOMB_DODGE: 0.85, AI_BOMB_MAXD: 420,
+    AI_BOMB_CHAIN: 0.68, AI_BOMB_MINE: 0.22, AI_BOMB_YOU: 0.55, AI_CHAIN_ESCAPE: 0.92
   }
 };
 let difficulty = 'Easy';
@@ -97,10 +101,11 @@ let AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE;
 let AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE;
 let AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_FOLLOWUP, AI_STICKY;
 let AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD; // v0.9.3
+let AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE; // v0.9.4
 // per-rider personalities (multipliers / overrides). GOLD tracks current difficulty knobs.
 const AI_PERSONA = {
-  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3,  bomb: 1.25, btie: 0.6 },
-  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6,  bomb: 1.0,  btie: 1.5 },
+  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3,  bomb: 1.25, btie: 0.75 },
+  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6,  bomb: 1.0,  btie: 1.3 },
   GOLD:  { tag: 'RIVAL',     yank: 0.42, cool: 1.0, tie: 0.72, seek: 0.20, pull: 1.0, bind: 0.45, bomb: 1.0,  btie: 1.0 },
 };
 function applyDifficulty(name) {
@@ -115,6 +120,7 @@ function applyDifficulty(name) {
   AI_REVENGE = P.AI_REVENGE; AI_FOLLOWUP = P.AI_FOLLOWUP; AI_STICKY = P.AI_STICKY;
   AI_BOMB_CHANCE = P.AI_BOMB_CHANCE; AI_BOMB_RANGE = P.AI_BOMB_RANGE; AI_BOMB_ACC = P.AI_BOMB_ACC; AI_BOMB_LEAD = P.AI_BOMB_LEAD;
   AI_BOMB_TIE = P.AI_BOMB_TIE; AI_BOMB_PANIC = P.AI_BOMB_PANIC; AI_BOMB_DODGE = P.AI_BOMB_DODGE; AI_BOMB_MAXD = P.AI_BOMB_MAXD;
+  AI_BOMB_CHAIN = P.AI_BOMB_CHAIN; AI_BOMB_MINE = P.AI_BOMB_MINE; AI_BOMB_YOU = P.AI_BOMB_YOU; AI_CHAIN_ESCAPE = P.AI_CHAIN_ESCAPE;
   AI_PERSONA.GOLD.yank = AI_ZONE_YANK; AI_PERSONA.GOLD.tie = AI_TIE_CHANCE;
   try { localStorage.setItem(DIFF_KEY, name); } catch (e) {}
 }
@@ -142,7 +148,7 @@ const CRASH_DV = 230;           // px/s impact: an entangled (hooked/bound/leash
 const ENTANGLE_GRACE = 0.6;     // s: still counts as entangled just after being released (whip into a wall)
 // v0.8 performance scoring
 const CREDIT_WINDOW = 3;        // s: the last rider whose cable/rope/binding affected you gets credit for your fall
-const PTS_KO = 10, PTS_CLOTHES = 15, PTS_TIE = 5, PTS_BIND = 8, PTS_HOOK = 2, PTS_DRAG = 1, DRAG_EVERY = 2;
+const PTS_KO = 10, PTS_CLOTHES = 20, /* v0.9.4: 15 -> 20, a named trick = 2 KOs */ PTS_TIE = 5, PTS_BIND = 8, PTS_HOOK = 2, PTS_DRAG = 1, DRAG_EVERY = 2;
 const COMBO_WINDOW = 4, PTS_COMBO = 5; // 2nd KO within 4 s: +5, 3rd: +10, ...
 const PTS_FALL = 3;             // lost when you get knocked off (score never below 0)
 const PTS_PICKUP = 1;
@@ -167,13 +173,30 @@ const BOMB_GROUND_DRAG = 2.2;      // 1/s then skids to a stop
 const BOMB_IMPACT_SPEED = 150;     // px/s: a flung bomb hitting a rider / rocket at least this fast explodes on contact (never on its owner)
 const BOMB_BLAST_R = 130;          // px: blast radius (knocks riders off, owner included)
 const BOMB_PUSH = 420;             // px/s: blast shove on empty rockets / riders on foot (falls off with distance)
-const BOMB_STICK_FUSE = 2.5;       // s: a bomb tied onto a rider / rocket gets a fresh short fuse
+const BOMB_STICK_FUSE = 3.2;       // s: a bomb tied (chained) onto a rider / rocket gets a fresh fuse (v0.9.4: 2.5 -> 3.2 = time to shake it)
 const BOMB_MINE_TIME = 12;         // s: a bomb tied to a post becomes a proximity mine for this long, then blows
 const BOMB_MINE_ARM = 1.0;         // s before a mine is live
 const BOMB_MINE_TRIGGER = 46;      // px: a rider on a rocket this close sets a mine off
-const BOMB_LONG_DIST = 420;        // px from where you let go: a flung-bomb KO this far away is a LONG BOMB trick
-const PTS_BOMB_TRICK = 5;          // STICKY BOMB / LONG BOMB trick bonus (on top of the normal +10 KO)
-const PTS_MINE_TRICK = 3;          // MINE KO trick bonus
+const BOMB_LONG_DIST = 420;        // (v0.9.4: LONG BOMB dropped; a flung KO is just a KO)
+const PTS_BOMB_TRICK = 0;          // v0.9.4: no bonus for a plain fling
+const PTS_MINE_TRICK = 8;          // MINEFIELD trick bonus (on top of the +10 KO = 18)
+// ---------- v0.9.4 BALL AND CHAIN + blast knockback (tuning) ----------
+const PTS_CHAIN_TRICK = 20;        // BALL AND CHAIN bonus on top of the +10 KO (= 30, worth 3 KOs)
+const CHAIN_L = 46;                // px: a chained bomb is reeled in to this length ...
+const CHAIN_REEL = 80;             // px/s ... at least this fast (it starts at whatever distance it was tied at: no snapping)
+const CHAIN_REEL_T = 2.2;          // s: ... and fast enough to be reeled right in by then (so it's in blast range when the fuse ends)
+const CHAIN_DRAG = 0.5;            // 1/s: air drag on a chained bomb (it swings and drags behind its victim)
+const CHAIN_SHAKE_BOOST = 0.5;     // chain strength (1.0) lost per s while the victim boosts ...
+const CHAIN_SHAKE_POST = 0.6;      // ... and per s while they swing on a post (both together: ~1 s to shake it off)
+const CHAIN_PASS_GAP = 12;         // px: bump bodies with another rider (or touch them with the bomb) to pass the chain on
+const CHAIN_PASS_COOL = 0.8;       // s: a passed chain can't be passed straight back
+const CHAIN_PASS_FUSE = 1.2;       // s: whoever it's passed to always gets at least this long
+const MINE_MAX_L = 190;            // px: a post mine hangs at the length it was tied at (only cinched if longer than this)
+const MINE_DRAG = 0.35;            // 1/s: low drag, so a mine keeps swinging round its post
+const BLAST_RIDER_V = 320;         // px/s: blast throw on a rider (knocked off, or already on foot), at point blank (-30% at the blast edge)
+const BLAST_ROCKET_V = 330;        // px/s: blast throw on a rocket (empty, or the one its rider just got blown off)
+const BLAST_ROCKET_ANG = 1.6;      // rad: a blown-off rider's rocket squirts out sideways to the rider's throw (they land apart)
+const ROCKET_SKID_T = 1.6, ROCKET_SKID_DRAG = 2.4; // s, 1/s: a blasted rocket skids to a stop instead of crossing the map
 // v0.6.1 remount fix
 const MIN_ON_FOOT_TIME = 1.5; // s: no remount until the tumble is over AND this long has passed since the knockoff
 const ROCKET_MIN_DIST = 120;  // px: a knocked-away rocket should come to rest at least this far from its rider
@@ -416,6 +439,7 @@ function makeRider(i) {
     tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null, alt: 1, altV: 1,
     ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0, mode: 'hunt', modeT: 0, react: 0, zone: 'mid', wantLatch: [false, false], postHold: [0, 0], seekPost: null, think: rand(0, 0.5), swingIdle: 0, p: AI_PERSONA[d.name] || AI_PERSONA.GOLD },
     pu: { cable: 0, grip: 0, turbo: 0 },   // v0.7 active power-up timers (s)
+    log: { swings: 0, clothes: 0, ties: 0, chains: 0, mines: 0, bombKOs: 0 }, // v0.9.4 trick log
     kos: 0, tricks: 0, lastBy: null, lastByT: -99, lastKO: -99, chain: 0, entangled: 0, anchored: 0, // v0.8 scoring / credit
   };
 }
@@ -1207,7 +1231,8 @@ function aiControl(r, dt) {
 let forceZone = null; // test hook: 'nose' | 'mid' | 'tail' forces the zone of the next rider hits
 let aiAll = false; // test hook: when true, the player is also AI-controlled
 const aiStats = { nose: 0, mid: 0, tail: 0, posts: 0, ties: 0, binds: 0, yanks: 0, // v0.9 headless counters
-  bombGrabs: 0, bombFlings: 0, bombSticks: 0, bombMines: 0, bombKOs: 0, bombSelfKOs: 0, bombImpacts: 0, bombDodges: 0, bombsSpawned: 0, bombBlasts: 0, bombAimedFlings: 0 }; // v0.9.3
+  bombGrabs: 0, bombFlings: 0, bombSticks: 0, bombMines: 0, bombKOs: 0, bombSelfKOs: 0, bombImpacts: 0, bombDodges: 0, bombsSpawned: 0, bombBlasts: 0, bombAimedFlings: 0, // v0.9.3
+  chainKOs: 0, mineKOs: 0, flingKOs: 0, chainPasses: 0, chainShakes: 0, chainRams: 0, chainYou: 0, planChain: 0, planMine: 0, planFling: 0, planFail: 0 }; // v0.9.4
 function resetAiStats() { for (const k in aiStats) aiStats[k] = 0; }
 function hitZone(o, x, y) { // where a cable tip at (x, y) hits rider o's rocket: 'nose' | 'mid' | 'tail' | null
   const hx = Math.cos(o.ang), hy = Math.sin(o.ang), dx = x - o.x, dy = y - o.y;
@@ -1240,7 +1265,7 @@ function autoAim(r, s) {
     else if (canReach(r, -1)) { consider(o, 0.8, -0.05, false); consider(o.rk, 0.8, -0.05, false); }
   }
   for (const p of posts) consider(p, 0.8, 0, false);
-  for (const b of bombs) if (bombGrabbable(b)) consider(b, 0.8, -0.15, false); // v0.9.3: loose / flying bombs
+  for (const b of bombs) if (bombGrabbable(b, r)) consider(b, 0.8, -0.15, false); // v0.9.3: loose / flying bombs (v0.9.4: or chained to you)
   if (!best) return base;
   const ft = best.d / CABLE_SPEED, o = best.o;
   const ovx = o.vx || 0, ovy = o.vy || 0;
@@ -1320,7 +1345,7 @@ function updateCable(r, s, hold, dt) {
     {
       const pl = Math.max(0, k.len - step), ptx = r.x + k.dx * pl, pty = r.y + k.dy * pl;
       for (const b of bombs) {
-        if (!bombGrabbable(b) || !(segDist(b.x, b.y, ptx, pty, k.tx, k.ty) <= BOMB_R + BOMB_HOOK_TOL)) continue; // (!(<=) is NaN-safe)
+        if (!bombGrabbable(b, r) || !(segDist(b.x, b.y, ptx, pty, k.tx, k.ty) <= BOMB_R + BOMB_HOOK_TOL)) continue; // (!(<=) is NaN-safe)
         k.tx = b.x; k.ty = b.y;
         if (hold || aiCtl) { latchCable(r, k, { kind: 'bomb', b }); return; }
         b.vx += k.dx * 90; b.vy += k.dy * 90; spawnParts(b.x, b.y, 4, '#fff', 80, 0.2); retract(r, k); return;
@@ -1364,6 +1389,7 @@ function updateCable(r, s, hold, dt) {
       k.L = Math.max(70, k.L - 22 * dt); // slowly reel in -> tighter, faster whip
       const a = Math.atan2(r.y - o.y, r.x - o.x);
       k.swept += Math.abs(angDiff(a, k.lastA)); k.lastA = a; k.age += dt;
+      if (!k.logged && k.swept >= Math.PI / 2) { k.logged = true; r.log.swings++; } // v0.9.4 trick log: a real swing (90+ degrees round a post)
       if (k.swept >= SWING_MAX_ROTATIONS * TAU || k.age >= SWING_MAX_TIME) { // auto-release
         retract(r, k); k.flash = 0.3;
         if (r.isPlayer && state === 'play') sfx.release();
@@ -1409,7 +1435,10 @@ function releaseCablesOn(pred) { // retract any latched cable whose target match
 // states: 'loose' (lying around / skidding), 'held' (dangling on a cable), 'flung' (flying after you let go),
 //         'tied' (mine on a post, or stuck onto a rider / rocket)
 const bombs = [], blasts = [];
-function bombGrabbable(b) { return b.state === 'loose' || b.state === 'flung'; }
+function bombGrabbable(b, r) { // v0.9.4: the rider a bomb is chained to may hook it themselves (then fling it or tie it on someone else)
+  return b.state === 'loose' || b.state === 'flung' || (!!r && b.state === 'tied' && !!b.stuck && b.stuck.kind === 'live' && b.stuck.r === r);
+}
+function chainVictim(b) { return b && b.state === 'tied' && b.stuck && b.stuck.kind === 'live' ? b.stuck.r : null; } // v0.9.4
 function spawnBomb(d) {
   const a = d.nextA, x = d.x + Math.cos(a) * (DISP_R + BOMB_R + 3), y = d.y + Math.sin(a) * (DISP_R + BOMB_R + 3), sp = rand(110, 170);
   const b = { x, y, px: x, py: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, state: 'loose', lit: false, fuse: BOMB_FUSE, idle: 0, t: rand(0, 3),
@@ -1421,6 +1450,8 @@ function spawnBomb(d) {
   return b;
 }
 function grabBomb(r, k, b) {
+  if (b.state === 'tied' && b.tether) { const j = tethers.indexOf(b.tether); if (j >= 0) tethers.splice(j, 1); // v0.9.4: unhooked your own ball and chain
+    if (r.isPlayer && state === 'play') msg('GOT THE BOMB OFF YOU! FLING IT OR TIE IT ON SOMEONE', '#fc0'); b.fuse = Math.max(b.fuse, CHAIN_PASS_FUSE); }
   b.state = 'held'; b.holder = r; b.owner = r; b.stuck = null; b.mine = false; b.tether = null;
   if (!b.lit) { b.lit = true; b.fuse = BOMB_FUSE; }
   k.L = clamp(hyp(r.x - b.x, r.y - b.y), 40, cableMax(r));
@@ -1432,8 +1463,9 @@ function tieBomb(b, t, owner, other) {
   b.state = 'tied'; b.tether = t; b.holder = null; b.owner = owner || b.owner; b.lit = true;
   if (t.kind === 'mine') { b.mine = true; b.stuck = null; b.fuse = BOMB_MINE_TIME; b.arm = BOMB_MINE_ARM; }
   else { // glue it on right away (so the short tether can't overstretch-snap on the first frame)
-    b.mine = false; b.stuck = other; b.fuse = BOMB_STICK_FUSE;
-    const o = anchorObj(other), a = (o.ang || 0) + Math.PI * 0.75; b.x = o.x + Math.cos(a) * 12; b.y = o.y + Math.sin(a) * 12; b.vx = o.vx || 0; b.vy = o.vy || 0;
+    // v0.9.4 BALL AND CHAIN: no more gluing it on. The bomb stays where it is, on a chain as long as the gap was,
+    // and the chain reels in over time (updateTethers) while the bomb swings / drags behind (updateBombs)
+    b.mine = false; b.stuck = other; b.fuse = BOMB_STICK_FUSE; b.chainStr = 1; b.passCool = CHAIN_PASS_COOL;
   }
 }
 function bombReleaseVel(b, r) { // velocity a dangling bomb leaves with if you let go now (whip = extra sideways swing speed)
@@ -1475,6 +1507,7 @@ function explodeBomb(b, impact) {
     if (near || (owner && owner.isPlayer)) sfx.boom(near ? 1 : 0.4);
     if (near) shake = Math.max(shake, 9);
   }
+  const blown = new Set(); // v0.9.4: riders blown off by THIS blast (their rocket was already thrown in knockOff)
   for (const o of riders) {
     if (o.onRocket) {
       const dx = o.x - x, dy = o.y - y, d = hyp(dx, dy);
@@ -1483,24 +1516,32 @@ function explodeBomb(b, impact) {
       if (o.inv > 0) { o.vx += nx * 200 * f; o.vy += ny * 200 * f; continue; } // blinking after a remount: just shoved
       const by = owner && owner !== o ? owner : null;
       if (owner === o && (!o.isPlayer || aiAll)) aiStats.bombSelfKOs++;
-      const hit = knockOff(o, by, 'bomb', { x, y });
+      const hit = knockOff(o, by, 'bomb', { x, y, d });
+      if (hit) blown.add(o);
       if (!hit) { o.vx += nx * 260 * f; o.vy += ny * 260 * f; o.stun = Math.max(o.stun, 0.4); continue; }
-      if (by && state === 'play') { // trick bonuses (mild)
-        if (b.stuck && b.stuck.r === o) { award(by, PTS_BOMB_TRICK, 'STICKY BOMB', o.x, o.y - 18); by.tricks++; }
-        else if (b.mine) { award(by, PTS_MINE_TRICK, 'MINE', o.x, o.y - 18); by.tricks++; }
-        else if (b.wasFlung && hyp(o.x - b.fx, o.y - b.fy) >= BOMB_LONG_DIST) { award(by, PTS_BOMB_TRICK, 'LONG BOMB', o.x, o.y - 18); by.tricks++; }
+      if (by && state === 'play' && o.killer === by) { // v0.9.4 named bomb tricks (a plain fling is just a KO)
+        if (b.stuck && b.stuck.kind === 'live' && b.stuck.r === o) {
+          award(by, PTS_CHAIN_TRICK, 'BALL AND CHAIN', o.x, o.y - 18); by.tricks++; by.log.chains++;
+          if (!by.isPlayer || aiAll) aiStats.chainKOs++;
+          if (by.isPlayer) msg('BALL AND CHAIN! +' + (PTS_KO + PTS_CHAIN_TRICK), '#fc0'); else if (o.isPlayer) msg('BALL AND CHAINED BY ' + by.name + '!', '#f44');
+        } else if (b.mine) {
+          award(by, PTS_MINE_TRICK, 'MINEFIELD', o.x, o.y - 18); by.tricks++; by.log.mines++;
+          if (!by.isPlayer || aiAll) aiStats.mineKOs++;
+          if (by.isPlayer) msg('MINEFIELD! +' + (PTS_KO + PTS_MINE_TRICK), '#fc0');
+        } else if ((!by.isPlayer || aiAll) && b.wasFlung) aiStats.flingKOs++;
       }
-    } else { // on foot: shoved + dazed, no points
+    } else { // on foot: thrown + tumbling (same throw and drag as a rider who just got blown off), no points
       const dx = o.x - x, dy = o.y - y, d = hyp(dx, dy);
-      if (d < R) { const nx = d > 1 ? dx / d : 1, ny = d > 1 ? dy / d : 0, f = 1 - d / R * 0.6; o.vx += nx * BOMB_PUSH * 0.6 * f; o.vy += ny * BOMB_PUSH * 0.6 * f; o.stun = Math.max(o.stun, 0.8); o.hitCool = 0.6; }
+      if (d < R) { const nx = d > 1 ? dx / d : 1, ny = d > 1 ? dy / d : 0, f = 1 - 0.3 * clamp(d / R, 0, 1);
+        o.vx = o.vx * 0.2 + nx * BLAST_RIDER_V * f; o.vy = o.vy * 0.2 + ny * BLAST_RIDER_V * f; o.tumble = Math.max(o.tumble, TUMBLE_TIME); o.spin = rand(-10, 10); o.hitCool = 0.6; }
     }
   }
-  for (const o of riders) { // empty rockets get pushed (and spun)
-    if (o.onRocket || o.rk.homing) continue;
+  for (const o of riders) { // empty rockets get pushed (and spun), then skid to a stop
+    if (o.onRocket || o.rk.homing || blown.has(o)) continue;
     const w = o.rk, dx = w.x - x, dy = w.y - y, d = hyp(dx, dy);
     if (!(d < R + 12)) continue;
-    const nx = d > 1 ? dx / d : 1, ny = d > 1 ? dy / d : 0, f = 1 - 0.6 * clamp(d / R, 0, 1);
-    w.vx += nx * BOMB_PUSH * f; w.vy += ny * BOMB_PUSH * f; w.spin += rand(-10, 10);
+    const nx = d > 1 ? dx / d : 1, ny = d > 1 ? dy / d : 0, f = 1 - 0.5 * clamp(d / R, 0, 1);
+    w.vx = w.vx * 0.3 + nx * BLAST_ROCKET_V * f; w.vy = w.vy * 0.3 + ny * BLAST_ROCKET_V * f; w.spin += rand(-10, 10); w.skid = ROCKET_SKID_T;
   }
   for (const q of bombs) { // chain reaction
     const d = hyp(q.x - x, q.y - y);
@@ -1531,20 +1572,16 @@ function updateBombs(dt) {
       if (b.fuse <= 0) { explodeBomb(b, false); continue; }
     } else { b.idle += dt; if (b.idle > BOMB_IDLE_LIFE) { removeBomb(b); spawnParts(b.x, b.y, 10, '#888', 80, 0.6); continue; } }
     // motion
-    if (b.state === 'tied' && b.stuck) { // glued onto a rider / rocket
-      const o = anchorObj(b.stuck);
-      if (o) { const a = (o.ang || 0) + Math.PI * 0.75; b.x = o.x + Math.cos(a) * 12; b.y = o.y + Math.sin(a) * 12; b.vx = o.vx || 0; b.vy = o.vy || 0; }
-      b.rot += 3 * dt;
-      continue;
-    }
+    if (b.state === 'tied' && b.stuck && b.stuck.kind === 'live' && updateChain(b, dt)) continue; // v0.9.4 ball and chain: shake / pass
     let drag = BOMB_GROUND_DRAG;
     if (b.state === 'held') drag = BOMB_HELD_DRAG;
-    else if (b.state === 'tied') drag = 1.2;
+    else if (b.state === 'tied') drag = b.mine ? MINE_DRAG : CHAIN_DRAG; // v0.9.4: chained / mined bombs swing on their tether
     else if (b.state === 'flung') { b.flungT += dt; drag = b.flungT < BOMB_FLY_TIME ? BOMB_FLY_DRAG : BOMB_GROUND_DRAG; }
     const g = Math.exp(-drag * dt); b.vx *= g; b.vy *= g;
     b.x += b.vx * dt; b.y += b.vy * dt;
     b.rot += b.spin * dt + hyp(b.vx, b.vy) * dt / (BOMB_R * 2);
     if (b.state === 'held') { const k = bombHolderCable(b); if (k) constrain(b.holder, 0, b, 1, k.L); }
+    if (b.state === 'tied' && b.tether) { const t = b.tether, e = t.a.kind === 'bomb' ? t.b : t.a, o = anchorObj(e); if (o) constrain(o, 0, b, 1, t.L); } // v0.9.4 hangs on its tether
     // walls / fences / posts
     if (b.x < BOMB_R) { b.x = BOMB_R; b.vx = Math.abs(b.vx) * 0.5; }
     if (b.x > WORLD_W - BOMB_R) { b.x = WORLD_W - BOMB_R; b.vx = -Math.abs(b.vx) * 0.5; }
@@ -1581,12 +1618,49 @@ function updateBombs(dt) {
   }
   for (let i = blasts.length - 1; i >= 0; i--) { blasts[i].t += dt; if (blasts[i].t >= blasts[i].max) blasts.splice(i, 1); }
 }
+// v0.9.4 BALL AND CHAIN: the victim can shake it off (boost hard and/or swing on a post) or pass it on (bump someone).
+// returns true if the bomb is no longer chained (skip the rest of this frame's update for it)
+function updateChain(b, dt) {
+  const v = b.stuck.r, t = b.tether;
+  if (!t || !v || !v.onRocket) return false;
+  b.passCool = Math.max(0, (b.passCool || 0) - dt);
+  const onPost = v.cables.some(k => k && k.state === 'latched' && k.target.kind === 'post');
+  const drain = (v.boosting ? CHAIN_SHAKE_BOOST : 0) + (onPost ? CHAIN_SHAKE_POST : 0);
+  b.chainStr = (b.chainStr == null ? 1 : b.chainStr) - drain * dt;
+  if (b.chainStr <= 0) { // shaken loose: it whips off (still lit, no impact explosion) and you get clear
+    snapTether(t, true); b.state = 'loose'; b.tether = null; b.stuck = null; b.chainStr = 1;
+    const dx = b.x - v.x, dy = b.y - v.y, d = hyp(dx, dy) || 1; b.vx += dx / d * 260; b.vy += dy / d * 260; b.fuse = clamp(b.fuse, 0.9, 1.2); // it whips away and blows soon after, behind you
+    v.log.shakes = (v.log.shakes || 0) + 1;
+    if (!v.isPlayer || aiAll) aiStats.chainShakes++;
+    if (state === 'play') { if (v.isPlayer) msg('SHOOK IT OFF!', '#3cf'); else if (b.owner && b.owner.isPlayer) msg(v.name + ' SHOOK YOUR BOMB OFF', '#aaa'); }
+    return true;
+  }
+  if (b.passCool > 0) return false;
+  for (const o of riders) { // pass it on: bump bodies (or the bomb touches them)
+    if (o === v || !o.onRocket || o.inv > 0) continue;
+    if (!(hyp(o.x - v.x, o.y - v.y) < RIDER_R * 2 + CHAIN_PASS_GAP || hyp(o.x - b.x, o.y - b.y) < RIDER_R + BOMB_R + 2)) continue;
+    const e = t.a.kind === 'live' && t.a.r === v ? 'a' : 'b';
+    t[e] = { kind: 'live', r: o, zone: 'tail' }; b.stuck = t[e];
+    t.L = Math.max(t.L, hyp(o.x - b.x, o.y - b.y)); t.reel = Math.max(CHAIN_REEL, (t.L - t.minL) / CHAIN_REEL_T); t.owner = v; b.owner = v; // no teleport: the chain is as long as the gap; the passer gets the credit
+    b.fuse = Math.max(b.fuse, CHAIN_PASS_FUSE); b.chainStr = 1; b.passCool = CHAIN_PASS_COOL; t.t = Math.max(t.t, b.fuse + 1);
+    noteHit(o, v); v.log.passes = (v.log.passes || 0) + 1;
+    if (!v.isPlayer || aiAll) aiStats.chainPasses++;
+    if (state === 'play') {
+      if (v.isPlayer) msg('PASSED THE BOMB TO ' + o.name + '!', '#fc0'); else if (o.isPlayer) msg(v.name + ' PASSED YOU THE BOMB!', '#f44');
+      spawnParts(b.x, b.y, 10, '#fc0', 160, 0.35); if (v.isPlayer || o.isPlayer || onScreen(b.x, b.y)) sfx.tie();
+    }
+    return false;
+  }
+  return false;
+}
 // ---- v0.9.3 bomb AI ----
 function bombThreat(r, b) { // is bomb b about to hurt rider r (and can r do anything about it)?
   if (!b.lit) return false;
   if (b.state === 'held' && b.holder === r) return false;
   if (b.state === 'tied' && b.stuck && b.stuck.r === r) return false; // stuck on me: can't outrun it
   const d = hyp(b.x - r.x, b.y - r.y);
+  const cv = chainVictim(b); // v0.9.4: someone dragging a ball and chain is coming at me (they want to pass it)
+  if (cv && cv !== r && b.passCool <= 0 && Math.min(d, hyp(cv.x - r.x, cv.y - r.y)) < 190) return true;
   if (b.fuse < 1.6 && d < BOMB_BLAST_R + 90) return true;
   if (b.state === 'flung' && b.owner !== r) {
     const sp = hyp(b.vx, b.vy);
@@ -1601,9 +1675,28 @@ function aiBombs(r, c, t, dist, desired, thinkNow, dt) {
   for (let i = 0; i < 2; i++) { const k = r.cables[i]; if (k && k.state === 'latched' && k.target.kind === 'bomb') s = i; }
   if (s < 0) { ai.bombRelease = false; ai.bombPlan = null; ai.bombAimed = false; }
   const b = s >= 0 ? r.cables[s].target.b : null;
-  // a bomb is stuck on me: ram the nearest enemy so it takes them down too
-  const onMe = bombs.find(q => q.state === 'tied' && q.stuck && q.stuck.kind === 'live' && q.stuck.r === r);
-  if (onMe) { const foe = aiEnemyNear(r, r.x, r.y, 600); if (foe) { c.boost = r.fuel > 5; return Math.atan2(foe.y + foe.vy * 0.3 - r.y, foe.x + foe.vx * 0.3 - r.x); } }
+  // v0.9.4: a ball and chain on me: ram someone to pass it on, else boost + swing a post to shake it (how often they try: difficulty)
+  const onMe = bombs.find(q => chainVictim(q) === r);
+  if (onMe) {
+    if (ai.chainB !== onMe) { ai.chainB = onMe; ai.chainTry = Math.random() < AI_CHAIN_ESCAPE; ai.chainRam = false; }
+    if (ai.chainTry) {
+      c.boost = r.fuel > 5;
+      const foe = aiEnemyNear(r, r.x, r.y, 560);
+      if (foe) {
+        if (!ai.chainRam) { ai.chainRam = true; if (!r.isPlayer || aiAll) aiStats.chainRams++; }
+        const ft = clamp(hyp(foe.x - r.x, foe.y - r.y) / 380, 0, 0.6);
+        return Math.atan2(foe.y + foe.vy * ft - r.y, foe.x + foe.vx * ft - r.x);
+      }
+      const side = aiFreeSide(r), post = aiNearestPost(r, cableMax(r) * 0.9);
+      if (post && !r.cables.some(k => k && k.state === 'latched' && k.target.kind === 'post')) {
+        if (side >= 0 && r.cableCool <= 0 && aiSideToward(r, post.x, post.y) === side) {
+          c.fire[side] = true; c.aim[side] = Math.atan2(post.y - r.y, post.x - r.x) + gauss() * AI_ERR * 0.5; c.hold[side] = true; ai.wantLatch[side] = true; ai.postHold[side] = 2;
+        }
+        return Math.atan2(post.y - r.y, post.x - r.x) + 0.9;
+      }
+      return desired;
+    }
+  } else ai.chainB = null;
   // carrying + fuse nearly out: get rid of it NOW
   if (b && b.fuse < AI_BOMB_PANIC) ai.bombRelease = true;
   // dodge (decided once per threatening bomb, by difficulty)
@@ -1621,20 +1714,30 @@ function aiBombs(r, c, t, dist, desired, thinkNow, dt) {
   if (b) {
     if (ai.bombRelease) return desired;
     const free = 1 - s;
-    if (!ai.bombPlan) {
-      const u = Math.random(), tieP = AI_BOMB_TIE * (P.btie || 1);
-      const post = aiNearestPost(r, 600);
-      if (t && dist < 650 && u < tieP * 0.6) ai.bombPlan = 'stick';
-      else if (u < tieP && post) { ai.bombPlan = 'mine'; ai.bombPost = post; }
+    if (!ai.bombPlan) { // v0.9.4: ball and chain first, then mines; flinging is the fallback (odds by difficulty x personality)
+      const u = Math.random(), m = P.btie || 1;
+      let pc = AI_BOMB_CHAIN * m, pm = AI_BOMB_MINE * m; if (pc + pm > 0.95) { const z = 0.95 / (pc + pm); pc *= z; pm *= z; }
+      const post = aiNearestPost(r, 460);
+      let v = t && t.onRocket ? t : null;
+      if (player && player !== r && player.onRocket && Math.random() < AI_BOMB_YOU && hyp(player.x - r.x, player.y - r.y) < 900) v = player; // Hard: comes for YOU
+      if (v && hyp(v.x - r.x, v.y - r.y) < 800 && u < pc) { ai.bombPlan = 'stick'; ai.bombVictim = v; if (v === player && (!r.isPlayer || aiAll)) aiStats.chainYou++; }
+      else if (u < pc + pm && post) { ai.bombPlan = 'mine'; ai.bombPost = post; }
       else ai.bombPlan = 'fling';
       ai.bombPlanT = 0;
+      if (!r.isPlayer || aiAll) aiStats[ai.bombPlan === 'stick' ? 'planChain' : ai.bombPlan === 'mine' ? 'planMine' : 'planFling']++;
     }
     ai.bombPlanT += dt;
     if (riderCanTie(r)) { c.tie = true; return desired; }
     const freeOK = (!r.cables[free] || r.cables[free].state === 'retract') && r.cableCool <= 0;
     if (ai.bombPlan === 'stick') {
-      if (!t || b.fuse < 1.8 || ai.bombPlanT > 3.5) ai.bombPlan = 'fling';
+      const v = ai.bombVictim;
+      if (!v || !v.onRocket || b.fuse < 1.1 || ai.bombPlanT > 5) { // couldn't catch them: lash it to a post if one's close, else fling
+        const post = b.fuse > 1.4 ? aiNearestPost(r, cableMax(r) * 0.8) : null;
+        if (post) { ai.bombPlan = 'mine'; ai.bombPost = post; ai.bombPlanT = 0; } else ai.bombPlan = 'fling';
+        if (!r.isPlayer || aiAll) aiStats.planFail++;
+      }
       else {
+        const t = v, dist = hyp(v.x - r.x, v.y - r.y);
         const toT = Math.atan2(t.y + t.vy * 0.3 - r.y, t.x + t.vx * 0.3 - r.x);
         const want = dist > 220 ? toT : toT + (free === 0 ? 0.55 : -0.55);
         if (freeOK && dist < cableMax(r) * AI_HOOK_FRAC && t.inv <= 0) {
@@ -1650,7 +1753,7 @@ function aiBombs(r, c, t, dist, desired, thinkNow, dt) {
     }
     if (ai.bombPlan === 'mine') {
       const post = ai.bombPost;
-      if (!post || b.fuse < 1.6 || ai.bombPlanT > 4) ai.bombPlan = 'fling';
+      if (!post || b.fuse < 1.0 || ai.bombPlanT > 4.5) { ai.bombPlan = 'fling'; if (!r.isPlayer || aiAll) aiStats.planFail++; }
       else {
         const dPost = hyp(post.x - r.x, post.y - r.y), toP = Math.atan2(post.y - r.y, post.x - r.x);
         const want = dPost > cableMax(r) * 0.7 ? toP : toP + (free === 0 ? 0.9 : -0.9);
@@ -1726,10 +1829,12 @@ function addTether(owner, a, b) {
   const kind = tetherKind(a, b);
   const footy = a.kind === 'foot' || b.kind === 'foot';
   const life = kind === 'mine' ? BOMB_MINE_TIME + 1 : kind === 'stuck' ? BOMB_STICK_FUSE + 1 : kind === 'binding' ? BIND_TIME : kind === 'leash' ? LEASH_TIME : footy ? TIE_EFFECT : TETHER_LIFE;
-  const minL = { clothes: 1e9, tied: 70, tangled: 26, anchored: 50, lashed: 40, bound: 30, binding: 70, leash: 80, mine: 45, stuck: 10 }[kind];
+  let minL = { clothes: 1e9, tied: 70, tangled: 26, anchored: 50, lashed: 40, bound: 30, binding: 70, leash: 80, mine: 45, stuck: CHAIN_L }[kind];
   const t = { a, b, owner, kind, L: Math.max(20, hyp(A.x - B.x, A.y - B.y)), minL, t: life, max: life, arm: 0.35, ownerArm: 1.0, alt: owner && owner.onRocket ? lvl(owner) : 1 };
   if (a.kind === 'live' && b.kind === 'live') t.anchor = hyp(A.vx, A.vy) <= hyp(B.vx, B.vy) ? A : B; // slower rocket = the anchor, dragged by the other
-  if (kind === 'stuck') t.L = minL; // a bomb tied onto something is glued right on
+  // v0.9.4: tied bombs keep the distance they were tied at (no snapping on). A chain reels in (CHAIN_REEL); a mine stays put (<= MINE_MAX_L)
+  if (kind === 'mine') t.minL = clamp(t.L, 45, MINE_MAX_L);
+  if (kind === 'stuck') t.reel = Math.max(CHAIN_REEL, (t.L - minL) / CHAIN_REEL_T);
   for (const e of [a, b]) if (e.kind === 'bomb') tieBomb(e.b, t, owner, e === a ? b : a); // v0.9.3
   tethers.push(t);
   while (tethers.length > TETHER_MAX) tethers.shift();
@@ -1753,10 +1858,11 @@ function doTie(r) {
   else if (t.kind === 'leash') { const lv = t.a.kind === 'live' ? t.a.r : t.b.r; msg('LEASHED ' + lv.name + "'S ROCKET TO A POST!", '#f93'); }
   else if (t.kind === 'mine') { if (r.isPlayer) msg('BOMB MINE SET!', '#f93'); }
   else if (t.kind === 'stuck') { const v = t.a.kind === 'bomb' ? t.b : t.a, nm = v.kind === 'rocket' ? v.r.name + "'S ROCKET" : v.r.name;
-    if (r.isPlayer) msg('BOMB STUCK ON ' + nm + '!', '#f93'); else if (v.r.isPlayer) msg(r.name + ' STUCK A BOMB ON YOU!', '#f44'); }
+    if (r.isPlayer) msg('BALL AND CHAIN ON ' + nm + '!', '#f93'); else if (v.r.isPlayer) msg(r.name + ' CHAINED A BOMB TO YOU! BOOST / SWING / BUMP!', '#f44'); }
   else msg('TIED ' + t.a.r.name + ' TO ' + t.b.r.name + '!', '#f93');
   // v0.8 trick points
   const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+  if (t.kind !== 'mine' && t.kind !== 'stuck') r.log.ties++; // v0.9.4 trick log (rope ties; bomb ties count when they pay off)
   if (t.kind === 'binding' || t.kind === 'bound') { award(r, PTS_BIND, 'BIND', mx, my); r.tricks++; if (!r.isPlayer || aiAll) { aiStats.ties++; aiStats.binds++; } }
   else if (t.kind === 'tied' || t.kind === 'tangled') { award(r, PTS_TIE, 'TIE-UP', mx, my); r.tricks++; if (!r.isPlayer || aiAll) aiStats.ties++; }
   else if (t.kind === 'anchored' || t.kind === 'leash' || t.kind === 'lashed') { award(r, PTS_TIE, 'ANCHOR', mx, my); r.tricks++; if (!r.isPlayer || aiAll) aiStats.ties++; }
@@ -1784,7 +1890,7 @@ function updateTethers(dt) {
     t.t -= dt; t.arm -= dt; t.ownerArm -= dt;
     if (!anchorValid(t.a) || !anchorValid(t.b)) { snapTether(t, false); continue; }
     if (t.t <= 0) { snapTether(t, true); continue; }
-    if (t.L > t.minL) t.L = Math.max(t.minL, t.L - 70 * dt); // cinch tie-ups tighter
+    if (t.L > t.minL) t.L = Math.max(t.minL, t.L - (t.kind === 'stuck' ? t.reel || CHAIN_REEL : 70) * dt); // cinch tie-ups tighter (v0.9.4: a chain reels in)
     const A = anchorObj(t.a), B = anchorObj(t.b);
     const tight = t.kind === 'binding' || t.kind === 'leash';
     if (hyp(A.x - B.x, A.y - B.y) > t.L + (tight ? BIND_SNAP : 300)) { snapTether(t, true); continue; } // overstretch snap
@@ -1859,16 +1965,20 @@ function knockOff(o, by, how, src) {
   o.onRocket = false; o.falls++; o.cables = [null, null]; o.killer = credit; o.boosting = false;
   o.tumble = TUMBLE_TIME; o.footT = 0; o.stun = 0; o.inv = 0; o.cableCool = 0;
   // the rocket keeps sliding and spinning away
-  const k = o.rk; k.x = o.x; k.y = o.y; k.ang = o.ang; k.homing = false;
+  const k = o.rk; k.x = o.x; k.y = o.y; k.ang = o.ang; k.homing = false; k.skid = 0;
   if (how === 'clothes') { k.vx = o.vx * 0.9; k.vy = o.vy * 0.9; o.vx *= -0.35; o.vy *= -0.35; }
   else if (how === 'bomb' && src) { // v0.9.3: blown away from the blast
+    // v0.9.4: rider and rocket get comparable throws; the rocket skids off at an angle and is braked by skid drag
     const dx = o.x - src.x, dy = o.y - src.y, d = hyp(dx, dy) || 1, nx = d > 1 ? dx / d : Math.cos(o.ang), ny = d > 1 ? dy / d : Math.sin(o.ang);
-    k.vx = o.vx * 0.6 + nx * 330; k.vy = o.vy * 0.6 + ny * 330; o.vx = o.vx * 0.2 + nx * 260; o.vy = o.vy * 0.2 + ny * 260;
+    const f = src.d == null ? 1 : 1 - 0.3 * clamp(src.d / BOMB_BLAST_R, 0, 1), side = (Math.sign(Math.cos(o.ang) * ny - Math.sin(o.ang) * nx) || 1) * BLAST_ROCKET_ANG;
+    const ra = Math.atan2(ny, nx) + side;
+    k.vx = o.vx * 0.3 + Math.cos(ra) * BLAST_ROCKET_V * f; k.vy = o.vy * 0.3 + Math.sin(ra) * BLAST_ROCKET_V * f; k.skid = ROCKET_SKID_T;
+    o.vx = o.vx * 0.2 + nx * BLAST_RIDER_V * f; o.vy = o.vy * 0.2 + ny * BLAST_RIDER_V * f;
   } else {
     k.vx = o.vx * 1.1; k.vy = o.vy * 1.1;
     if (by) { const dx = by.x - o.x, dy = by.y - o.y, d = hyp(dx, dy) || 1; o.vx = o.vx * 0.3 + dx / d * 280; o.vy = o.vy * 0.3 + dy / d * 280; }
   }
-  kickRocketAway(o);
+  kickRocketAway(o, k.skid > 0 ? skidReach() : undefined);
   k.spin = rand(-8, 8);
   if (state === 'play') { // v0.8 performance scoring
     if (credit) {
@@ -1876,6 +1986,7 @@ function knockOff(o, by, how, src) {
       const clo = how === 'clothes';
       if ((!credit.isPlayer || aiAll) && how === 'yank') { aiStats.yanks++; aiStats.mid++; }
       if ((!credit.isPlayer || aiAll) && how === 'bomb') aiStats.bombKOs++;
+      if (how === 'bomb') credit.log.bombKOs++; else if (clo) credit.log.clothes++; // v0.9.4 trick log
       award(credit, clo ? PTS_CLOTHES : PTS_KO, clo ? 'CLOTHESLINE' : how === 'bomb' ? 'BOMBED' : 'KNOCKOFF', o.x, o.y);
       credit.chain = gameT - credit.lastKO <= COMBO_WINDOW ? credit.chain + 1 : 1; credit.lastKO = gameT;
       if (credit.chain > 1) award(credit, PTS_COMBO * (credit.chain - 1), 'COMBO', o.x, o.y - 18);
@@ -1914,8 +2025,10 @@ function restClear(x, y, ex, ey) {
   for (const p of posts) if (hyp(p.x - ex, p.y - ey) < p.r + 30) return false;
   return true;
 }
-function kickRocketAway(o) {
-  const k = o.rk, RD = 0.35, KD = 1 / 0.9, WANT = 165;
+// v0.9.4: how far (per px/s) a skidding (blasted) rocket travels: skid drag for ROCKET_SKID_T, then the normal 0.9/s
+function skidReach() { const e = Math.exp(-ROCKET_SKID_DRAG * ROCKET_SKID_T); return (1 - e) / ROCKET_SKID_DRAG + e / 0.9; }
+function kickRocketAway(o, kd) {
+  const k = o.rk, RD = 0.35, KD = kd || 1 / 0.9, WANT = 165;
   const rx = o.x + o.vx * RD, ry = o.y + o.vy * RD;          // where the rider will end up
   let sx = k.vx * KD - o.vx * RD, sy = k.vy * KD - o.vy * RD;  // predicted rocket offset from the rider
   const s0 = hyp(sx, sy), a0 = s0 > 1 ? Math.atan2(sy, sx) : o.ang;
@@ -1980,7 +2093,8 @@ function updateFoot(r, c, dt) {
     w.x += w.vx * dt; w.y += w.vy * dt;
     if (Math.random() < 0.5) particles.push({ x: w.x, y: w.y, vx: -w.vx * 0.2, vy: -w.vy * 0.2, life: 0.4, max: 0.4, color: '#3cf' });
   } else {
-    const g = Math.exp(-0.9 * dt); w.vx *= g; w.vy *= g; w.x += w.vx * dt; w.y += w.vy * dt; w.ang += w.spin * dt; w.spin *= Math.exp(-0.8 * dt);
+    w.skid = Math.max(0, (w.skid || 0) - dt); // v0.9.4: a blasted rocket skids to a stop (extra drag) before normal sliding
+    const g = Math.exp(-(w.skid > 0 ? ROCKET_SKID_DRAG : 0.9) * dt); w.vx *= g; w.vy *= g; w.x += w.vx * dt; w.y += w.vy * dt; w.ang += w.spin * dt; w.spin *= Math.exp(-0.8 * dt);
     if (w.x < 20 || w.x > WORLD_W - 20) { w.vx = -w.vx * 0.5; w.x = clamp(w.x, 20, WORLD_W - 20); }
     if (w.y < 20 || w.y > WORLD_H - 20) { w.vy = -w.vy * 0.5; w.y = clamp(w.y, 20, WORLD_H - 20); }
     pushOutPosts(w, 12, 0.4);
@@ -2291,8 +2405,26 @@ function drawRunner(r, now) {
   }
   if (tiedDown(r)) { ctx.strokeStyle = '#f93'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(r.x, r.y, 11, 0, TAU); ctx.stroke(); }
 }
+function drawChain(t, A, B, now) { // v0.9.4 ball and chain: steel links + the victim's shake-off meter
+  const dx = B.x - A.x, dy = B.y - A.y, d = hyp(dx, dy) || 1, n = Math.max(2, Math.floor(d / 9)), a = Math.atan2(dy, dx);
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+  for (let i = 0; i <= n; i++) {
+    const u = i / n, x = A.x + dx * u, y = A.y + dy * u;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a + (i % 2 ? Math.PI / 2 : 0));
+    ctx.strokeStyle = i % 2 ? '#8b93a6' : '#c9d0de'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, 0, 4.5, 2.6, 0, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
+  const bomb = t.a.kind === 'bomb' ? t.a.b : t.b.b, v = chainVictim(bomb);
+  if (v) { // shake-off meter: ring around the victim that empties as they boost / swing
+    const str = clamp(bomb.chainStr == null ? 1 : bomb.chainStr, 0, 1);
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(v.x, v.y, 24, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = Math.floor(now / 160) % 2 ? '#ff5533' : '#ffcc33'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(v.x, v.y, 24, -Math.PI / 2, -Math.PI / 2 + TAU * str); ctx.stroke();
+  }
+}
 function drawTether(t, now) {
   const A = anchorObj(t.a), B = anchorObj(t.b);
+  if (t.kind === 'stuck') { drawChain(t, A, B, now); return; }
   ctx.globalAlpha = t.t < 2 ? (Math.floor(now / 120) % 2 ? 0.35 : 0.9) : 1;
   if (t.kind === 'clothes') { ctx.strokeStyle = 'rgba(255,150,40,0.25)'; ctx.lineWidth = 12; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke(); }
   ctx.strokeStyle = '#a5520f'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
@@ -2559,9 +2691,16 @@ function drawHUD(now) {
     if (player.rk.homing) sub = 'ROCKET RETURNING...';
     else if (player.footT > 5) sub += '   (RECALL IN ' + Math.max(1, Math.ceil(RECALL_TIME - player.footT)) + ')';
     txt(sub, VW / 2, VH * 0.36 + 26 * sc, 14 * sc, '#fff', 'center');
+  } else if (bombs.some(q => chainVictim(q) === player)) { // v0.9.4: ball and chain on YOU
+    const q = bombs.find(q => chainVictim(q) === player), str = clamp(q.chainStr == null ? 1 : q.chainStr, 0, 1);
+    txt('BALL AND CHAIN ON YOU! ' + q.fuse.toFixed(1) + 's', VW / 2, VH * 0.3, 18 * sc, q.on ? '#ff5533' : '#ffcc33', 'center');
+    txt('BOOST / SWING A POST TO SHAKE IT  |  BUMP SOMEONE TO PASS IT', VW / 2, VH * 0.3 + 20 * sc, 12 * sc, '#fff', 'center');
+    const bw = 160 * sc, bh = 7 * sc, bx = VW / 2 - bw / 2, by = VH * 0.3 + 32 * sc;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+    ctx.fillStyle = '#ff7733'; ctx.fillRect(bx, by, bw * str, bh);
   } else if (!canTie() && player.cables.some(k => k && k.state === 'latched' && k.target.kind === 'bomb')) { // v0.9.3
     const hb = player.cables.find(k => k && k.state === 'latched' && k.target.kind === 'bomb').target.b;
-    txt('BOMB ' + hb.fuse.toFixed(1) + 's: LET GO TO FLING' + '  |  HOOK POST/RIDER + TIE', VW / 2, VH * 0.3, 14 * sc, hb.on ? '#ff5533' : '#ffcc33', 'center');
+    txt('BOMB ' + hb.fuse.toFixed(1) + 's: HOOK A RIDER + TIE = BALL AND CHAIN  |  POST + TIE = MINE  |  LET GO = FLING', VW / 2, VH * 0.3, 13 * sc, hb.on ? '#ff5533' : '#ffcc33', 'center');
   } else if (canTie()) {
     txt('BOTH CABLES HOOKED: ' + (isTouch ? 'TAP TIE!' : 'PRESS T TO TIE!'), VW / 2, VH * 0.3, 16 * sc, Math.floor(now / 200) % 2 ? '#f93' : '#fff', 'center');
   }
@@ -2664,13 +2803,13 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.9.3  ROCKET WAR + BOMBS', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.9.4  ROCKET WAR + BALL AND CHAIN', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   txt('Grapple posts to whip around corners.  Hit RIDER to yank; NOSE/TAIL to tow!', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE: clotheslines & tie-ups!', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#f93', 'center');
   txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.48 + 34 * sc, 11 * sc, '#8ab', 'center');
-  txt('SCORING: KO +' + PTS_KO + '  CLOTHES +' + PTS_CLOTHES + '  BIND +' + PTS_BIND + '  TIE +' + PTS_TIE + '  HOOK +' + PTS_HOOK + '  COMBO +' + PTS_COMBO + '  BOMB KO +' + PTS_KO + '  FALL -' + PTS_FALL,
+  txt('SCORING: KO +' + PTS_KO + '  CLOTHES +' + PTS_CLOTHES + '  BIND +' + PTS_BIND + '  TIE +' + PTS_TIE + '  HOOK +' + PTS_HOOK + '  COMBO +' + PTS_COMBO + '  BALL&CHAIN +' + (PTS_KO + PTS_CHAIN_TRICK) + '  MINEFIELD +' + (PTS_KO + PTS_MINE_TRICK) + '  FALL -' + PTS_FALL,
     VW / 2, VH * 0.48 + 50 * sc, 9 * sc, '#9c9', 'center', false);
-  txt('NEW: hook BOMBS from the dispensers, let go to fling, or TIE them to a post / an enemy!', VW / 2, VH * 0.48 + (ALTITUDE_ENABLED ? 78 : 64) * sc, 11 * sc, '#ffcc33', 'center');
+  txt('NEW: BOMB + enemy + TIE = BALL AND CHAIN!   BOMB + post = MINE', VW / 2, VH * 0.48 + (ALTITUDE_ENABLED ? 78 : 64) * sc, 11 * sc, '#ffcc33', 'center');
   if (ALTITUDE_ENABLED) txt(isTouch ? 'UP / DN: altitude (cables reach 1 level; LOW fences only stop LOW)' : 'R / F: altitude (cables reach 1 level; LOW fences only stop LOW)', VW / 2, VH * 0.48 + 64 * sc, 11 * sc, '#b9a0ff', 'center');
   drawDiffPicker('title', now);
   if (Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO START' : 'CLICK OR PRESS SPACE TO START', VW / 2, VH * 0.9, 18 * sc, '#fff', 'center');
@@ -2678,23 +2817,39 @@ function drawTitle(now) {
 function drawResults(now) {
   ctx.fillStyle = 'rgba(0,0,10,0.75)'; ctx.fillRect(0, 0, VW, VH);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  drawBigTitle('ROUND OVER', VW / 2, VH * 0.14, Math.min(VW / 10, 46 * sc));
+  // v0.9.4: tighter layout so the trick log fits above the difficulty buttons on a landscape phone (~915x412)
+  const btnTop = diffBtnLayout('over')[0].y - 24 * sc; // top of the DIFFICULTY label
+  drawBigTitle('ROUND OVER', VW / 2, VH * 0.09, Math.min(VW / 12, 34 * sc));
   const place = results.indexOf(player) + 1;
   const tie = results.length > 1 && results[0].score === results[1].score && results[0].falls === results[1].falls && place <= 2;
   const ord = ['1ST', '2ND', '3RD', '4TH'][place - 1];
-  txt(place === 1 && !tie ? 'YOU WIN!' : tie ? 'TIE FOR 1ST!' : 'YOU PLACED ' + ord, VW / 2, VH * 0.29, 22 * sc, place === 1 ? '#fc0' : '#fff', 'center');
-  const cx = VW / 2, rowH = 26 * sc; let y = VH * 0.41;
-  const cols = [['RANK', -250, 'left'], ['RIDER', -170, 'left'], ['POINTS', 60, 'right'], ['KOs', 130, 'right'], ['TRICKS', 225, 'right'], ['FALLS', 305, 'right']];
-  for (const c of cols) txt(c[0], cx + c[1] * sc, y, 13 * sc, '#888', c[2]);
-  y += rowH;
+  txt(place === 1 && !tie ? 'YOU WIN!' : tie ? 'TIE FOR 1ST!' : 'YOU PLACED ' + ord, VW / 2, VH * 0.19, 18 * sc, place === 1 ? '#fc0' : '#fff', 'center');
+  const cx = VW / 2, rowH = 19 * sc; let y = VH * 0.27;
+  const cols = [['RANK', -250, 'left'], ['RIDER', -195, 'left'], ['POINTS', 30, 'right'], ['KOs', 110, 'right'], ['TRICKS', 205, 'right'], ['FALLS', 290, 'right']];
+  for (const c of cols) txt(c[0], cx + c[1] * sc, y, 11 * sc, '#888', c[2], false);
+  y += rowH * 0.95;
   results.forEach((r, i) => {
     const vals = [(i + 1) + '.', r.name, String(r.score), String(r.kos), String(r.tricks), String(r.falls)];
-    cols.forEach((c, j) => txt(vals[j], cx + c[1] * sc, y, (j === 2 ? 18 : 16) * sc, r.color, c[2]));
+    cols.forEach((c, j) => txt(vals[j], cx + c[1] * sc, y, (j === 2 ? 16 : 14) * sc, r.color, c[2], false));
     y += rowH;
   });
+  // trick log: one compact line per rider, small columns
+  const lh = clamp((btnTop - y - 4 * sc) / (results.length + 1), 9, 14 * sc), fs = Math.min(10 * sc, lh * 0.82);
+  y += lh * 0.2;
+  const tcols = [['TRICK LOG', -250, 'left', null], ['SWINGS', -95, 'right', 'swings'], ['CLOTHES', -25, 'right', 'clothes'], ['TIES', 35, 'right', 'ties'],
+    ['BALL+CHAIN', 125, 'right', 'chains'], ['MINES', 185, 'right', 'mines'], ['BOMB KOs', 260, 'right', 'bombKOs'], ['PASSED', 325, 'right', 'passes']];
+  ctx.fillStyle = 'rgba(8,10,24,0.92)'; ctx.fillRect(cx - 258 * sc, y - lh * 0.6, 590 * sc, lh * (results.length + 1) + lh * 0.2);
+  for (const c of tcols) txt(c[0], cx + c[1] * sc, y, fs, c[0] === 'TRICK LOG' ? '#f93' : '#888', c[2], false);
+  y += lh;
+  results.forEach(r => {
+    tcols.forEach(c => txt(c[3] ? String(r.log[c[3]] || 0) : r.name, cx + c[1] * sc, y, fs, (c[3] === 'chains' && r.log.chains) ? '#fc0' : r.color, c[2], false));
+    y += lh;
+  });
+  RESULTS_LAYOUT.logBottom = y - lh * 0.4; RESULTS_LAYOUT.btnTop = btnTop; RESULTS_LAYOUT.fs = fs;
   drawDiffPicker('over', now);
   if (overT > 1.2 && Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO RESTART' : 'CLICK OR SPACE TO RESTART', VW / 2, VH * 0.92, 18 * sc, '#fff', 'center');
 }
+const RESULTS_LAYOUT = {}; // v0.9.4 test hook: where the trick log ended vs where the difficulty picker starts
 
 // ---------- main loop ----------
 let last = performance.now(), acc = 0;
@@ -2726,9 +2881,11 @@ window.RJ = { get state() { return state; }, get riders() { return riders; }, ge
   get difficulty() { return difficulty; }, set difficulty(v) { applyDifficulty(v); }, applyDifficulty, DIFF_PRESETS, DIFF_NAMES,
   bombs, blasts, dispensers, spawnBomb, explodeBomb, flingBomb, updateCable, fireCable, autoAim, get shake() { return shake; },
   BOMB: { DISP_COUNT, DISP_R, BOMB_EVERY, BOMB_MAX, BOMB_DISP_LOOSE, BOMB_R, BOMB_FUSE, BOMB_IDLE_LIFE, BOMB_REEL_L, BOMB_FLING_MULT, BOMB_WHIP, BOMB_FLY_TIME, BOMB_FLY_DRAG, BOMB_GROUND_DRAG,
-    BOMB_IMPACT_SPEED, BOMB_BLAST_R, BOMB_PUSH, BOMB_STICK_FUSE, BOMB_MINE_TIME, BOMB_MINE_ARM, BOMB_MINE_TRIGGER, BOMB_LONG_DIST, PTS_BOMB_TRICK, PTS_MINE_TRICK },
+    BOMB_IMPACT_SPEED, BOMB_BLAST_R, BOMB_PUSH, BOMB_STICK_FUSE, BOMB_MINE_TIME, BOMB_MINE_ARM, BOMB_MINE_TRIGGER, BOMB_LONG_DIST, PTS_BOMB_TRICK, PTS_MINE_TRICK,
+    PTS_CHAIN_TRICK, PTS_KO, CHAIN_L, CHAIN_REEL, CHAIN_SHAKE_BOOST, CHAIN_SHAKE_POST, CHAIN_PASS_GAP, CHAIN_PASS_FUSE, MINE_MAX_L, BLAST_RIDER_V, BLAST_ROCKET_V, ROCKET_SKID_T, ROCKET_SKID_DRAG },
+  chainVictim, updateTethers, RESULTS_LAYOUT, get overT() { return overT; }, set overT(v) { overT = v; },
   get AI() { return { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE, AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_STICKY, AI_FOLLOWUP, AI_PERSONA,
-    AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD }; } };
+    AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD, AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE }; } };
 })();
 </script>
 </body>
