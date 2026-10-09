@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.9.4</title>
+<title>Rocket Jockey v0.9.5</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -73,7 +73,9 @@ const DIFF_PRESETS = {
     // v0.9.3 bombs
     AI_BOMB_CHANCE: 0.22, AI_BOMB_RANGE: 380, AI_BOMB_ACC: 0.5, AI_BOMB_LEAD: 0.3, AI_BOMB_TIE: 0.25, AI_BOMB_PANIC: 0.55, AI_BOMB_DODGE: 0.35, AI_BOMB_MAXD: 560,
     // v0.9.4 ball and chain: plan odds once a bomb is in hand (the rest = fling), how often to go after YOU, how hard to shake one off
-    AI_BOMB_CHAIN: 0.40, AI_BOMB_MINE: 0.25, AI_BOMB_YOU: 0.0, AI_CHAIN_ESCAPE: 0.45
+    AI_BOMB_CHAIN: 0.40, AI_BOMB_MINE: 0.25, AI_BOMB_YOU: 0.0, AI_CHAIN_ESCAPE: 0.45,
+    // v0.9.5 rocket theft: per-think odds to go for an on-foot rider's empty rocket, range, px bias toward YOUR rocket, tie-off odds
+    AI_STEAL_CHANCE: 0.012, AI_STEAL_RANGE: 450, AI_STEAL_YOU: 0, AI_STEAL_TIE: 0.25
   },
   // Normal: competitive — less aim noise, faster reactions, stickier focus, more fire/tie
   Normal: {
@@ -83,7 +85,8 @@ const DIFF_PRESETS = {
     AI_SWING_ENEMY: 400, AI_SWING_IDLE: 1.2, AI_PLAYER_PULL: 210, AI_CROWD: 380,
     AI_REVENGE: 500, AI_FOLLOWUP: [0.18, 0.5], AI_STICKY: 340,
     AI_BOMB_CHANCE: 0.35, AI_BOMB_RANGE: 460, AI_BOMB_ACC: 0.32, AI_BOMB_LEAD: 0.7, AI_BOMB_TIE: 0.33, AI_BOMB_PANIC: 0.8, AI_BOMB_DODGE: 0.6, AI_BOMB_MAXD: 480,
-    AI_BOMB_CHAIN: 0.55, AI_BOMB_MINE: 0.25, AI_BOMB_YOU: 0.3, AI_CHAIN_ESCAPE: 0.7
+    AI_BOMB_CHAIN: 0.55, AI_BOMB_MINE: 0.25, AI_BOMB_YOU: 0.3, AI_CHAIN_ESCAPE: 0.7,
+    AI_STEAL_CHANCE: 0.07, AI_STEAL_RANGE: 650, AI_STEAL_YOU: 250, AI_STEAL_TIE: 0.4
   },
   // Hard: often threatens a win — tight aim, snappy decisions, aggressive hook/tie/fire
   Hard: {
@@ -93,7 +96,8 @@ const DIFF_PRESETS = {
     AI_SWING_ENEMY: 420, AI_SWING_IDLE: 1.0, AI_PLAYER_PULL: 280, AI_CROWD: 350,
     AI_REVENGE: 550, AI_FOLLOWUP: [0.12, 0.35], AI_STICKY: 420,
     AI_BOMB_CHANCE: 0.5, AI_BOMB_RANGE: 540, AI_BOMB_ACC: 0.2, AI_BOMB_LEAD: 1.0, AI_BOMB_TIE: 0.4, AI_BOMB_PANIC: 1.0, AI_BOMB_DODGE: 0.85, AI_BOMB_MAXD: 420,
-    AI_BOMB_CHAIN: 0.68, AI_BOMB_MINE: 0.22, AI_BOMB_YOU: 0.55, AI_CHAIN_ESCAPE: 0.92
+    AI_BOMB_CHAIN: 0.68, AI_BOMB_MINE: 0.22, AI_BOMB_YOU: 0.55, AI_CHAIN_ESCAPE: 0.92,
+    AI_STEAL_CHANCE: 0.16, AI_STEAL_RANGE: 800, AI_STEAL_YOU: 400, AI_STEAL_TIE: 0.55
   }
 };
 let difficulty = 'Easy';
@@ -102,11 +106,12 @@ let AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE;
 let AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_FOLLOWUP, AI_STICKY;
 let AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD; // v0.9.3
 let AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE; // v0.9.4
+let AI_STEAL_CHANCE, AI_STEAL_RANGE, AI_STEAL_YOU, AI_STEAL_TIE; // v0.9.5
 // per-rider personalities (multipliers / overrides). GOLD tracks current difficulty knobs.
 const AI_PERSONA = {
-  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3,  bomb: 1.25, btie: 0.75 },
-  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6,  bomb: 1.0,  btie: 1.3 },
-  GOLD:  { tag: 'RIVAL',     yank: 0.42, cool: 1.0, tie: 0.72, seek: 0.20, pull: 1.0, bind: 0.45, bomb: 1.0,  btie: 1.0 },
+  RED:   { tag: 'BRAWLER',   yank: 0.62, cool: 0.9, tie: 0.6,  seek: 0.10, pull: 1.3, bind: 0.3,  bomb: 1.25, btie: 0.75, steal: 0.15 },
+  GREEN: { tag: 'TRICKSTER', yank: 0.25, cool: 0.9, tie: 0.92, seek: 0.30, pull: 0.9, bind: 0.6,  bomb: 1.0,  btie: 1.3,  steal: 1.0 },
+  GOLD:  { tag: 'RIVAL',     yank: 0.42, cool: 1.0, tie: 0.72, seek: 0.20, pull: 1.0, bind: 0.45, bomb: 1.0,  btie: 1.0,  steal: 1.25 },
 };
 function applyDifficulty(name) {
   if (!DIFF_PRESETS[name]) name = 'Easy';
@@ -121,6 +126,7 @@ function applyDifficulty(name) {
   AI_BOMB_CHANCE = P.AI_BOMB_CHANCE; AI_BOMB_RANGE = P.AI_BOMB_RANGE; AI_BOMB_ACC = P.AI_BOMB_ACC; AI_BOMB_LEAD = P.AI_BOMB_LEAD;
   AI_BOMB_TIE = P.AI_BOMB_TIE; AI_BOMB_PANIC = P.AI_BOMB_PANIC; AI_BOMB_DODGE = P.AI_BOMB_DODGE; AI_BOMB_MAXD = P.AI_BOMB_MAXD;
   AI_BOMB_CHAIN = P.AI_BOMB_CHAIN; AI_BOMB_MINE = P.AI_BOMB_MINE; AI_BOMB_YOU = P.AI_BOMB_YOU; AI_CHAIN_ESCAPE = P.AI_CHAIN_ESCAPE;
+  AI_STEAL_CHANCE = P.AI_STEAL_CHANCE; AI_STEAL_RANGE = P.AI_STEAL_RANGE; AI_STEAL_YOU = P.AI_STEAL_YOU; AI_STEAL_TIE = P.AI_STEAL_TIE;
   AI_PERSONA.GOLD.yank = AI_ZONE_YANK; AI_PERSONA.GOLD.tie = AI_TIE_CHANCE;
   try { localStorage.setItem(DIFF_KEY, name); } catch (e) {}
 }
@@ -309,6 +315,14 @@ const TUMBLE_TIME = 0.7;        // seconds tumbling before you can run
 const REMOUNT_INV = 1.5;        // blinking invulnerability after remount
 const RECALL_TIME = 15;         // on foot this long -> rocket flies back to you
 const TETHER_LIFE = 20, TIE_EFFECT = 6, TETHER_MAX = 4, TIE_COOL = 1.2;
+// ---------- v0.9.5 ROCKET THEFT (hook an on-foot rider's empty rocket and tow it off / tie it to a post) ----------
+const STEAL_DIST = 250;          // px: tow the rocket this far (net, from where you hooked it) = ROCKET THEFT
+const PTS_STEAL = 8;             // tow theft
+const PTS_STEAL_TIE = 10;        // tie a stolen rocket to a post (ROCKET TIED OFF) ...
+const PTS_STEAL_TIE_BONUS = 4;   // ... or +4 on top if the tow already paid (cap 12 per knockoff)
+const STEAL_TOW_MAX = 7;         // s: a tow on an enemy's empty rocket auto-releases after this (no endless hostage)
+const STEAL_TIE_LIFE = 10;       // s: a stolen rocket tied to a post stays tied this long (the owner can still remount it)
+const STEAL_YANK = 160;          // px/s: the thief gets jerked toward the rocket when the owner jumps back on mid-tow
 sfx.tie = () => { // rope creak + knot
   beep(140, 0.18, 'triangle', 0.12, 95); setTimeout(() => beep(170, 0.16, 'triangle', 0.1, 110), 120);
   setTimeout(() => { noise(0.08, 0.3, 1500); beep(900, 0.05, 'square', 0.05); }, 260);
@@ -439,7 +453,7 @@ function makeRider(i) {
     tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null, alt: 1, altV: 1,
     ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0, mode: 'hunt', modeT: 0, react: 0, zone: 'mid', wantLatch: [false, false], postHold: [0, 0], seekPost: null, think: rand(0, 0.5), swingIdle: 0, p: AI_PERSONA[d.name] || AI_PERSONA.GOLD },
     pu: { cable: 0, grip: 0, turbo: 0 },   // v0.7 active power-up timers (s)
-    log: { swings: 0, clothes: 0, ties: 0, chains: 0, mines: 0, bombKOs: 0 }, // v0.9.4 trick log
+    log: { swings: 0, clothes: 0, ties: 0, chains: 0, mines: 0, bombKOs: 0, stolen: 0 }, // v0.9.4 trick log
     kos: 0, tricks: 0, lastBy: null, lastByT: -99, lastKO: -99, chain: 0, entangled: 0, anchored: 0, // v0.8 scoring / credit
   };
 }
@@ -857,6 +871,8 @@ function playerFoot() {
 }
 function aiFoot(r) {
   let gx = r.rk.x, gy = r.rk.y;
+  if (!r.rk.homing && stealCable(r)) { // v0.9.5: own rocket being towed off: run to where it's going (cut the corner)
+    const d = hyp(gx - r.x, gy - r.y), lead = clamp(d / 200, 0, 1.2); gx += r.rk.vx * lead; gy += r.rk.vy * lead; }
   // if tied down, wait it out (can't remount anyway)
   if (tiedDown(r)) return { mx: 0, my: 0 };
   // crude path around a fence that's in the way: head for its nearer end
@@ -972,8 +988,24 @@ function aiControl(r, dt) {
   // v0.9.1: a live hook just landed -> quick follow-up shot (the player can fire the 2nd cable right away too)
   if (hasLive && !ai.hadLive) ai.cool = Math.min(ai.cool, rand(AI_FOLLOWUP[0], AI_FOLLOWUP[1]));
   ai.hadLive = hasLive;
+  // v0.9.5 rocket theft: drop the plan when it can't work any more
+  if (ai.steal) {
+    const v = ai.steal.v, si = stealInfo(v); ai.steal.t += dt;
+    if (v.onRocket || v.rk.homing || hooker || ai.steal.t > 12 || (si && (si.thief !== r || si.tied))) { ai.steal = null; if (ai.mode === 'steal') { ai.mode = 'hunt'; ai.modeT = 0; } }
+  } else if (ai.mode === 'steal') ai.mode = 'hunt';
+  if (!ai.steal && thinkNow && !hooker && nLatch === 0 && (ai.mode === 'hunt' || ai.mode === 'lineup') && Math.random() < AI_STEAL_CHANCE * (P.steal == null ? 1 : P.steal)) {
+    let best = null, bs = 1e9;
+    for (const o of riders) {
+      if (o === r || o.onRocket || o.rk.homing || stealInfo(o) || o.footT > RECALL_TIME - 3) continue;
+      const d = hyp(o.rk.x - r.x, o.rk.y - r.y); if (d > AI_STEAL_RANGE) continue;
+      if (hyp(o.x - o.rk.x, o.y - o.rk.y) < 70) continue; // the owner is about to hop on: not worth it
+      const sc = d - (o.isPlayer ? AI_STEAL_YOU : 0); if (sc < bs) { bs = sc; best = o; }
+    }
+    if (best) { ai.steal = { v: best, t: 0, tie: Math.random() < AI_STEAL_TIE * (P.tie / 0.8) }; ai.mode = 'steal'; ai.modeT = 0; aiStats.stealTries++; }
+  }
   let want = ai.mode;
   if (hooker) want = 'escape';
+  else if (ai.steal) want = 'steal';
   else if (riderCanTie(r)) want = 'tieup';
   else if (hasPost) want = 'swing';
   else if (hasLive && aiFreeSide(r) >= 0) want = 'tieup';
@@ -1138,6 +1170,40 @@ function aiControl(r, dt) {
 
   // ---- v0.9.3 bombs: dodge / carry (fling, stick, mine) / go grab one ----
   desired = aiBombs(r, c, t, dist, desired, thinkNow, dt);
+  // ---- v0.9.5 rocket theft: hook the empty rocket, tow it away from its owner, maybe tie it to a post ----
+  ai.dropRocket = null;
+  if (ai.mode === 'steal' && ai.steal) {
+    const v = ai.steal.v, w = v.rk;
+    const tow = r.cables.findIndex(k => k && k.state === 'latched' && k.target.kind === 'rocket' && k.target.r === v);
+    if (tow < 0) {
+      const d = hyp(w.x - r.x, w.y - r.y);
+      desired = Math.atan2(w.y - r.y, w.x - r.x) + (d < 150 ? 0.7 : 0); // don't run it over: swing past and hook it from the side
+      if (ai.cool <= 0 && d < cableMax(r) * 0.85 && d > 45) {
+        let side = aiSideToward(r, w.x, w.y); if (side < 0) side = aiFreeSide(r);
+        if (side >= 0 && (!r.cables[side] || r.cables[side].state === 'retract')) {
+          const ft = d / CABLE_SPEED;
+          c.fire[side] = true; c.aim[side] = Math.atan2(w.y + (w.vy - r.vy) * ft - r.y, w.x + (w.vx - r.vx) * ft - r.x) + gauss() * AI_ERR * 0.5;
+          c.hold[side] = true; ai.wantLatch[side] = true; ai.cool = rand(0.6, 1.2);
+        }
+      }
+    } else {
+      const k = r.cables[tow], moved = hyp(w.x - k.steal.x0, w.y - k.steal.y0);
+      desired = Math.atan2(r.y - v.y, r.x - v.x); // haul it away from its owner
+      c.boost = r.fuel > 30 && k.steal.t < 2.5;
+      if (riderCanTie(r)) c.tie = true;
+      else if (ai.steal.tie && moved > STEAL_DIST * 0.6) {
+        const post = aiNearestPost(r, cableMax(r) * 0.85), side = 1 - tow;
+        if (post) {
+          desired = Math.atan2(post.y - r.y, post.x - r.x) + 0.8;
+          if (ai.cool <= 0 && (!r.cables[side] || r.cables[side].state === 'retract')) {
+            c.fire[side] = true; c.aim[side] = Math.atan2(post.y - r.y, post.x - r.x) + gauss() * AI_ERR * 0.4;
+            c.hold[side] = true; ai.wantLatch[side] = true; ai.postHold[side] = 1.5; ai.cool = rand(0.8, 1.4);
+          }
+        }
+      }
+      if ((!ai.steal.tie && moved > STEAL_DIST + 90) || k.steal.t > STEAL_TOW_MAX - 0.3 || (ai.steal.tie && ai.steal.t > 9)) { ai.dropRocket = v; ai.steal = null; ai.mode = 'hunt'; ai.modeT = 0; }
+    }
+  }
 
   // wall avoidance
   const lx = r.x + r.vx * 0.9, ly = r.y + r.vy * 0.9, m = 170;
@@ -1210,12 +1276,12 @@ function aiControl(r, dt) {
     if (k.state === 'latched') {
       if (k.target.kind === 'post') {
         // hold while the timer runs (set when we fired at the post); then release so we don't spin forever
-        if (ai.postHold[s] <= 0 && ai.mode === 'tieup') ai.postHold[s] = 1.2; // brief hold to finish a tie
+        if (ai.postHold[s] <= 0 && (ai.mode === 'tieup' || ai.mode === 'steal')) ai.postHold[s] = 1.2; // brief hold to finish a tie
         c.hold[s] = ai.postHold[s] > 0;
       } else if (k.target.kind === 'live') {
         c.hold[s] = true; // updateCable uses aiHold for AI release timing; keep hold asserted
         if (ai.mode === 'tieup') k.aiHold = Math.max(k.aiHold || 0, 2.5); // hang on longer to set up a bind
-      } else if (k.target.kind === 'foot' || k.target.kind === 'rocket') c.hold[s] = true;
+      } else if (k.target.kind === 'foot' || k.target.kind === 'rocket') c.hold[s] = !(ai.dropRocket && k.target.r === ai.dropRocket); // v0.9.5: let a stolen rocket go
       else if (k.target.kind === 'bomb') c.hold[s] = !ai.bombRelease; // v0.9.3: let go = fling
     }
     if (k.state === 'retract') ai.wantLatch[s] = false;
@@ -1232,7 +1298,8 @@ let forceZone = null; // test hook: 'nose' | 'mid' | 'tail' forces the zone of t
 let aiAll = false; // test hook: when true, the player is also AI-controlled
 const aiStats = { nose: 0, mid: 0, tail: 0, posts: 0, ties: 0, binds: 0, yanks: 0, // v0.9 headless counters
   bombGrabs: 0, bombFlings: 0, bombSticks: 0, bombMines: 0, bombKOs: 0, bombSelfKOs: 0, bombImpacts: 0, bombDodges: 0, bombsSpawned: 0, bombBlasts: 0, bombAimedFlings: 0, // v0.9.3
-  chainKOs: 0, mineKOs: 0, flingKOs: 0, chainPasses: 0, chainShakes: 0, chainRams: 0, chainYou: 0, planChain: 0, planMine: 0, planFling: 0, planFail: 0 }; // v0.9.4
+  chainKOs: 0, mineKOs: 0, flingKOs: 0, chainPasses: 0, chainShakes: 0, chainRams: 0, chainYou: 0, planChain: 0, planMine: 0, planFling: 0, planFail: 0, // v0.9.4
+  stealTries: 0, stealHooks: 0, thefts: 0, theftsYou: 0, theftTies: 0, stealBreaks: 0 }; // v0.9.5
 function resetAiStats() { for (const k in aiStats) aiStats[k] = 0; }
 function hitZone(o, x, y) { // where a cable tip at (x, y) hits rider o's rocket: 'nose' | 'mid' | 'tail' | null
   const hx = Math.cos(o.ang), hy = Math.sin(o.ang), dx = x - o.x, dy = y - o.y;
@@ -1301,6 +1368,12 @@ function latchCable(r, k, target) {
     }
   }
   if (target.kind === 'bomb') grabBomb(r, k, target.b); // v0.9.3
+  if (target.kind === 'rocket' && target.r !== r) { // v0.9.5: towing an enemy's empty rocket = a theft in progress
+    k.steal = { x0: o.x, y0: o.y, t: 0 };
+    noteHit(target.r, r);
+    if (!r.isPlayer || aiAll) aiStats.stealHooks++;
+    if (state === 'play' && target.r.isPlayer) { msg(r.name + ' IS STEALING YOUR ROCKET!', '#f44'); if (!r.isPlayer) beep(220, 0.25, 'square', 0.06, 140); }
+  }
   if (target.kind === 'post') { // swing tracking (caps) + live-cable clothesline bookkeeping
     k.swept = 0; k.age = 0; k.lastA = Math.atan2(r.y - o.y, r.x - o.x); k.immune = new Map(); k.sides = new Map();
     if (!r.isPlayer || aiAll) aiStats.posts++;
@@ -1381,6 +1454,11 @@ function updateCable(r, s, hold, dt) {
     }
     if (!hold) { retract(r, k); return; }
     if (k.target.kind === 'bomb') k.L = Math.max(BOMB_REEL_L, k.L - BOMB_REEL_SPEED * dt); // v0.9.3 reel the bomb in
+    if (k.steal && k.target.kind === 'rocket') { // v0.9.5 theft: pay once it's been towed far enough; never hold it hostage forever
+      k.steal.t += dt;
+      if (hyp(o.x - k.steal.x0, o.y - k.steal.y0) >= STEAL_DIST) payTheft(r, k.target.r, false, o.x, o.y);
+      if (k.steal.t >= STEAL_TOW_MAX) { retract(r, k); k.flash = 0.3; if (r.isPlayer && state === 'play') sfx.release(); return; }
+    }
     if (k.target.kind === 'rocket' || k.target.kind === 'foot') { // drag bonus
       k.dragT += dt;
       if (k.dragT >= DRAG_EVERY) { k.dragT -= DRAG_EVERY; award(r, PTS_DRAG, 'DRAG', o.x, o.y); }
@@ -1428,6 +1506,30 @@ function applyCableConstraints(r, dt) {
 }
 function releaseCablesOn(pred) { // retract any latched cable whose target matches
   for (const o of riders) for (const k of o.cables) if (k && k.state === 'latched' && pred(k.target)) retract(o, k);
+}
+// ---------- v0.9.5 rocket theft ----------
+function stealCable(o) { // the enemy cable towing o's empty rocket -> { thief, k } | null
+  if (o.onRocket) return null;
+  for (const r of riders) { if (r === o) continue; for (const k of r.cables) if (k && k.state === 'latched' && k.target.kind === 'rocket' && k.target.r === o) return { thief: r, k }; }
+  return null;
+}
+function stealTie(o) { for (const t of tethers) if (t.stolen && t.victim === o) return t; return null; }
+function stealInfo(o) { // is o's rocket being stolen? -> { thief, tied, held }
+  const s = stealCable(o); if (s) return { thief: s.thief, tied: false, k: s.k };
+  const t = stealTie(o); return t ? { thief: t.owner, tied: true, held: !!t.held, t } : null;
+}
+function payTheft(thief, o, tie, x, y) {
+  if (!thief || thief === o || state !== 'play') return;
+  if (tie ? o.theftTie : o.theftTow) return;
+  const first = !o.theftTow && !o.theftTie;
+  const pts = tie ? (o.theftTow ? PTS_STEAL_TIE_BONUS : PTS_STEAL_TIE) : PTS_STEAL;
+  if (tie) o.theftTie = true; else o.theftTow = true;
+  award(thief, pts, tie ? 'ROCKET TIED OFF' : 'ROCKET THEFT', x, y);
+  if (first) { thief.log.stolen++; thief.tricks++; }
+  if (!thief.isPlayer || aiAll) { if (first) { aiStats.thefts++; if (o.isPlayer) aiStats.theftsYou++; } if (tie) aiStats.theftTies++; }
+  if (thief.isPlayer) msg((tie ? 'TIED OFF ' : 'STOLE ') + o.name + "'S ROCKET!", '#fc0');
+  else if (o.isPlayer) msg(thief.name + (tie ? ' TIED YOUR ROCKET TO A POST!' : ' STOLE YOUR ROCKET!'), '#f44');
+  else msg(thief.name + (tie ? ' TIED OFF ' : ' STOLE ') + o.name + "'S ROCKET", '#aaa');
 }
 
 
@@ -1844,6 +1946,10 @@ function doTie(r) {
   const [k0, k1] = r.cables;
   const t = addTether(r, k0.target, k1.target);
   r.cables = [null, null]; r.cableCool = TIE_COOL;
+  if (t.kind === 'anchored') { // v0.9.5: an enemy's empty rocket tied to a post = ROCKET TIED OFF
+    const re = t.a.kind === 'rocket' ? t.a : t.b;
+    if (re.r !== r && !re.r.onRocket) { t.stolen = true; t.victim = re.r; t.t = t.max = STEAL_TIE_LIFE; }
+  }
   sfx.tie();
   const A = anchorObj(t.a), B = anchorObj(t.b);
   spawnParts(A.x, A.y, 10, '#f93', 140, 0.4); spawnParts(B.x, B.y, 10, '#f93', 140, 0.4);
@@ -1852,7 +1958,8 @@ function doTie(r) {
   if (t.kind === 'clothes') msg('CLOTHESLINE SET!', '#f93');
   else if (t.kind === 'tied') msg('TIED UP ' + fa.name + '!', '#f93');
   else if (t.kind === 'tangled') msg('TANGLED ' + fa.name + (ra === fa ? ' TO THEIR ROCKET!' : ' WITH ' + ra.name + "'S ROCKET!"), '#f93');
-  else if (t.kind === 'anchored') msg('ANCHORED ' + ra.name + "'S ROCKET!", '#f93');
+  else if (t.kind === 'anchored' && !t.stolen) msg('ANCHORED ' + ra.name + "'S ROCKET!", '#f93');
+  else if (t.kind === 'anchored') {} // v0.9.5: payTheft below says it
   else if (t.kind === 'lashed') msg('ROCKETS LASHED TOGETHER!', '#f93');
   else if (t.kind === 'binding') msg('BOUND ' + t.a.r.name + ' TO ' + t.b.r.name + '!', '#f93');
   else if (t.kind === 'leash') { const lv = t.a.kind === 'live' ? t.a.r : t.b.r; msg('LEASHED ' + lv.name + "'S ROCKET TO A POST!", '#f93'); }
@@ -1865,6 +1972,7 @@ function doTie(r) {
   if (t.kind !== 'mine' && t.kind !== 'stuck') r.log.ties++; // v0.9.4 trick log (rope ties; bomb ties count when they pay off)
   if (t.kind === 'binding' || t.kind === 'bound') { award(r, PTS_BIND, 'BIND', mx, my); r.tricks++; if (!r.isPlayer || aiAll) { aiStats.ties++; aiStats.binds++; } }
   else if (t.kind === 'tied' || t.kind === 'tangled') { award(r, PTS_TIE, 'TIE-UP', mx, my); r.tricks++; if (!r.isPlayer || aiAll) aiStats.ties++; }
+  else if (t.stolen) payTheft(r, t.victim, true, mx, my); // v0.9.5 (replaces the +5 ANCHOR)
   else if (t.kind === 'anchored' || t.kind === 'leash' || t.kind === 'lashed') { award(r, PTS_TIE, 'ANCHOR', mx, my); r.tricks++; if (!r.isPlayer || aiAll) aiStats.ties++; }
   else if ((!r.isPlayer || aiAll) && t.kind === 'clothes') { aiStats.ties++; }
   else if ((!r.isPlayer || aiAll) && t.kind === 'mine') aiStats.bombMines++;
@@ -1890,7 +1998,9 @@ function updateTethers(dt) {
     t.t -= dt; t.arm -= dt; t.ownerArm -= dt;
     if (!anchorValid(t.a) || !anchorValid(t.b)) { snapTether(t, false); continue; }
     if (t.t <= 0) { snapTether(t, true); continue; }
-    if (t.L > t.minL) t.L = Math.max(t.minL, t.L - (t.kind === 'stuck' ? t.reel || CHAIN_REEL : 70) * dt); // cinch tie-ups tighter (v0.9.4: a chain reels in)
+    if (t.held && t.victim.boosting) { // v0.9.5: the owner jumped back on a tied-off rocket: boosting rips it free
+      snapTether(t, true); if (t.victim.isPlayer && state === 'play') msg('RIPPED FREE!', '#3cf'); continue; }
+    if (t.L > t.minL && !t.held) t.L = Math.max(t.minL, t.L - (t.kind === 'stuck' ? t.reel || CHAIN_REEL : 70) * dt); // cinch tie-ups tighter (v0.9.4: a chain reels in)
     const A = anchorObj(t.a), B = anchorObj(t.b);
     const tight = t.kind === 'binding' || t.kind === 'leash';
     if (hyp(A.x - B.x, A.y - B.y) > t.L + (tight ? BIND_SNAP : 300)) { snapTether(t, true); continue; } // overstretch snap
@@ -1963,6 +2073,7 @@ function knockOff(o, by, how, src) {
   if ((how === 'yank' || how === 'clothes' || how === 'bomb') && gripAbsorb(o, by)) return false; // v0.7 GRIP shield (v0.9.3: also soaks one bomb)
   const credit = creditFor(o, by); // v0.8: who caused this fall (direct hit, or the last cable/rope/binding on them within 3 s)
   o.onRocket = false; o.falls++; o.cables = [null, null]; o.killer = credit; o.boosting = false;
+  o.theftTow = o.theftTie = false; // v0.9.5: one theft payout per knockoff
   o.tumble = TUMBLE_TIME; o.footT = 0; o.stun = 0; o.inv = 0; o.cableCool = 0;
   // the rocket keeps sliding and spinning away
   const k = o.rk; k.x = o.x; k.y = o.y; k.ang = o.ang; k.homing = false; k.skid = 0;
@@ -2043,14 +2154,23 @@ function kickRocketAway(o, kd) {
 }
 function remount(r) {
   const k = r.rk;
+  // v0.9.5: jumping back on mid-tow breaks the tow and jerks the thief back a bit; a post tie-off holds until you boost
+  const st = stealCable(r), keep = stealTie(r);
+  if (st) {
+    const th = st.thief, dx = k.x - th.x, dy = k.y - th.y, d = hyp(dx, dy) || 1;
+    th.vx += dx / d * STEAL_YANK; th.vy += dy / d * STEAL_YANK; th.stun = Math.max(th.stun, 0.25);
+    if (!th.isPlayer || aiAll) aiStats.stealBreaks++;
+    if (state === 'play') { if (r.isPlayer) msg('TOOK IT BACK FROM ' + th.name + '!', '#3cf'); else if (th.isPlayer) msg(r.name + ' TOOK THEIR ROCKET BACK!', '#f44'); }
+  }
   // free everything attached to this rider / rocket
-  for (const t of tethers.slice()) if ([t.a, t.b].some(a => a.r === r)) snapTether(t, true);
+  for (const t of tethers.slice()) if (t !== keep && [t.a, t.b].some(a => a.r === r)) snapTether(t, true);
   releaseCablesOn(a => a.r === r);
   r.onRocket = true; r.x = k.x; r.y = k.y; r.ang = k.ang; r.px = r.x; r.py = r.y;
   r.vx = Math.cos(r.ang) * BASE_SPEED * 0.4; r.vy = Math.sin(r.ang) * BASE_SPEED * 0.4;
   r.inv = REMOUNT_INV; r.stun = 0; r.tumble = 0; r.footT = 0; k.homing = false; r.alt = r.altV = ALTITUDE_ENABLED ? 0 : 1; // climb back on from the ground (LOW only when altitude is on)
+  if (keep) { if (keep.a.kind === 'rocket') keep.a = { kind: 'live', r }; else keep.b = { kind: 'live', r }; keep.held = true; }
   spawnParts(r.x, r.y, 16, '#fff', 150, 0.5);
-  if (r.isPlayer && state === 'play') { sfx.spawn(); msg('BACK IN THE SADDLE', '#3cf'); }
+  if (r.isPlayer && state === 'play') { sfx.spawn(); msg(keep ? 'TIED TO A POST: BOOST TO RIP FREE!' : 'BACK IN THE SADDLE', '#3cf'); }
 }
 function recallRocket(r) {
   r.rk.homing = true;
@@ -2107,11 +2227,11 @@ function updateFoot(r, c, dt) {
       if ((w.y <= 21 && uy < 0) || (w.y >= WORLD_H - 21 && uy > 0)) { uy = 0; ux = ux >= 0 ? 1 : -1; }
       const va = w.vx * ux + w.vy * uy, vrel = (w.vx - r.vx) * ux + (w.vy - r.vy) * uy;
       if (r.footT < MIN_ON_FOOT_TIME) { if (vrel < 80) { w.vx += (80 - vrel) * ux; w.vy += (80 - vrel) * uy; } } // early: push it clear
-      else if (va < 0) { w.vx -= va * ux; w.vy -= va * uy; }  // later: it may not drift back toward the rider
+      else if (va < 0 && !stealCable(r)) { w.vx -= va * ux; w.vy -= va * uy; }  // later: it may not drift back toward the rider (v0.9.5: unless a thief is towing it past you)
     }
     if (hyp(w.vx, w.vy) > 40 && Math.random() < 0.3) particles.push({ x: w.x, y: w.y, vx: rand(-20, 20), vy: rand(-20, 20), life: 0.8, max: 0.8, color: '#666' });
   }
-  if (r.footT >= RECALL_TIME && !w.homing) recallRocket(r);
+  if (r.footT >= RECALL_TIME && !w.homing && !stealInfo(r)) recallRocket(r); // v0.9.5: no recall mid-theft (tow <= 7 s, tie <= 10 s)
   // remount by touching the rocket
   if (r.tumble <= 0 && r.footT >= MIN_ON_FOOT_TIME && !tiedDown(r) && hyp(w.x - r.x, w.y - r.y) < RIDER_R + 12 && (state === 'play' || state === 'title')) remount(r);
 }
@@ -2566,6 +2686,12 @@ function render(now) {
       ctx.strokeStyle = 'rgba(51,204,255,' + (0.5 + 0.4 * Math.sin(now / 120)) + ')'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(w.x, w.y, 30, 0, TAU); ctx.stroke();
     }
+    const si = stealInfo(r); // v0.9.5: a rocket being stolen gets the thief's dashed ring + tag
+    if (si) {
+      ctx.strokeStyle = si.thief.color; ctx.lineWidth = 2.5; ctx.setLineDash([6, 5]); ctx.lineDashOffset = -now / 40;
+      ctx.beginPath(); ctx.arc(w.x, w.y, 36, 0, TAU); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+      txt(si.tied ? 'TIED OFF' : 'STOLEN', w.x, w.y - 44, 11, si.thief.color, 'center');
+    }
     if (w.homing) { ctx.strokeStyle = 'rgba(51,204,255,0.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(w.x, w.y, 22, 0, TAU); ctx.stroke(); }
     drawShadow(w.x, w.y, w.ang, 0.88, 2, 0.4);
     drawRocket({ x: w.x, y: w.y, ang: w.ang, color: r.color, boosting: false }, false, true, 0.88);
@@ -2685,12 +2811,30 @@ function drawHUD(now) {
   for (const m of msgs) { ctx.globalAlpha = clamp(m.t, 0, 1); txt(m.text, VW / 2, my, 16 * sc, m.color, 'center'); my += 20 * sc; }
   ctx.globalAlpha = 1;
   // on foot prompt
-  if (!player.onRocket) {
+  const psi = state === 'play' && !player.onRocket ? stealInfo(player) : null; // v0.9.5
+  if (psi) {
+    const blink = Math.floor(now / 250) % 2 === 0;
+    txt(psi.tied ? psi.thief.name + ' TIED OFF YOUR ROCKET!' : psi.thief.name + ' IS STEALING YOUR ROCKET!', VW / 2, VH * 0.36, 22 * sc, blink ? '#ff4444' : psi.thief.color, 'center');
+    txt(psi.tied ? 'RUN TO IT - HOP ON, THEN BOOST TO RIP FREE' : 'CHASE IT! TOUCH IT TO TAKE IT BACK', VW / 2, VH * 0.36 + 24 * sc, 13 * sc, '#fff', 'center');
+    // arrow from you toward your rocket (screen space)
+    const s2 = cam.scale, px = VW / 2 + (player.x - cam.x) * s2, py = VH / 2 + (player.y - cam.y) * s2;
+    const w = player.rk, a = Math.atan2(w.y - player.y, w.x - player.x), dd = hyp(w.x - player.x, w.y - player.y);
+    if (dd > 40) {
+      const ar = 34 * sc, ax = px + Math.cos(a) * ar, ay = py + Math.sin(a) * ar;
+      ctx.save(); ctx.translate(ax, ay); ctx.rotate(a); ctx.fillStyle = blink ? '#ff4444' : '#ffdd33'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(14 * sc, 0); ctx.lineTo(-8 * sc, -9 * sc); ctx.lineTo(-3 * sc, 0); ctx.lineTo(-8 * sc, 9 * sc); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+      txt(Math.round(dd) + 'px', ax + Math.cos(a) * 20 * sc, ay + Math.sin(a) * 20 * sc + 4, 10 * sc, '#fff', 'center', false);
+    }
+  } else if (player.onRocket && tethers.some(q => q.held && q.victim === player)) {
+    txt('YOUR ROCKET IS TIED TO A POST: BOOST TO RIP FREE!', VW / 2, VH * 0.3, 15 * sc, Math.floor(now / 200) % 2 ? '#f93' : '#fff', 'center');
+  }
+  if (!player.onRocket && !psi) {
     if (Math.floor(now / 350) % 2 === 0 || player.tumble > 0) txt('GET BACK ON YOUR ROCKET!', VW / 2, VH * 0.36, 24 * sc, '#3cf', 'center');
     let sub = player.tumble > 0 ? 'KNOCKED OFF!' : tiedDown(player) ? 'TIED UP! WAIT IT OUT...' : 'RUN TO IT';
     if (player.rk.homing) sub = 'ROCKET RETURNING...';
     else if (player.footT > 5) sub += '   (RECALL IN ' + Math.max(1, Math.ceil(RECALL_TIME - player.footT)) + ')';
     txt(sub, VW / 2, VH * 0.36 + 26 * sc, 14 * sc, '#fff', 'center');
+  } else if (!player.onRocket) {
   } else if (bombs.some(q => chainVictim(q) === player)) { // v0.9.4: ball and chain on YOU
     const q = bombs.find(q => chainVictim(q) === player), str = clamp(q.chainStr == null ? 1 : q.chainStr, 0, 1);
     txt('BALL AND CHAIN ON YOU! ' + q.fuse.toFixed(1) + 's', VW / 2, VH * 0.3, 18 * sc, q.on ? '#ff5533' : '#ffcc33', 'center');
@@ -2803,7 +2947,7 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.9.4  ROCKET WAR + BALL AND CHAIN', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.9.5  ROCKET WAR + ROCKET THEFT', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   txt('Grapple posts to whip around corners.  Hit RIDER to yank; NOSE/TAIL to tow!', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE: clotheslines & tie-ups!', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#f93', 'center');
   txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.48 + 34 * sc, 11 * sc, '#8ab', 'center');
@@ -2836,13 +2980,13 @@ function drawResults(now) {
   // trick log: one compact line per rider, small columns
   const lh = clamp((btnTop - y - 4 * sc) / (results.length + 1), 9, 14 * sc), fs = Math.min(10 * sc, lh * 0.82);
   y += lh * 0.2;
-  const tcols = [['TRICK LOG', -250, 'left', null], ['SWINGS', -95, 'right', 'swings'], ['CLOTHES', -25, 'right', 'clothes'], ['TIES', 35, 'right', 'ties'],
-    ['BALL+CHAIN', 125, 'right', 'chains'], ['MINES', 185, 'right', 'mines'], ['BOMB KOs', 260, 'right', 'bombKOs'], ['PASSED', 325, 'right', 'passes']];
-  ctx.fillStyle = 'rgba(8,10,24,0.92)'; ctx.fillRect(cx - 258 * sc, y - lh * 0.6, 590 * sc, lh * (results.length + 1) + lh * 0.2);
+  const tcols = [['TRICK LOG', -250, 'left', null], ['SWINGS', -112, 'right', 'swings'], ['CLOTHES', -48, 'right', 'clothes'], ['TIES', 2, 'right', 'ties'],
+    ['BALL+CHAIN', 86, 'right', 'chains'], ['MINES', 142, 'right', 'mines'], ['BOMB KOs', 212, 'right', 'bombKOs'], ['PASSED', 272, 'right', 'passes'], ['STOLEN', 334, 'right', 'stolen']]; // v0.9.5 + STOLEN
+  ctx.fillStyle = 'rgba(8,10,24,0.92)'; ctx.fillRect(cx - 258 * sc, y - lh * 0.6, 600 * sc, lh * (results.length + 1) + lh * 0.2);
   for (const c of tcols) txt(c[0], cx + c[1] * sc, y, fs, c[0] === 'TRICK LOG' ? '#f93' : '#888', c[2], false);
   y += lh;
   results.forEach(r => {
-    tcols.forEach(c => txt(c[3] ? String(r.log[c[3]] || 0) : r.name, cx + c[1] * sc, y, fs, (c[3] === 'chains' && r.log.chains) ? '#fc0' : r.color, c[2], false));
+    tcols.forEach(c => txt(c[3] ? String(r.log[c[3]] || 0) : r.name, cx + c[1] * sc, y, fs, ((c[3] === 'chains' && r.log.chains) || (c[3] === 'stolen' && r.log.stolen)) ? '#fc0' : r.color, c[2], false));
     y += lh;
   });
   RESULTS_LAYOUT.logBottom = y - lh * 0.4; RESULTS_LAYOUT.btnTop = btnTop; RESULTS_LAYOUT.fs = fs;
@@ -2883,9 +3027,9 @@ window.RJ = { get state() { return state; }, get riders() { return riders; }, ge
   BOMB: { DISP_COUNT, DISP_R, BOMB_EVERY, BOMB_MAX, BOMB_DISP_LOOSE, BOMB_R, BOMB_FUSE, BOMB_IDLE_LIFE, BOMB_REEL_L, BOMB_FLING_MULT, BOMB_WHIP, BOMB_FLY_TIME, BOMB_FLY_DRAG, BOMB_GROUND_DRAG,
     BOMB_IMPACT_SPEED, BOMB_BLAST_R, BOMB_PUSH, BOMB_STICK_FUSE, BOMB_MINE_TIME, BOMB_MINE_ARM, BOMB_MINE_TRIGGER, BOMB_LONG_DIST, PTS_BOMB_TRICK, PTS_MINE_TRICK,
     PTS_CHAIN_TRICK, PTS_KO, CHAIN_L, CHAIN_REEL, CHAIN_SHAKE_BOOST, CHAIN_SHAKE_POST, CHAIN_PASS_GAP, CHAIN_PASS_FUSE, MINE_MAX_L, BLAST_RIDER_V, BLAST_ROCKET_V, ROCKET_SKID_T, ROCKET_SKID_DRAG },
-  chainVictim, updateTethers, RESULTS_LAYOUT, get overT() { return overT; }, set overT(v) { overT = v; },
+  chainVictim, updateTethers, RESULTS_LAYOUT, stealInfo, stealCable, stealTie, remount, latchCable, STEAL: { STEAL_DIST, PTS_STEAL, PTS_STEAL_TIE, PTS_STEAL_TIE_BONUS, STEAL_TOW_MAX, STEAL_TIE_LIFE, STEAL_YANK }, get overT() { return overT; }, set overT(v) { overT = v; },
   get AI() { return { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE, AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_STICKY, AI_FOLLOWUP, AI_PERSONA,
-    AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD, AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE }; } };
+    AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD, AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE, AI_STEAL_CHANCE, AI_STEAL_RANGE, AI_STEAL_YOU, AI_STEAL_TIE }; } };
 })();
 </script>
 </body>
