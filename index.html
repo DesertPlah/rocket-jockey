@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.9.6</title>
+<title>Rocket Jockey v0.9.7</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -150,7 +150,7 @@ function applyMode(m) { if (!MODES.includes(m)) m = 'war'; gameMode = m; try { l
 function isBall() { return gameMode === 'ball'; }
 // ROCKETBALL tuning. Balls live in the bombs[] list (flag ball:true) so they reuse the exact hook / reel / swing / fling code,
 // but never light, never explode, can't be tied, and bounce off rockets. Bombs and power-ups are OFF in this mode.
-const BALL_MAX = 2;               // loose + carried balls on the field at once
+const BALL_MAX = 1;               // v0.9.7: one ball at a time (team play: everyone reads the same ball; kickoff after each goal)
 const BALL_EVERY = [2.5, 4];      // s: a dispenser drops a new ball this long after the field drops below BALL_MAX
 const BALL_FLY_TIME = 1.5;        // s: a flung ball flies with low drag this long (bombs: 1.2), then skids
 const BALL_BUMP = 1.7;            // restitution-ish kick when a rocket bumps a loose / flying ball
@@ -159,12 +159,22 @@ const GOAL_DEPTH = 150;           // px: goal box depth from the side wall (the 
 const PTS_GOAL = 25, PTS_ASSIST = 8, PTS_BALL_STEAL = 3, ASSIST_WINDOW = 12;
 const RB_KO_MULT = 0.5;           // KOs are a smaller side score in ROCKETBALL (KO +5, clothesline +10, combos halved)
 const goals = [ // left + right wall, centred. side = which wall (-1 left, +1 right); x = the mouth line
-  { side: -1, x: GOAL_DEPTH, cy: WORLD_H / 2, flash: 0, color: '#ff66ff', name: 'WEST' },
-  { side: 1, x: WORLD_W - GOAL_DEPTH, cy: WORLD_H / 2, flash: 0, color: '#66ffcc', name: 'EAST' },
+  { side: -1, x: GOAL_DEPTH, cy: WORLD_H / 2, flash: 0, color: '#3399ff', name: 'WEST', team: 0 },   // v0.9.7: BLUE defends WEST
+  { side: 1, x: WORLD_W - GOAL_DEPTH, cy: WORLD_H / 2, flash: 0, color: '#ff8800', name: 'EAST', team: 1 }, // ORANGE defends EAST
 ];
 const goalPosts = goals.flatMap(g => [-1, 1].map(d => ({ x: g.x, y: g.cy + d * (GOAL_HALF + 6), r: 15, ph: 0, gp: true, g })));
 function inGoal(x, y) { for (const g of goals) if (Math.abs(y - g.cy) < GOAL_HALF && (g.side < 0 ? x < g.x : x > g.x)) return g; return null; }
 let goalBanner = null, lastGoal = null;
+// ---------- v0.9.7 ROCKETBALL 2v2 ----------
+// BLUE = YOU + GOLD (the balanced RIVAL makes the most useful teammate), ORANGE = RED (brawler) + GREEN (trickster).
+// BLUE attacks the EAST goal (goals[1]) and defends WEST; ORANGE the other way round.
+const TEAMS = [{ name: 'BLUE', color: '#3399ff', rgb: '51,153,255', attack: 1 }, { name: 'ORANGE', color: '#ff8800', rgb: '255,136,0', attack: 0 }];
+const PTS_OWN_GOAL = -5;
+function teamOf(r) { return !isBall() || !r ? -1 : (r.id === 0 || r.name === 'GOLD') ? 0 : 1; }
+function sameTeam(a, b) { return isBall() && !!a && !!b && a !== b && teamOf(a) === teamOf(b); } // friendly: cables / ropes pass through teammates
+let teamGoals = [0, 0], pendingKick = 0, kickT = 0, teamResult = null;
+// kickoff: both teams line up in their own half (one forward, one back), ball pops out of the centre dispenser
+const KICK_SPOTS = { YOU: [-480, -260], GOLD: [-900, 260], RED: [480, 260], GREEN: [900, -260] };
 const PU_TYPES = { F: { name: 'FUEL', color: '#ffaa33' }, C: { name: 'LONG CABLE', color: '#33ccff' }, G: { name: 'GRIP', color: '#66ff66' }, T: { name: 'TURBO', color: '#ff55ff' } };
 // v0.8 hit zones on occupied rockets: NOSE (front 30%) / MIDDLE = rider (40%) / TAIL (rear 30%)
 const ZONE_NOSE = 0.3, ZONE_TAIL = 0.3;   // fractions of the rocket length; the middle 40% yanks
@@ -431,6 +441,20 @@ const dispensers = [];
   }
   for (const d of dispensers) posts.push(d);
 })();
+// v0.9.7 ROCKETBALL pitch
+// the pitch: one ball dispenser dead centre, posts in a ring round it (clear of the dispenser), wing lanes, defenders' posts flanking each goal
+const ballDisp = { x: WORLD_W / 2, y: WORLD_H / 2, r: DISP_R + 4, ph: 0, disp: true, cool: 999, nextA: 0, flash: 0, n: 0, ballDisp: true };
+const RB_POSTS = (() => { const L = [], P = (x, y, r) => L.push({ x, y, r: r || 18, ph: (x * 7 + y) % TAU, rb: true });
+  for (let i = 0; i < 4; i++) { const a = Math.PI / 4 + i * Math.PI / 2; P(WORLD_W / 2 + Math.cos(a) * 340, WORLD_H / 2 + Math.sin(a) * 340, 16); } // centre circle
+  for (const x of [650, 1200, 2000, 2550]) { P(x, 430); P(x, WORLD_H - 430); }                                                                // wing lanes
+  for (const sx of [-1, 1]) { const gx = sx < 0 ? 560 : WORLD_W - 560; P(gx, WORLD_H / 2 - 360, 20); P(gx, WORLD_H / 2 + 360, 20); }          // defenders' posts
+  return L; })();
+const WAR_POSTS = posts.slice(), WAR_FENCES = fences.slice();
+function setArena() { // Rocket War gets back its exact posts / dispensers / fences (same objects, same order)
+  posts.length = 0; fences.length = 0;
+  if (isBall()) { for (const p of RB_POSTS) posts.push(p); posts.push(ballDisp); for (const p of goalPosts) posts.push(p); }
+  else { for (const p of WAR_POSTS) posts.push(p); for (const f of WAR_FENCES) fences.push(f); }
+}
 function fenceBlocks(f, level) { return !ALTITUDE_ENABLED || f.tall || level <= 0; } // level -1 = ground, 0 = LOW
 function cableBlocked(level, x1, y1, x2, y2) {
   for (const f of fences) if (fenceBlocks(f, level) && segsCross(x1, y1, x2, y2, f.x1, f.y1, f.x2, f.y2)) return true;
@@ -482,7 +506,7 @@ function makeRider(i) {
     tumble: 0, footT: 0, hitCool: 0, walk: 0, spin: 0, killer: null, alt: 1, altV: 1,
     ai: { target: null, retarget: 0, cool: rand(2, 4), wx: WORLD_W / 2, wy: WORLD_H / 2, boosting: false, altCool: rand(1, 2), puCool: rand(1, 3), pu: null, puT: 0, mode: 'hunt', modeT: 0, react: 0, zone: 'mid', wantLatch: [false, false], postHold: [0, 0], seekPost: null, think: rand(0, 0.5), swingIdle: 0, p: AI_PERSONA[d.name] || AI_PERSONA.GOLD },
     pu: { cable: 0, grip: 0, turbo: 0 },   // v0.7 active power-up timers (s)
-    log: { swings: 0, clothes: 0, ties: 0, chains: 0, mines: 0, bombKOs: 0, stolen: 0, goals: 0, assists: 0, ballSteals: 0, ballKOs: 0 }, // v0.9.4 trick log (v0.9.6 + ROCKETBALL)
+    log: { swings: 0, clothes: 0, ties: 0, chains: 0, mines: 0, bombKOs: 0, stolen: 0, goals: 0, assists: 0, ballSteals: 0, ballKOs: 0, ballPasses: 0, ownGoals: 0 }, // v0.9.4 trick log (v0.9.6 + ROCKETBALL)
     goals: 0,
     kos: 0, tricks: 0, lastBy: null, lastByT: -99, lastKO: -99, chain: 0, entangled: 0, anchored: 0, // v0.8 scoring / credit
   };
@@ -509,6 +533,7 @@ function spawnRider(r, first) {
   syncRocket(r);
 }
 function resetWorld() {
+  setArena(); // v0.9.7
   riders = RIDER_DEFS.map((d, i) => makeRider(i));
   player = riders[0];
   for (const r of riders) spawnRider(r, true);
@@ -517,13 +542,9 @@ function resetWorld() {
   if (!isBall()) for (let i = 0; i < POWERUP_MAX; i++) spawnPickup(); // v0.9.6: no power-ups in ROCKETBALL
   bombs.length = 0; blasts.length = 0;
   for (const d of dispensers) { d.cool = rand(1.5, 4); d.nextA = rand(0, TAU); d.flash = 0; }
-  // v0.9.6: goal-mouth posts exist only in ROCKETBALL (hookable, so you can swing round the goal)
-  for (let i = posts.length - 1; i >= 0; i--) if (posts[i].gp) posts.splice(i, 1);
   goalBanner = null; lastGoal = null; for (const g of goals) g.flash = 0;
-  if (isBall()) {
-    for (const p of goalPosts) posts.push(p);
-    dispensers.forEach((d, i) => { d.cool = i === 0 ? 1.0 : rand(BALL_EVERY[0], BALL_EVERY[1]) + 1; d.nextA = Math.atan2(WORLD_H / 2 - d.y, WORLD_W / 2 - d.x) + rand(-0.6, 0.6); });
-  }
+  teamGoals = [0, 0]; pendingKick = 0; kickT = 0; teamResult = null;
+  if (isBall()) kickoff(true); // v0.9.7
   cam.x = player.x; cam.y = player.y;
 }
 
@@ -911,6 +932,12 @@ function startGame() {
 function endRound() {
   state = 'over'; overT = 0; resultsMode = gameMode; // v0.9.6: the results show the mode that was played (even if you switch the picker)
   results = riders.slice().sort((a, b) => (b.score - a.score) || (a.falls - b.falls));
+  if (isBall()) { // v0.9.7: winner = more goals; level on goals -> more team points; still level -> DRAW
+    const pts = [0, 1].map(t => riders.filter(r => teamOf(r) === t).reduce((a, r) => a + r.score, 0));
+    const w = teamGoals[0] !== teamGoals[1] ? (teamGoals[0] > teamGoals[1] ? 0 : 1) : pts[0] !== pts[1] ? (pts[0] > pts[1] ? 0 : 1) : -1;
+    teamResult = { goals: teamGoals.slice(), pts, winner: w, byPoints: teamGoals[0] === teamGoals[1] && w >= 0 };
+    results.sort((a, b) => ((teamOf(a) === w ? 0 : 1) - (teamOf(b) === w ? 0 : 1)) || (teamOf(a) - teamOf(b)) || (b.score - a.score));
+  }
   sfx.end();
 }
 
@@ -999,7 +1026,7 @@ function aiNearestPost(r, maxD) {
 }
 function aiEnemyNear(r, x, y, R) { // closest enemy rider on a rocket within R of (x, y)
   let best = null, bd = R;
-  for (const o of riders) { if (o === r || !o.onRocket || o.inv > 0) continue; const d = hyp(o.x - x, o.y - y); if (d < bd) { bd = d; best = o; } }
+  for (const o of riders) { if (o === r || !o.onRocket || o.inv > 0 || sameTeam(o, r)) continue; const d = hyp(o.x - x, o.y - y); if (d < bd) { bd = d; best = o; } }
   return best;
 }
 function aiTargetCost(r, o) {
@@ -1013,7 +1040,7 @@ function aiTargetCost(r, o) {
 }
 function aiPickTarget(r) {
   let best = null, bc = 1e9;
-  for (const o of riders) { if (o === r || !o.onRocket) continue; const c = aiTargetCost(r, o) + rand(-120, 120); if (c < bc) { bc = c; best = o; } }
+  for (const o of riders) { if (o === r || !o.onRocket || sameTeam(o, r)) continue; const c = aiTargetCost(r, o) + rand(-120, 120); if (c < bc) { bc = c; best = o; } }
   const cur = r.ai.target;
   if (cur && cur.onRocket && cur !== best && aiTargetCost(r, cur) < bc + AI_STICKY) return cur; // hysteresis: no zig-zagging
   return best;
@@ -1071,7 +1098,7 @@ function aiControl(r, dt) {
   if (!ai.steal && thinkNow && !hooker && nLatch === 0 && (ai.mode === 'hunt' || ai.mode === 'lineup') && Math.random() < AI_STEAL_CHANCE * (P.steal == null ? 1 : P.steal)) {
     let best = null, bs = 1e9;
     for (const o of riders) {
-      if (o === r || o.onRocket || o.rk.homing || stealInfo(o) || o.footT > RECALL_TIME - 3) continue;
+      if (o === r || o.onRocket || o.rk.homing || stealInfo(o) || o.footT > RECALL_TIME - 3 || sameTeam(o, r)) continue;
       const d = hyp(o.rk.x - r.x, o.rk.y - r.y); if (d > AI_STEAL_RANGE) continue;
       if (hyp(o.x - o.rk.x, o.y - o.rk.y) < 70) continue; // the owner is about to hop on: not worth it
       const sc = d - (o.isPlayer ? AI_STEAL_YOU : 0); if (sc < bs) { bs = sc; best = o; }
@@ -1375,8 +1402,9 @@ const aiStats = { nose: 0, mid: 0, tail: 0, posts: 0, ties: 0, binds: 0, yanks: 
   bombGrabs: 0, bombFlings: 0, bombSticks: 0, bombMines: 0, bombKOs: 0, bombSelfKOs: 0, bombImpacts: 0, bombDodges: 0, bombsSpawned: 0, bombBlasts: 0, bombAimedFlings: 0, // v0.9.3
   chainKOs: 0, mineKOs: 0, flingKOs: 0, chainPasses: 0, chainShakes: 0, chainRams: 0, chainYou: 0, planChain: 0, planMine: 0, planFling: 0, planFail: 0, // v0.9.4
   stealTries: 0, stealHooks: 0, thefts: 0, theftsYou: 0, theftTies: 0, stealBreaks: 0, // v0.9.5
-  ballsSpawned: 0, ballGrabs: 0, ballFlings: 0, ballShots: 0, ballSteals: 0, goals: 0, assists: 0, carrierKOs: 0, ballDefends: 0, dunks: 0 }; // v0.9.6
-function resetAiStats() { for (const k in aiStats) aiStats[k] = 0; }
+  ballsSpawned: 0, ballGrabs: 0, ballFlings: 0, ballShots: 0, ballSteals: 0, goals: 0, assists: 0, carrierKOs: 0, ballDefends: 0, dunks: 0, // v0.9.6
+  passes: 0, passesAll: 0, passTries: 0, ownGoals: 0, teamGoals: [0, 0], ffBlocked: 0 }; // v0.9.7
+function resetAiStats() { for (const k in aiStats) aiStats[k] = Array.isArray(aiStats[k]) ? [0, 0] : 0; }
 function hitZone(o, x, y) { // where a cable tip at (x, y) hits rider o's rocket: 'nose' | 'mid' | 'tail' | null
   const hx = Math.cos(o.ang), hy = Math.sin(o.ang), dx = x - o.x, dy = y - o.y;
   const along = dx * hx + dy * hy, perp = -dx * hy + dy * hx;
@@ -1403,7 +1431,7 @@ function autoAim(r, s) {
     if (sc < bestScore) { bestScore = sc; best = { o, d }; }
   };
   for (const o of riders) {
-    if (o === r) continue;
+    if (o === r || sameTeam(o, r)) continue; // v0.9.7: auto-aim never picks a teammate
     if (o.onRocket) { if (o.inv <= 0 && canReach(r, lvl(o))) consider(o, 0.75, 0, true); }
     else if (canReach(r, -1)) { consider(o, 0.8, -0.05, false); consider(o.rk, 0.8, -0.05, false); }
   }
@@ -1476,6 +1504,7 @@ function updateCable(r, s, hold, dt) {
       const L = k.len - step + step * i / ns, px = r.x + k.dx * L, py = r.y + k.dy * L;
       for (const o of riders) {
         if (o === r || !o.onRocket || o.inv > 0 || !canReach(r, lvl(o))) continue; // altitude gap too big -> passes by
+        if (sameTeam(o, r)) continue; // v0.9.7 ROCKETBALL: your cable passes straight through teammates
         let z = hitZone(o, px, py); if (!z) continue;
         k.tx = px; k.ty = py;
         { // judge the zone where the cable line crosses the rocket's long axis (not where it first grazes the hull)
@@ -1503,7 +1532,7 @@ function updateCable(r, s, hold, dt) {
     // 2) movable things (rider on foot, empty rocket): only latch if the button is held, else pass through
     if (hold && canReach(r, -1)) { // things on the ground: only reachable from LOW
       for (const o of riders) {
-        if (o === r || o.onRocket) continue;
+        if (o === r || o.onRocket || sameTeam(o, r)) continue;
         if (hyp(o.x - k.tx, o.y - k.ty) < RIDER_R + 7) { latchCable(r, k, { kind: 'foot', r: o }); return; }
         if (!o.rk.homing && hyp(o.rk.x - k.tx, o.rk.y - k.ty) < RIDER_R + 9) { latchCable(r, k, { kind: 'rocket', r: o }); return; }
       }
@@ -1614,7 +1643,7 @@ function payTheft(thief, o, tie, x, y) {
 //         'tied' (mine on a post, or stuck onto a rider / rocket)
 const bombs = [], blasts = [];
  function bombGrabbable(b, r) { // v0.9.4: the rider a bomb is chained to may hook it themselves (then fling it or tie it on someone else)
-  if (b.ball) return b.state === 'loose' || b.state === 'flung' || (!!r && b.state === 'held' && b.holder !== r); // v0.9.6: hook a carried ball = steal it
+  if (b.ball) return b.state === 'loose' || b.state === 'flung' || (!!r && b.state === 'held' && b.holder !== r && !sameTeam(b.holder, r)); // v0.9.6: hook a carried ball = steal it (v0.9.7: not off a teammate)
   return b.state === 'loose' || b.state === 'flung' || (!!r && b.state === 'tied' && !!b.stuck && b.stuck.kind === 'live' && b.stuck.r === r);
 }
 function chainVictim(b) { return b && b.state === 'tied' && b.stuck && b.stuck.kind === 'live' ? b.stuck.r : null; } // v0.9.4
@@ -1656,7 +1685,8 @@ function bombReleaseVel(b, r) { // velocity a dangling bomb leaves with if you l
 function flingBomb(b) {
   const r = b.holder;
   if (r && b.ball) { // v0.9.6: same release physics as a bomb; a carrier knocked off just drops it (keeps its momentum)
-    [b.vx, b.vy] = bombReleaseVel(b, r); b.dropped = !r.onRocket;
+    [b.vx, b.vy] = bombReleaseVel(b, r); b.dropped = !r.onRocket; b.flungBy = r.onRocket ? r : null; b.flungAt = gameT;
+    if (r.onRocket && r.ai.passTo && (!r.isPlayer || aiAll)) aiStats.passTries++;
     if (r.onRocket) { if (!r.isPlayer || aiAll) { aiStats.ballFlings++; if (r.ai.ballShot) aiStats.ballShots++; } if (state === 'play' && (r.isPlayer || onScreen(b.x, b.y))) sfx.fling(); }
     r.ai.ballShot = false;
   } else if (r) {
@@ -1736,14 +1766,10 @@ function updateBombs(dt) {
   // dispensers
   for (const g of goals) g.flash = Math.max(0, g.flash - dt);
   if (goalBanner) { goalBanner.t -= dt; if (goalBanner.t <= 0) goalBanner = null; }
-  if (isBall()) { // v0.9.6: ball dispensers: keep up to BALL_MAX balls in play, one drop at a time
-    let dropped = false;
-    for (const d of dispensers) {
-      d.flash = Math.max(0, d.flash - dt); d.cool -= dt;
-      if (d.cool > 0) continue;
-      if (!dropped && bombs.length < BALL_MAX) { spawnBall(d); dropped = true; d.cool = rand(BALL_EVERY[0], BALL_EVERY[1]) + 3; for (const e of dispensers) if (e !== d) e.cool = Math.max(e.cool, rand(BALL_EVERY[0], BALL_EVERY[1])); }
-      else d.cool = 0.5;
-    }
+  if (isBall()) { // v0.9.7: one centre dispenser, one ball; after a goal -> short celebration -> kickoff reset -> new ball
+    const d = ballDisp; d.flash = Math.max(0, d.flash - dt); kickT = Math.max(0, kickT - dt);
+    if (pendingKick > 0) { pendingKick -= dt; if (pendingKick <= 0) kickoff(false); }
+    else { d.cool -= dt; if (d.cool <= 0) { if (!bombs.some(b => b.ball)) spawnBall(d); d.cool = 1e9; } }
   } else
   for (const d of dispensers) {
     d.flash = Math.max(0, d.flash - dt);
@@ -1821,7 +1847,7 @@ function spawnBall(d) {
   const b = { ball: true, x, y, px: x, py: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, state: 'loose', lit: false, fuse: 99, idle: 0, t: rand(0, 3),
     rot: rand(0, TAU), spin: rand(-3, 3), owner: null, prevOwner: null, prevT: -99, holder: null, tether: null, stuck: null, mine: false, arm: 0, fx: x, fy: y, flungT: 0, wasFlung: false, disp: d, blink: 0 };
   bombs.push(b); aiStats.ballsSpawned++;
-  d.nextA = Math.atan2(WORLD_H / 2 - d.y, WORLD_W / 2 - d.x) + rand(-1.2, 1.2); d.flash = 0.35;
+  d.flash = 0.35;
   spawnParts(x, y, 10, '#fff', 120, 0.35);
   if (state === 'play' && onScreen(d.x, d.y)) sfx.dispense();
   return b;
@@ -1838,6 +1864,11 @@ function grabBall(r, k, b) {
     if (!r.isPlayer || aiAll) aiStats.ballSteals++;
     if (state === 'play') { if (r.isPlayer) msg('STOLE THE BALL FROM ' + from.name + '!', '#fc0'); else if (from.isPlayer) msg(r.name + ' STOLE YOUR BALL!', '#f44'); }
   }
+  if (!from && b.flungBy && b.flungBy !== r && sameTeam(b.flungBy, r) && gameT - b.flungAt < 4) { // v0.9.7: a teammate's fling caught = PASS
+    b.flungBy.log.ballPasses++; if (!b.flungBy.isPlayer || aiAll) aiStats.passes++; if (b.flungBy.isPlayer || r.isPlayer || aiAll) aiStats.passesAll++;
+    if (state === 'play') { if (r.isPlayer) msg('PASS FROM ' + b.flungBy.name + '!', '#3cf'); else if (b.flungBy.isPlayer) msg('NICE PASS TO ' + r.name + '!', '#3cf'); }
+  }
+  b.flungBy = null;
   touchBall(b, r);
   b.state = 'held'; b.holder = r; b.stuck = null; b.tether = null; b.dropped = false;
   k.L = clamp(hyp(r.x - b.x, r.y - b.y), 40, cableMax(r));
@@ -1858,42 +1889,69 @@ function updateBall(b, dt) {
   const g = inGoal(b.x, b.y);
   if (g) scoreGoal(b, g);
 }
-function scoreGoal(b, g) {
-  const s = b.owner, dunk = b.state === 'held';
+function scoreGoal(b, g) { // v0.9.7: the team attacking goal g scores; credited to the last hooker; an own goal still counts for the other team
+  const s = b.owner, dunk = b.state === 'held', atk = TEAMS[0].attack === goals.indexOf(g) ? 0 : 1, own = !!s && teamOf(s) !== atk;
   removeBomb(b);
-  g.flash = 1.4;
-  spawnParts(b.x, b.y, 40, s ? s.color : '#fff', 380, 0.9); spawnParts(b.x, b.y, 24, '#fff', 260, 0.6); spawnParts(b.x, b.y, 20, g.color, 300, 0.8);
-  lastGoal = { by: s ? s.name : null, goal: g.name, x: b.x, y: b.y, t: gameT, dunk, assist: null };
-  if (!s) { if (state === 'play') msg('GOAL - NOBODY CLAIMED IT', '#aaa'); return; }
-  s.goals++; s.log.goals++; s.tricks++;
-  if (!s.isPlayer || aiAll) { aiStats.goals++; if (dunk) aiStats.dunks++; }
-  award(s, PTS_GOAL, dunk ? 'GOAL (DUNK)' : 'GOAL', b.x, b.y);
-  const a = b.prevOwner;
-  if (a && a !== s && gameT - b.prevT <= ASSIST_WINDOW) { a.log.assists++; award(a, PTS_ASSIST, 'ASSIST', b.x, b.y - 20); lastGoal.assist = a.name; if (!a.isPlayer || aiAll) aiStats.assists++; }
+  g.flash = 1.4; teamGoals[atk]++;
+  spawnParts(b.x, b.y, 40, TEAMS[atk].color, 380, 0.9); spawnParts(b.x, b.y, 24, '#fff', 260, 0.6); spawnParts(b.x, b.y, 20, s ? s.color : '#fff', 300, 0.8);
+  lastGoal = { team: TEAMS[atk].name, by: s ? s.name : null, own, goal: g.name, x: b.x, y: b.y, t: gameT, dunk, assist: null };
+  if (s && !own) {
+    s.goals++; s.log.goals++; s.tricks++;
+    if (!s.isPlayer || aiAll) { aiStats.goals++; if (dunk) aiStats.dunks++; }
+    award(s, PTS_GOAL, dunk ? 'GOAL (DUNK)' : 'GOAL', b.x, b.y);
+    const a = b.prevOwner;
+    if (a && a !== s && sameTeam(a, s) && gameT - b.prevT <= ASSIST_WINDOW) { a.log.assists++; award(a, PTS_ASSIST, 'ASSIST', b.x, b.y - 20); lastGoal.assist = a.name; if (!a.isPlayer || aiAll) aiStats.assists++; }
+  } else if (own) { s.log.ownGoals++; aiStats.ownGoals++; award(s, PTS_OWN_GOAL, 'OWN GOAL', b.x, b.y); }
+  aiStats.teamGoals[atk]++;
   if (state === 'play') {
-    goalBanner = { text: 'GOAL! ' + s.name, color: s.color, t: 2.4, sub: (dunk ? 'DUNKED IT  ' : '') + '+' + PTS_GOAL + (lastGoal.assist ? '   ASSIST ' + lastGoal.assist + ' +' + PTS_ASSIST : '') };
-    const near = onScreen(b.x, b.y);
-    if (near || s.isPlayer) { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.14, 'square', 0.07), i * 80)); noise(0.6, 0.25, 1200); }
-    if (s.isPlayer || near) shake = Math.max(shake, 7);
+    goalBanner = { text: own ? 'OWN GOAL! ' + TEAMS[atk].name + ' SCORES' : 'GOAL! ' + (s ? s.name : TEAMS[atk].name), color: TEAMS[atk].color, t: 2.4,
+      sub: TEAMS[0].name + ' ' + teamGoals[0] + ' - ' + teamGoals[1] + ' ' + TEAMS[1].name + (own ? '   (' + s.name + ' ' + PTS_OWN_GOAL + ')' : '   +' + PTS_GOAL + (dunk ? ' DUNK' : '') + (lastGoal.assist ? '  ASSIST ' + lastGoal.assist + ' +' + PTS_ASSIST : '')) };
+    [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.14, 'square', 0.07), i * 80)); noise(0.6, 0.25, 1200);
+    shake = Math.max(shake, 7);
   }
-  for (const d of dispensers) d.cool = Math.max(d.cool, 1.5);
+  pendingKick = 1.8; // celebrate, then kickoff
 }
 function ballOf(r) { return bombs.find(b => b.ball && b.state === 'held' && b.holder === r) || null; }
+function kickoff(first) {
+  tethers.length = 0; bombs.length = 0; pendingKick = 0;
+  for (const r of riders) {
+    const sp = KICK_SPOTS[r.name] || [0, 0], s = teamOf(r) === 0 ? -1 : 1;
+    r.x = r.px = WORLD_W / 2 + sp[0]; r.y = r.py = WORLD_H / 2 + sp[1]; r.ang = s < 0 ? 0 : Math.PI;
+    r.vx = Math.cos(r.ang) * BASE_SPEED * 0.3; r.vy = 0; r.onRocket = true; r.cables = [null, null]; r.cableCool = 0; r.boosting = false;
+    r.inv = 1; r.stun = 0; r.tumble = 0; r.footT = 0; r.entangled = 0; r.fuel = Math.max(r.fuel, 60); syncRocket(r);
+    const ai = r.ai; ai.ballGoal = null; ai.contest = null; ai.defend = null; ai.steal = null; ai.mode = 'hunt'; ai.bombRelease = false; ai.wantLatch = [false, false];
+  }
+  ballDisp.cool = first ? 1.2 : 1.4; ballDisp.nextA = (Math.random() < 0.5 ? -1 : 1) * Math.PI / 2 + rand(-0.25, 0.25); // straight up or down: nobody's favoured
+  kickT = 1.6;
+  if (state === 'play') msg('KICKOFF!', '#fff');
+  cam.x = player.x; cam.y = player.y;
+}
 function ballCarriers() { const out = []; for (const b of bombs) if (b.ball && b.state === 'held' && b.holder) out.push(b.holder); return out; }
 // ---- v0.9.6 ROCKETBALL AI ----
-function aiBallTarget(r, thinkNow) { // contest a carrier: knock them off (they drop it) or hook the ball off them
+function aiBallTarget(r, thinkNow) { // v0.9.7: contest an ENEMY carrier: the teammate nearest to them, or a brawler from further out
   const ai = r.ai, P = ai.p || AI_PERSONA.GOLD;
   if (ballOf(r)) { ai.contest = null; return; }
   if (ai.contest && (!ai.contest.onRocket || !ballOf(ai.contest))) ai.contest = null;
   if (!ai.contest && thinkNow) {
-    let best = null, bd = AI_BALL_RANGE;
-    for (const o of ballCarriers()) { if (o === r || !o.onRocket) continue; const d = hyp(o.x - r.x, o.y - r.y); if (d < bd) { bd = d; best = o; } }
-    if (best && Math.random() < 0.35 + 0.6 * P.brawl) ai.contest = best;
+    const o = ballCarriers().find(o => o !== r && o.onRocket && !sameTeam(o, r));
+    if (o) {
+      const d = hyp(o.x - r.x, o.y - r.y), nearest = !riders.some(m => sameTeam(m, r) && !m.isPlayer && m.onRocket && hyp(o.x - m.x, o.y - m.y) < d);
+      if ((nearest && d < AI_BALL_RANGE) || (P.brawl >= 0.6 && d < AI_BALL_RANGE * 1.3)) ai.contest = o;
+    }
   }
   if (ai.contest) {
     ai.target = ai.contest; ai.retarget = Math.max(ai.retarget, 0.5);
     if (P.brawl >= 0.6 && thinkNow && hyp(ai.contest.x - r.x, ai.contest.y - r.y) < cableMax(r)) { ai.cool = Math.min(ai.cool, 0.35); ai.zone = 'mid'; } // RED: quick yank shots at the carrier
   }
+}
+function aiPassLine(b, r, m) { // would the ball, let go now, fly to teammate m (leading them)?
+  const [vx, vy] = bombReleaseVel(b, r), sp = hyp(vx, vy); if (sp < 200) return false;
+  const tx = m.x + m.vx * 0.7, ty = m.y + m.vy * 0.7, d = hyp(tx - b.x, ty - b.y);
+  if (d < 200 || d > sp * 1.4) return false;
+  if (Math.abs(angDiff(Math.atan2(ty - b.y, tx - b.x), Math.atan2(vy, vx))) > 0.26) return false;
+  for (const o of riders) if (o !== r && o !== m && o.onRocket && !sameTeam(o, r) && segDist(o.x, o.y, b.x, b.y, tx, ty) < 38) return false; // an enemy would intercept
+  for (const p of posts) if (segDist(p.x, p.y, b.x, b.y, tx, ty) < p.r + BOMB_R + 2) return false;
+  return true;
 }
 function aiGoalLine(b, r, g, aimY, tol) { // would the ball, let go right now, roll into goal g (near aimY)?
   const [vx, vy] = bombReleaseVel(b, r), sp = hyp(vx, vy);
@@ -1907,33 +1965,75 @@ function aiGoalLine(b, r, g, aimY, tol) { // would the ball, let go right now, r
   for (const o of riders) if (o !== r && o.onRocket && segDist(o.x, o.y, b.x, b.y, g.x, cy) < RIDER_R + BOMB_R + 6 && hyp(o.x - b.x, o.y - b.y) > 30) return false; // someone in the way
   return true;
 }
-function aiBall(r, c, t, dist, desired, thinkNow, dt) {
-  const ai = r.ai, P = ai.p || AI_PERSONA.GOLD;
+function aiBall(r, c, t, dist, desired, thinkNow, dt) { // v0.9.7 team ROCKETBALL
+  const ai = r.ai, P = ai.p || AI_PERSONA.GOLD, tm = teamOf(r), atkG = goals[TEAMS[tm].attack], ownG = goals[1 - TEAMS[tm].attack];
+  const mates = riders.filter(o => sameTeam(o, r)), mateOf = r.name === 'GOLD' && player && !aiAll ? player : null; // GOLD plays with YOU
   let s = -1;
   for (let i = 0; i < 2; i++) { const k = r.cables[i]; if (k && k.state === 'latched' && k.target.kind === 'bomb') s = i; }
-  if (s < 0) { ai.bombRelease = false; ai.carryT = 0; ai.shotErr = null; ai.goalRun = false; }
+  if (s < 0) { ai.bombRelease = false; ai.carryT = 0; ai.shotErr = null; ai.goalRun = false; ai.passTo = null; }
   const b = s >= 0 ? r.cables[s].target.b : null;
-  if (b) { // carrying: run at a goal, let go when the ball's flight line is in
+  const toward = (x, y) => Math.atan2(y - r.y, x - r.x);
+  if (b) { // carrying: shoot at the attacking goal, or pass to an open teammate further up
     ai.ballGoal = null;
     if (ai.bombRelease) return desired;
     ai.carryT += dt; ai.goalRun = true;
-    if (ai.shotErr == null) { ai.shotErr = clamp(gauss() * AI_BALL_ERR, -GOAL_HALF * 1.3, GOAL_HALF * 1.3); ai.goalPick = hyp(goals[0].x - r.x, goals[0].cy - r.y) < hyp(goals[1].x - r.x, goals[1].cy - r.y) ? goals[0] : goals[1]; }
-    const g = ai.goalPick, aimY = g.cy + ai.shotErr, dG = hyp(g.x - r.x, aimY - r.y);
+    if (ai.shotErr == null) {
+      const err = tm === 0 && !r.isPlayer ? (AI_BALL_ERR + 100) / 2 : AI_BALL_ERR; // your teammate's aim only scales modestly with difficulty
+      ai.shotErr = clamp(gauss() * err, -GOAL_HALF * 1.3, GOAL_HALF * 1.3);
+      ai.passMind = Math.random() < (mateOf ? 0.85 : P.weave ? 0.7 : 0.55); // GOLD looks for YOU a lot
+    }
+    const g = atkG, aimY = g.cy + ai.shotErr, dG = hyp(g.x - r.x, aimY - r.y);
     if (aiGoalLine(b, r, g, aimY, 28 + AI_BALL_ERR * 0.15)) { ai.bombRelease = true; ai.ballShot = true; return desired; }
-    // aim point a little past the mouth; GREEN weaves so the ball whips out
-    let d = Math.atan2(aimY - r.y, g.x - g.side * 30 - r.x);
+    const pressed = riders.some(o => o.onRocket && !sameTeam(o, r) && o !== r && hyp(o.x - r.x, o.y - r.y) < 260);
+    if (ai.passMind || pressed) for (const m of mates) {
+      if (!m.onRocket || m.inv > 0.5) continue;
+      const ahead = hyp(atkG.x - m.x, atkG.cy - m.y) < dG - 120 || pressed;
+      const open = !riders.some(o => o.onRocket && !sameTeam(o, r) && o !== r && hyp(o.x - m.x, o.y - m.y) < 200);
+      if (ahead && open && aiPassLine(b, r, m)) { ai.bombRelease = true; ai.passTo = m; ai.ballShot = false; return desired; }
+    }
+    let d = toward(g.x - g.side * 30, aimY);
     if (P.weave && dG > 450) d += Math.sin(gameT * 3.2 + r.id) * 0.45;
     c.boost = r.fuel > 15 && dG < 1100;
-    if (ai.carryT > 10) { ai.bombRelease = true; ai.ballShot = false; } // stuck: dump it
+    if (ai.carryT > 10) { ai.bombRelease = true; ai.ballShot = false; }
     return d;
   }
   ai.goalRun = false;
   if (ai.mode === 'escape') return desired;
-  if (ai.contest && P.brawl >= 0.6) { ai.ballGoal = null; return desired; } // RED: go knock the carrier off (hunt/lineup yanks), don't fish for the ball
-  // go for a ball (loose / flying; or the one a rival carries: hook it right off them)
+  const ball = bombs.find(q => q.ball);
+  const homeX = ownG.x - ownG.side * 330; // just in front of our own goal mouth
+  if (!ball) { // waiting for the kickoff ball: hover in our half near the centre
+    const sp = KICK_SPOTS[r.name] || [0, 0]; return toward(WORLD_W / 2 + sp[0] * 0.6, WORLD_H / 2 + sp[1] * 0.6);
+  }
+  const carrier = ball.state === 'held' ? ball.holder : null;
+  if (carrier && sameTeam(carrier, r)) { // support: get up the pitch into open space ahead of the carrier, on the other side, for a pass
+    const side = carrier.y < WORLD_H / 2 ? 1 : -1, ax = clamp(carrier.x - atkG.side * -450, 500, WORLD_W - 500);
+    const px = clamp(carrier.x + atkG.side * 450, 450, WORLD_W - 450), py = WORLD_H / 2 + side * 330;
+    c.boost = r.fuel > 40 && hyp(px - r.x, py - r.y) > 500;
+    return toward(px, py);
+  }
+  if (carrier && !sameTeam(carrier, r)) { // enemy has it: the contester hunts them (aiBallTarget), the other drops back to defend
+    if (ai.contest) {
+      if (P.brawl >= 0.6) { ai.ballGoal = null; return desired; } // RED: knock them off
+      if (thinkNow && !ai.ballGoal && Math.random() < AI_BALL_STEAL) { ai.ballGoal = ball; ai.ballGoalT = 4; ai.ballSteal = true; }
+    } else {
+      if (!ai.defending && (!r.isPlayer || aiAll)) aiStats.ballDefends++;
+      ai.defending = true; ai.ballGoal = null;
+      const py = ownG.cy + clamp(carrier.y - ownG.cy, -GOAL_HALF, GOAL_HALF) * 0.6, d = hyp(homeX - r.x, py - r.y);
+      return d > 120 ? toward(homeX, py) : toward(carrier.x, carrier.y);
+    }
+  } else ai.defending = false;
+  if (!carrier) { // loose ball: the team's nearest goes for it (GOLD leaves it to YOU unless clearly closer), the other covers
+    const myD = hyp(ball.x - r.x, ball.y - r.y);
+    const closerMate = mates.some(m => m.onRocket && hyp(ball.x - m.x, ball.y - m.y) * (m === mateOf ? 0.8 : 1) < myD);
+    if (closerMate && !ai.ballGoal) {
+      const bx = (ball.x + (ownG.x - ownG.side * 500)) / 2, by = (ball.y + ownG.cy) / 2; // cover: between the ball and our goal
+      return toward(bx, by);
+    }
+    if (!ai.ballGoal && thinkNow && Math.random() < 0.35 + 0.6 * AI_BALL_CHASE * P.chase) { ai.ballGoal = ball; ai.ballGoalT = 6; ai.ballSteal = true; }
+  }
   if (ai.ballGoal) {
     const g = ai.ballGoal; ai.ballGoalT -= dt; ai.ballShotCool = Math.max(0, (ai.ballShotCool || 0) - dt);
-    if (!bombs.includes(g) || ai.ballGoalT <= 0 || (g.state === 'held' && (g.holder === r || !ai.ballSteal))) ai.ballGoal = null;
+    if (!bombs.includes(g) || ai.ballGoalT <= 0 || (g.state === 'held' && (g.holder === r || sameTeam(g.holder, r) || !ai.ballSteal))) ai.ballGoal = null;
     else {
       const side = aiFreeSide(r), d = hyp(g.x - r.x, g.y - r.y), toB = Math.atan2(g.y + g.vy * 0.3 - r.y, g.x + g.vx * 0.3 - r.x);
       if (side >= 0 && d < cableMax(r) * 0.85 && r.cableCool <= 0 && !ai.ballShotCool && (!r.cables[side] || r.cables[side].state === 'retract')) {
@@ -1945,30 +2045,6 @@ function aiBall(r, c, t, dist, desired, thinkNow, dt) {
         }
       }
       return d > cableMax(r) * 0.6 ? toB : toB + ((side === 0 ? 1 : -1) * 0.6);
-    }
-  }
-  if (thinkNow && !ai.ballGoal) {
-    let best = null, bs = AI_BALL_RANGE;
-    for (const q of bombs) {
-      if (!q.ball || (q.state === 'held' && q.holder === r)) continue;
-      const d = hyp(q.x - r.x, q.y - r.y) + (q.state === 'held' ? 250 : 0); if (d < bs) { bs = d; best = q; }
-    }
-    if (best && Math.random() < AI_BALL_CHASE * P.chase) {
-      ai.ballGoal = best; ai.ballGoalT = 6; ai.ballSteal = best.state === 'held' ? Math.random() < AI_BALL_STEAL : true;
-      if (best.state === 'held' && !ai.ballSteal) ai.ballGoal = null;
-    }
-  }
-  // defend: a rival carrier closing on a goal and nobody's on them -> sit in front of that goal mouth
-  if (ai.defend) {
-    ai.defend.t -= dt; const o = ai.defend.o, g = ai.defend.g;
-    if (ai.defend.t <= 0 || !o.onRocket || !ballOf(o)) ai.defend = null;
-    else { const px = g.x - g.side * 260, py = g.cy + clamp(o.y - g.cy, -GOAL_HALF, GOAL_HALF) * 0.6, d = hyp(px - r.x, py - r.y);
-      return d > 120 ? Math.atan2(py - r.y, px - r.x) : Math.atan2(o.y - r.y, o.x - r.x); }
-  } else if (thinkNow && !ai.contest && Math.random() < AI_BALL_DEFEND * P.defend) {
-    for (const o of ballCarriers()) {
-      if (o === r) continue;
-      const g = hyp(goals[0].x - o.x, goals[0].cy - o.y) < hyp(goals[1].x - o.x, goals[1].cy - o.y) ? goals[0] : goals[1];
-      if (hyp(g.x - o.x, g.cy - o.y) < 1200 && hyp(g.x - r.x, g.cy - r.y) < hyp(g.x - o.x, g.cy - o.y) + 300) { ai.defend = { o, g, t: 4 }; if (!r.isPlayer || aiAll) aiStats.ballDefends++; break; }
     }
   }
   return desired;
@@ -2271,6 +2347,7 @@ function updateTethers(dt) {
       for (const r of riders) {
         if (!r.onRocket || r.inv > 0) continue;
         if (r === t.owner && t.ownerArm > 0) continue;
+        if (sameTeam(r, t.owner)) continue; // v0.9.7: your rope doesn't catch your teammate
         if (lvl(r) !== t.alt) continue; // a rope only catches riders at the altitude it was tied at
         if (segDist(r.x, r.y, A.x, A.y, B.x, B.y) < 9 || segsCross(r.px, r.py, r.x, r.y, A.x, A.y, B.x, B.y)) {
           const by = r === t.owner ? null : t.owner;
@@ -2297,7 +2374,7 @@ function swingClotheslines(dt) {
       const p = k.target.p, ex = r.x - p.x, ey = r.y - p.y, len2 = ex * ex + ey * ey;
       for (const [o, t] of k.immune) { if (t - dt <= 0) k.immune.delete(o); else k.immune.set(o, t - dt); }
       for (const o of riders) {
-        if (o === r || !o.onRocket) continue;
+        if (o === r || !o.onRocket || sameTeam(o, r)) continue; // v0.9.7: a swing never clotheslines a teammate
         if (lvl(o) !== lvl(r)) { k.sides.delete(o); continue; } // live cable only catches riders at the swinger's altitude
         const ox = o.x - p.x, oy = o.y - p.y;
         const side = Math.sign(ex * oy - ey * ox);
@@ -2325,7 +2402,8 @@ function swingClotheslines(dt) {
 // ---------- knock off ----------
 function knockOff(o, by, how, src) {
   if ((how === 'yank' || how === 'clothes' || how === 'bomb') && gripAbsorb(o, by)) return false; // v0.7 GRIP shield (v0.9.3: also soaks one bomb)
-  const credit = creditFor(o, by); // v0.8: who caused this fall (direct hit, or the last cable/rope/binding on them within 3 s)
+  let credit = creditFor(o, by); // v0.8: who caused this fall (direct hit, or the last cable/rope/binding on them within 3 s)
+  if (sameTeam(credit, o)) credit = null; // v0.9.7: never any points for a teammate's fall
   const hadBall = isBall() && !!ballOf(o); // v0.9.6: a carrier knocked off drops the ball (cables go -> it flies off with its momentum)
   o.onRocket = false; o.falls++; o.cables = [null, null]; o.killer = credit; o.boosting = false;
   o.theftTow = o.theftTie = false; // v0.9.5: one theft payout per knockoff
@@ -2868,7 +2946,7 @@ function drawBall(b, now) { // v0.9.6: big white ball with an owner-coloured rin
 }
 function drawGoal(g, now) { // v0.9.6: netted box against the side wall, posts at the mouth, big GOAL lettering
   const x0 = g.side < 0 ? 0 : g.x, w = GOAL_DEPTH, y0 = g.cy - GOAL_HALF, h = GOAL_HALF * 2, fl = g.flash > 0 && Math.floor(now / 90) % 2;
-  ctx.fillStyle = fl ? 'rgba(255,255,255,0.35)' : 'rgba(' + (g.side < 0 ? '255,102,255' : '102,255,204') + ',0.16)'; ctx.fillRect(x0, y0, w, h);
+  ctx.fillStyle = fl ? 'rgba(255,255,255,0.35)' : 'rgba(' + TEAMS[g.team].rgb + ',0.18)'; ctx.fillRect(x0, y0, w, h);
   ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1;
   for (let yy = y0; yy <= y0 + h; yy += 20) { ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x0 + w, yy); ctx.stroke(); }
   for (let xx = x0; xx <= x0 + w; xx += 20) { ctx.beginPath(); ctx.moveTo(xx, y0); ctx.lineTo(xx, y0 + h); ctx.stroke(); }
@@ -2876,7 +2954,8 @@ function drawGoal(g, now) { // v0.9.6: netted box against the side wall, posts a
   ctx.moveTo(x0 + (g.side < 0 ? 0 : w), y0); ctx.lineTo(g.x, y0); ctx.lineTo(g.x, y0 + h); ctx.lineTo(x0 + (g.side < 0 ? 0 : w), y0 + h); ctx.stroke();
   ctx.setLineDash([16, 12]); ctx.lineWidth = 4; ctx.strokeStyle = fl ? '#fff' : g.color; ctx.beginPath(); ctx.moveTo(g.x, y0); ctx.lineTo(g.x, y0 + h); ctx.stroke(); ctx.setLineDash([]);
   ctx.save(); ctx.translate(x0 + w / 2, g.cy); ctx.rotate(g.side < 0 ? -Math.PI / 2 : Math.PI / 2);
-  txt('GOAL', 0, 0, 44, fl ? '#fff' : g.color, 'center'); ctx.restore();
+  txt(TEAMS[g.team].name + ' GOAL', 0, 0, 34, fl ? '#fff' : g.color, 'center'); ctx.restore();
+  txt(g.team === teamOf(player) ? 'DEFEND' : 'ATTACK', g.x - g.side * 70, g.cy - GOAL_HALF - 30, 22, g.team === teamOf(player) ? '#9cf' : '#fc6', 'center');
 }
 function drawBomb(b, now) {
   if (b.ball) { drawBall(b, now); return; } // v0.9.6
@@ -3007,6 +3086,8 @@ function render(now) {
   for (const r of flying) {
     const sc = altScale(r.altV);
     if (r.inv > 0 && Math.floor(now / 100) % 2) ctx.globalAlpha = 0.4;
+    if (isBall() && teamOf(r) >= 0) { // v0.9.7 team ring
+      ctx.strokeStyle = 'rgba(' + TEAMS[teamOf(r)].rgb + ',0.85)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(r.x, r.y, 22 * sc, 0, TAU); ctx.stroke(); }
     drawRocket(r, true, false, sc);
     drawJockey(r.x, r.y, r.ang, r.color, r.stun > 0.3, sc);
     ctx.globalAlpha = 1;
@@ -3015,7 +3096,7 @@ function render(now) {
       ctx.beginPath(); ctx.arc(r.x, r.y, 31 * sc, 0, TAU); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
     }
     if (!r.isPlayer) {
-      txt(r.name, r.x, r.y - 26 * sc, 13, r.color, 'center');
+      txt(r.name + (isBall() ? (sameTeam(r, player) ? ' (TEAM)' : '') : ''), r.x, r.y - 26 * sc, 13, r.color, 'center');
       ctx.font = 'bold 13px ' + FONT;
       if (ALTITUDE_ENABLED) drawPips(r.x + ctx.measureText(r.name).width / 2 + 4, r.y - 26 * sc + 4, lvl(r), 3.5);
     }
@@ -3088,7 +3169,7 @@ function drawHUD(now) {
   if (ALTITUDE_ENABLED && !player.onRocket) txt('GROUND', ax + 1.5 * (aw + 3 * sc), fy + fh + 14 * sc, 10 * sc, '#aaa', 'center', false);
   // mini scoreboard
   let yy = fy + fh + 14 * sc;
-  for (const r of riders) { if (r.isPlayer) continue; txt(r.name + ' ' + r.score + (isBall() ? ' (' + r.goals + 'G)' : '') + (r.onRocket ? (ALTITUDE_ENABLED ? ' [' + 'LMH'[lvl(r)] + ']' : '') : ' (on foot)'), 12, yy, 12 * sc, r.color); yy += 15 * sc; }
+  for (const r of riders) { if (r.isPlayer) continue; txt(r.name + ' ' + r.score + (isBall() ? ' ' + TEAMS[teamOf(r)].name[0] + ' ' + r.goals + 'G' : '') + (r.onRocket ? (ALTITUDE_ENABLED ? ' [' + 'LMH'[lvl(r)] + ']' : '') : ' (on foot)'), 12, yy, 12 * sc, r.color); yy += 15 * sc; }
   // timer
   const t = Math.ceil(timeLeft), mm = Math.floor(t / 60), ss = t % 60;
   txt(mm + ':' + (ss < 10 ? '0' : '') + ss, VW / 2, 20 * sc, 26 * sc, t <= 30 ? '#f44' : '#fff', 'center');
@@ -3143,17 +3224,17 @@ function drawHUD(now) {
   else txt(player.onRocket ? 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables (hold)  T tie' + (ALTITUDE_ENABLED ? '  R/F altitude' : '') : 'ARROWS/WASD run to your rocket', VW / 2, VH - 14, 12, '#678', 'center', false);
 }
 function drawBallHUD(sc, now) {
-  // goal ticker under the clock: YOU 1  RED 0  GREEN 2  GOLD 0
-  ctx.font = 'bold ' + (12 * sc) + 'px ' + FONT;
-  const parts = riders.map(r => (r.isPlayer ? 'YOU' : r.name) + ' ' + r.goals), wd = parts.map(p => ctx.measureText(p).width + 12 * sc), tw = wd.reduce((a, b) => a + b, 0);
-  let x = VW / 2 - tw / 2; const y = 55 * sc;
-  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x - 6 * sc, y - 9 * sc, tw + 12 * sc, 18 * sc);
-  txt('GOALS', x - 10 * sc, y, 10 * sc, '#f8f', 'right', false);
-  riders.forEach((r, i) => { txt(parts[i], x + wd[i] / 2, y, 12 * sc, r.color, 'center', false); x += wd[i]; });
+  // v0.9.7 team score under the clock: BLUE 3 - 2 ORANGE
+  const y = 57 * sc;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(VW / 2 - 120 * sc, y - 11 * sc, 240 * sc, 22 * sc);
+  txt(TEAMS[0].name + ' ' + teamGoals[0], VW / 2 - 12 * sc, y, 17 * sc, TEAMS[0].color, 'right', false);
+  txt('-', VW / 2, y, 17 * sc, '#fff', 'center', false);
+  txt(teamGoals[1] + ' ' + TEAMS[1].name, VW / 2 + 12 * sc, y, 17 * sc, TEAMS[1].color, 'left', false);
   // who has the ball
   const cs = ballCarriers(), loose = bombs.filter(b => b.ball && b.state !== 'held').length;
-  const line = cs.length ? 'BALL: ' + cs.map(r => r.isPlayer ? 'YOU' : r.name).join(' + ') + (loose ? '  (+' + loose + ' LOOSE)' : '') : loose ? loose + ' LOOSE BALL' + (loose > 1 ? 'S' : '') : 'NEXT BALL COMING...';
-  txt(line, VW / 2, y + 16 * sc, 11 * sc, cs.length ? cs[0].color : '#ddd', 'center', false);
+  const line = cs.length ? 'BALL: ' + cs.map(r => (r.isPlayer ? 'YOU' : r.name) + ' (' + TEAMS[teamOf(r)].name + ')').join(' + ') : loose ? 'LOOSE BALL' : pendingKick > 0 ? 'KICKOFF COMING...' : 'BALL DROPPING...';
+  txt(line, VW / 2, y + 18 * sc, 11 * sc, cs.length ? TEAMS[teamOf(cs[0])].color : '#ddd', 'center', false);
+  if (kickT > 0) { drawBigTitle('KICKOFF', VW / 2, VH * 0.42, Math.min(VW / 12, 38 * sc)); txt('YOU + GOLD (BLUE) ATTACK THE ORANGE GOAL  >>>', VW / 2, VH * 0.42 + 30 * sc, 13 * sc, '#9cf', 'center'); }
   // off-screen arrow to the nearest ball you don't have
   let nb = null, nd = 1e9; for (const b of bombs) { if (!b.ball || b.holder === player) continue; const d = hyp(b.x - player.x, b.y - player.y); if (d < nd) { nd = d; nb = b; } }
   if (nb && !onScreen(nb.x, nb.y) && player.onRocket) {
@@ -3167,7 +3248,7 @@ function drawBallHUD(sc, now) {
     ctx.globalAlpha = a; drawBigTitle(goalBanner.text, VW / 2, VH * 0.42, sz);
     txt(goalBanner.sub, VW / 2, VH * 0.42 + sz * 0.75, 15 * sc, goalBanner.color, 'center'); ctx.globalAlpha = 1;
   }
-  return y + 32 * sc;
+  return y + 34 * sc;
 }
 function drawMinimap(sc) {
   const w = 130 * sc, h = w * WORLD_H / WORLD_W, x = VW - w - 10, y = 10;
@@ -3176,7 +3257,7 @@ function drawMinimap(sc) {
   const k = w / WORLD_W;
   ctx.fillStyle = '#0aa';
   for (const p of posts) if (!p.disp) ctx.fillRect(x + p.x * k - 1, y + p.y * k - 1, 2, 2);
-  for (const d of dispensers) { ctx.fillStyle = isBall() ? '#ff66ff' : '#ffcc00'; ctx.fillRect(x + d.x * k - 3, y + d.y * k - 3, 6, 6); ctx.fillStyle = '#000'; ctx.fillRect(x + d.x * k - 1, y + d.y * k - 1, 2, 2); } // v0.9.3
+  for (const d of (isBall() ? [ballDisp] : dispensers)) { ctx.fillStyle = isBall() ? '#ff66ff' : '#ffcc00'; ctx.fillRect(x + d.x * k - 3, y + d.y * k - 3, 6, 6); ctx.fillStyle = '#000'; ctx.fillRect(x + d.x * k - 1, y + d.y * k - 1, 2, 2); } // v0.9.3
   if (isBall()) for (const g of goals) { ctx.fillStyle = g.color; ctx.fillRect(x + (g.side < 0 ? 0 : g.x) * k, y + (g.cy - GOAL_HALF) * k, GOAL_DEPTH * k + 1, GOAL_HALF * 2 * k); } // v0.9.6
   for (const b of bombs) {
     if (b.ball) { ctx.fillStyle = '#fff'; ctx.strokeStyle = b.owner ? b.owner.color : '#000'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x + b.x * k, y + b.y * k, 3.5, 0, TAU); ctx.fill(); ctx.stroke(); continue; }
@@ -3190,6 +3271,7 @@ function drawMinimap(sc) {
     if (!r.onRocket) { ctx.fillStyle = '#777'; ctx.fillRect(x + r.rk.x * k - 1.5, y + r.rk.y * k - 1.5, 3, 3); }
     ctx.fillStyle = r.onRocket ? r.color : '#888';
     const sz = r.isPlayer ? 5 : 4;
+    if (isBall() && r.onRocket) { ctx.strokeStyle = TEAMS[teamOf(r)].color; ctx.lineWidth = 1.5; ctx.strokeRect(x + r.x * k - sz / 2 - 1.5, y + r.y * k - sz / 2 - 1.5, sz + 3, sz + 3); }
     ctx.fillRect(x + r.x * k - sz / 2, y + r.y * k - sz / 2, sz, sz);
   }
   const s = cam.scale;
@@ -3267,12 +3349,12 @@ function drawTitle(now) {
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.9.6  ROCKET WAR + ROCKETBALL', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v0.9.7  ROCKET WAR + ROCKETBALL 2v2', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   if (isBall()) { // v0.9.6
-    txt('ROCKETBALL: hook a ball with <L / R>, hold to carry & swing it, let go to FLING.', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
-    txt('Get it in either GOAL: +' + PTS_GOAL + ' to whoever hooked it last (ASSIST +' + PTS_ASSIST + ').', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#f8f', 'center');
+    txt('ROCKETBALL 2v2: YOU + GOLD (BLUE) vs RED + GREEN (ORANGE). Hook the ball, carry, FLING.', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
+    txt('Put it in the ORANGE goal (right): +' + PTS_GOAL + ' to the last hooker, ASSIST +' + PTS_ASSIST + '. Most goals wins.', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#fc6', 'center');
     txt(isTouch ? 'LEFT: steer   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie  M mode', VW / 2, VH * 0.48 + 34 * sc, 11 * sc, '#8ab', 'center');
-    txt('Hook a carried ball to STEAL it (+' + PTS_BALL_STEAL + ').  Knock the carrier off and they drop it.  KO +' + PTS_KO * RB_KO_MULT + '  CLOTHES +' + PTS_CLOTHES * RB_KO_MULT + '  FALL -' + PTS_FALL + '.  No bombs.',
+    txt('STEAL +' + PTS_BALL_STEAL + '  KO +' + PTS_KO * RB_KO_MULT + '  CLOTHES +' + PTS_CLOTHES * RB_KO_MULT + '  FALL -' + PTS_FALL + '  OWN GOAL ' + PTS_OWN_GOAL + '.  Cables pass through teammates.  No bombs.',
       VW / 2, VH * 0.48 + 50 * sc, 9 * sc, '#9c9', 'center', false);
     drawDiffPicker('title', now);
     if (Math.floor(now / 500) % 2 === 0) txt(isTouch ? 'TAP TO START' : 'CLICK OR PRESS SPACE TO START', VW / 2, VH * 0.9, 18 * sc, '#fff', 'center');
@@ -3297,23 +3379,29 @@ function drawResults(now) {
   const place = results.indexOf(player) + 1;
   const tie = results.length > 1 && results[0].score === results[1].score && results[0].falls === results[1].falls && place <= 2;
   const ord = ['1ST', '2ND', '3RD', '4TH'][place - 1];
+  if (resultsMode === 'ball' && teamResult) { // v0.9.7 team result
+    const w = teamResult.winner, g = teamResult.goals;
+    const head = (w < 0 ? 'DRAW ' : TEAMS[w].name + ' WINS ') + g[0] + ' - ' + g[1] + (teamResult.byPoints ? ' (ON POINTS)' : '') + (w < 0 ? '' : w === teamOf(player) ? '   YOUR TEAM WINS!' : '   YOUR TEAM LOST');
+    txt(head, VW / 2, VH * 0.19, 18 * sc, w < 0 ? '#fff' : TEAMS[w].color, 'center');
+  } else
   txt(place === 1 && !tie ? 'YOU WIN!' : tie ? 'TIE FOR 1ST!' : 'YOU PLACED ' + ord, VW / 2, VH * 0.19, 18 * sc, place === 1 ? '#fc0' : '#fff', 'center');
   const cx = VW / 2, rowH = 19 * sc; let y = VH * 0.27;
   const RB = resultsMode === 'ball'; // v0.9.6
-  const cols = RB ? [['RANK', -250, 'left'], ['RIDER', -195, 'left'], ['POINTS', 30, 'right'], ['GOALS', 110, 'right'], ['KOs', 205, 'right'], ['FALLS', 290, 'right']]
+  const cols = RB ? [['TEAM', -250, 'left'], ['RIDER', -165, 'left'], ['POINTS', 30, 'right'], ['GOALS', 110, 'right'], ['KOs', 205, 'right'], ['FALLS', 290, 'right']]
     : [['RANK', -250, 'left'], ['RIDER', -195, 'left'], ['POINTS', 30, 'right'], ['KOs', 110, 'right'], ['TRICKS', 205, 'right'], ['FALLS', 290, 'right']];
   for (const c of cols) txt(c[0], cx + c[1] * sc, y, 11 * sc, c[0] === 'GOALS' ? '#f8f' : '#888', c[2], false);
   y += rowH * 0.95;
   results.forEach((r, i) => {
-    const vals = RB ? [(i + 1) + '.', r.name, String(r.score), String(r.goals), String(r.kos), String(r.falls)] : [(i + 1) + '.', r.name, String(r.score), String(r.kos), String(r.tricks), String(r.falls)];
+    if (RB) txt(TEAMS[teamOf(r)] ? TEAMS[teamOf(r)].name : '', cx - 250 * sc, y, 14 * sc, TEAMS[teamOf(r)] ? TEAMS[teamOf(r)].color : '#fff', 'left', false);
+    const vals = RB ? ['', r.name, String(r.score), String(r.goals), String(r.kos), String(r.falls)] : [(i + 1) + '.', r.name, String(r.score), String(r.kos), String(r.tricks), String(r.falls)];
     cols.forEach((c, j) => txt(vals[j], cx + c[1] * sc, y, (j === 2 ? 16 : 14) * sc, r.color, c[2], false));
     y += rowH;
   });
   // trick log: one compact line per rider, small columns
   const lh = clamp((btnTop - y - 4 * sc) / (results.length + 1), 9, 14 * sc), fs = Math.min(10 * sc, lh * 0.82);
   y += lh * 0.2;
-  const tcols = RB ? [['TRICK LOG', -250, 'left', null], ['GOALS', -112, 'right', 'goals'], ['ASSISTS', -40, 'right', 'assists'], ['BALL STEALS', 62, 'right', 'ballSteals'],
-    ['CARRIER KOs', 168, 'right', 'ballKOs'], ['SWINGS', 236, 'right', 'swings'], ['CLOTHES', 304, 'right', 'clothes']] : [['TRICK LOG', -250, 'left', null], ['SWINGS', -112, 'right', 'swings'], ['CLOTHES', -48, 'right', 'clothes'], ['TIES', 2, 'right', 'ties'],
+  const tcols = RB ? [['TRICK LOG', -250, 'left', null], ['GOALS', -112, 'right', 'goals'], ['ASSISTS', -40, 'right', 'assists'], ['PASSES', 30, 'right', 'ballPasses'], ['STEALS', 98, 'right', 'ballSteals'],
+    ['CARRIER KOs', 196, 'right', 'ballKOs'], ['OWN G', 260, 'right', 'ownGoals'], ['CLOTHES', 334, 'right', 'clothes']] : [['TRICK LOG', -250, 'left', null], ['SWINGS', -112, 'right', 'swings'], ['CLOTHES', -48, 'right', 'clothes'], ['TIES', 2, 'right', 'ties'],
     ['BALL+CHAIN', 86, 'right', 'chains'], ['MINES', 142, 'right', 'mines'], ['BOMB KOs', 212, 'right', 'bombKOs'], ['PASSED', 272, 'right', 'passes'], ['STOLEN', 334, 'right', 'stolen']]; // v0.9.5 + STOLEN
   ctx.fillStyle = 'rgba(8,10,24,0.92)'; ctx.fillRect(cx - 258 * sc, y - lh * 0.6, 600 * sc, lh * (results.length + 1) + lh * 0.2);
   for (const c of tcols) txt(c[0], cx + c[1] * sc, y, fs, c[0] === 'TRICK LOG' ? '#f93' : '#888', c[2], false);
@@ -3361,6 +3449,7 @@ window.RJ = { get state() { return state; }, get riders() { return riders; }, ge
     BOMB_IMPACT_SPEED, BOMB_BLAST_R, BOMB_PUSH, BOMB_STICK_FUSE, BOMB_MINE_TIME, BOMB_MINE_ARM, BOMB_MINE_TRIGGER, BOMB_LONG_DIST, PTS_BOMB_TRICK, PTS_MINE_TRICK,
     PTS_CHAIN_TRICK, PTS_KO, CHAIN_L, CHAIN_REEL, CHAIN_SHAKE_BOOST, CHAIN_SHAKE_POST, CHAIN_PASS_GAP, CHAIN_PASS_FUSE, MINE_MAX_L, BLAST_RIDER_V, BLAST_ROCKET_V, ROCKET_SKID_T, ROCKET_SKID_DRAG },
   get mode() { return gameMode; }, set mode(v) { applyMode(v); }, setMode, MODES, modeBtnLayout, diffBtnLayout, goals, goalPosts, spawnBall, scoreGoal, inGoal, ballOf, grabBall, bombReleaseVel,
+  TEAMS, teamOf, sameTeam, ballDisp, kickoff, KICK_SPOTS, RB_POSTS, get teamGoals() { return teamGoals; }, get pendingKick() { return pendingKick; }, set pendingKick(v) { pendingKick = v; }, get teamResult() { return teamResult; }, get kickT() { return kickT; },
   get lastGoal() { return lastGoal; }, get goalBanner() { return goalBanner; }, get resultsMode() { return resultsMode; },
   BALL: { BALL_MAX, BALL_EVERY, BALL_FLY_TIME, GOAL_HALF, GOAL_DEPTH, PTS_GOAL, PTS_ASSIST, PTS_BALL_STEAL, ASSIST_WINDOW, RB_KO_MULT },
   chainVictim, updateTethers, RESULTS_LAYOUT, stealInfo, stealCable, stealTie, remount, latchCable, STEAL: { STEAL_DIST, PTS_STEAL, PTS_STEAL_TIE, PTS_STEAL_TIE_BONUS, STEAL_TOW_MAX, STEAL_TIE_LIFE, STEAL_YANK }, get overT() { return overT; }, set overT(v) { overT = v; },
