@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Rocket Jockey v0.9.9</title>
+<title>Rocket Jockey v1.0</title>
 <link rel="manifest" id="manifest">
 <link rel="icon" id="favicon">
 <link rel="apple-touch-icon" id="appleicon">
@@ -299,40 +299,78 @@ try {
   document.getElementById('manifest').href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(man));
 } catch (e) { /* non-fatal */ }
 
-// ---------- audio ----------
-let AC = null, eng = null;
+// ---------- audio (v1.0: Web Audio sound pass, all synthesized; master bus + voice cap + mute/volume) ----------
+let AC = null, eng = null, master = null, sfxBus = null, noiseBuf = null, crushCurve = null;
+const VOL_KEY = 'rj_volume', MUTE_KEY = 'rj_muted', MAX_VOICES = 18;
+let volume = 0.8, muted = false, voices = 0, paused = false;
+const sfxLog = {}; // test hook: how many times each sound fired
+try { const v = parseFloat(localStorage.getItem(VOL_KEY)); if (v >= 0 && v <= 1) volume = v; muted = localStorage.getItem(MUTE_KEY) === '1'; } catch (e) {}
+function applyVolume() {
+  try { localStorage.setItem(VOL_KEY, String(volume)); localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch (e) {}
+  if (AC && master) master.gain.setTargetAtTime(muted ? 0 : volume, AC.currentTime, 0.03);
+}
+function setVolume(v) { volume = clamp(Math.round(v * 10) / 10, 0, 1); if (volume > 0) muted = false; applyVolume(); }
+function toggleMute() { muted = !muted; applyVolume(); }
 function ensureAudio() {
   try {
     if (!AC) {
       const A = window.AudioContext || window.webkitAudioContext; if (!A) return;
       AC = new A();
-      const o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
-      o.type = 'sawtooth'; o.frequency.value = 60; f.type = 'lowpass'; f.frequency.value = 500; g.gain.value = 0;
-      o.connect(f); f.connect(g); g.connect(AC.destination); o.start();
-      eng = { o, f, g };
+      master = AC.createGain(); master.gain.value = muted ? 0 : volume;
+      const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.knee.value = 8; comp.ratio.value = 5; comp.attack.value = 0.003; comp.release.value = 0.2;
+      master.connect(comp); comp.connect(AC.destination);
+      sfxBus = AC.createGain(); sfxBus.gain.value = 1; sfxBus.connect(master);
+      noiseBuf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      crushCurve = new Float32Array(256); for (let i = 0; i < 256; i++) { const x = i / 128 - 1; crushCurve[i] = Math.tanh(x * 4); }
+      // engine: two detuned saws + a sine sub through a lowpass; a looped noise "roar" layer that opens on boost
+      const o1 = AC.createOscillator(), o2 = AC.createOscillator(), sub = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+      o1.type = 'sawtooth'; o2.type = 'sawtooth'; sub.type = 'sine'; o1.frequency.value = 55; o2.frequency.value = 55; o2.detune.value = 14; sub.frequency.value = 27.5;
+      const sg = AC.createGain(); sg.gain.value = 0.9;
+      f.type = 'lowpass'; f.frequency.value = 420; f.Q.value = 3; g.gain.value = 0;
+      o1.connect(f); o2.connect(f); sub.connect(sg); sg.connect(g); f.connect(g); g.connect(master);
+      const rs = AC.createBufferSource(); rs.buffer = noiseBuf; rs.loop = true;
+      const rf = AC.createBiquadFilter(); rf.type = 'lowpass'; rf.frequency.value = 900; rf.Q.value = 0.7;
+      const rg = AC.createGain(); rg.gain.value = 0; rs.connect(rf); rf.connect(rg); rg.connect(master);
+      // flutter LFO on the roar for a rumbling rocket texture
+      const lfo = AC.createOscillator(), lg = AC.createGain(); lfo.frequency.value = 23; lg.gain.value = 0.25; lfo.connect(lg); lg.connect(rg.gain);
+      o1.start(); o2.start(); sub.start(); rs.start(); lfo.start();
+      eng = { o: o1, o2, sub, f, g, rf, rg, wasBoost: false };
     }
-    if (AC.state === 'suspended') AC.resume();
+    if (AC.state === 'suspended' && !paused) AC.resume();
   } catch (e) { AC = null; }
 }
-function beep(freq, dur, type, vol, slideTo) {
-  if (!AC) return;
+function voiceOK() { return AC && !muted && voices < MAX_VOICES; }
+function track(node, end) { voices++; node.onended = () => { voices = Math.max(0, voices - 1); }; }
+// oscillator voice: freq -> slideTo over dur, optional attack + filter
+function beep(freq, dur, type, vol, slideTo, opt) {
+  if (!voiceOK()) return;
   try {
-    const t = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
+    opt = opt || {};
+    const t = AC.currentTime + (opt.delay || 0), o = AC.createOscillator(), g = AC.createGain();
     o.type = type || 'square'; o.frequency.setValueAtTime(freq, t);
-    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
-    g.gain.setValueAtTime(vol || 0.08, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + dur + 0.02);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t + (opt.slideT || dur));
+    const a = opt.attack || 0.004;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol || 0.08, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    let n = o;
+    if (opt.lp) { const f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = opt.lp; f.Q.value = opt.q || 1; n.connect(f); n = f; }
+    n.connect(g); g.connect(sfxBus); track(o); o.start(t); o.stop(t + dur + 0.03);
   } catch (e) {}
 }
-let noiseBuf = null;
-function noise(dur, vol, freq) {
-  if (!AC) return;
+// filtered noise voice: filter freq sweeps freq -> sweepTo; type lowpass/bandpass/highpass; optional distortion
+function noise(dur, vol, freq, opt) {
+  if (!voiceOK()) return;
   try {
-    if (!noiseBuf) { noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
-    const t = AC.currentTime, s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
-    s.buffer = noiseBuf; f.type = 'bandpass'; f.frequency.value = freq || 800;
-    g.gain.setValueAtTime(vol || 0.2, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    s.connect(f); f.connect(g); g.connect(AC.destination); s.start(t); s.stop(t + dur + 0.02);
+    opt = opt || {};
+    const t = AC.currentTime + (opt.delay || 0), s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+    s.buffer = noiseBuf; s.playbackRate.value = opt.rate || 1; f.type = opt.type || 'bandpass'; f.Q.value = opt.q || 1;
+    f.frequency.setValueAtTime(freq || 800, t);
+    if (opt.sweepTo) f.frequency.exponentialRampToValueAtTime(opt.sweepTo, t + (opt.sweepT || dur));
+    const a = opt.attack || 0.003;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol || 0.2, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    let n = s; n.connect(f); n = f;
+    if (opt.crush) { const w = AC.createWaveShaper(); w.curve = crushCurve; n.connect(w); n = w; }
+    n.connect(g); g.connect(sfxBus); track(s); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.03);
   } catch (e) {}
 }
 const sfx = {
@@ -374,6 +412,65 @@ sfx.fuse = () => { beep(1700, 0.025, 'square', 0.025); };
 sfx.dispense = () => { beep(180, 0.12, 'square', 0.05, 90); setTimeout(() => beep(520, 0.06, 'triangle', 0.05), 90); };
 sfx.fling = () => { noise(0.18, 0.18, 1800); beep(500, 0.15, 'triangle', 0.05, 1100); };
 sfx.runover = () => { beep(500, 0.08, 'square', 0.06, 900); setTimeout(() => beep(900, 0.08, 'square', 0.05, 500), 70); };
+
+// ---------- v1.0 sound designs (override the old beeps; same call sites) ----------
+let lastSfxT = {};
+function sfxGate(name, gap) { const n = performance.now(); if (n - (lastSfxT[name] || 0) < gap) return false; lastSfxT[name] = n; return true; }
+function logSfx(n) { sfxLog[n] = (sfxLog[n] || 0) + 1; }
+const SFX = {
+  fire() { noise(0.14, 0.22, 2500, { type: 'highpass', sweepTo: 6000 }); beep(1400, 0.1, 'triangle', 0.05, 600); },        // cable whip-out
+  squish() { // wet squishy thwack: rider grabbed by a cable
+    beep(190, 0.22, 'sine', 0.5, 45, { slideT: 0.14 });                                    // meaty body thump
+    noise(0.28, 0.5, 2600, { type: 'lowpass', q: 9, sweepTo: 220, sweepT: 0.2 });           // resonant wet squelch
+    noise(0.05, 0.35, 3500, { type: 'highpass' });                                          // slap transient
+    beep(520, 0.12, 'sine', 0.12, 140, { delay: 0.05 });                                    // gloopy tail
+  },
+  clank() { // cable latching onto a post / bomb / ball
+    beep(1230, 0.18, 'square', 0.07, 1180, { lp: 4000 }); beep(1847, 0.12, 'square', 0.05, null, { lp: 5000 });
+    noise(0.04, 0.35, 5000, { type: 'highpass' }); beep(240, 0.09, 'triangle', 0.25, 120);
+  },
+  latch(kind) { if (kind === 'live' || kind === 'foot' || kind === 'rocket') this.squish(); else this.clank(); },
+  creak() { // rope creak: wobbly rasp
+    for (let i = 0; i < 3; i++) beep(110 + i * 23, 0.14, 'sawtooth', 0.13, 70 + i * 30, { delay: i * 0.09, lp: 900, q: 8, attack: 0.03 });
+  },
+  snap() { noise(0.07, 0.6, 3000, { type: 'highpass' }); beep(1800, 0.05, 'square', 0.08, 300); beep(120, 0.15, 'sine', 0.35, 50); },
+  tie() { this.creak(); setTimeout(() => this.snap(), 290); },
+  twang() { beep(220, 0.55, 'sawtooth', 0.14, 55, { lp: 1500, q: 6 }); this.snap(); },
+  release() { noise(0.12, 0.2, 3000, { type: 'bandpass', sweepTo: 700 }); beep(700, 0.08, 'triangle', 0.06, 250); },
+  crunch(v = 1) { // collision / knockoff body crunch
+    noise(0.35, 0.6 * v, 1800, { type: 'lowpass', sweepTo: 200, crush: true });
+    beep(95, 0.3, 'sine', 0.55 * v, 38); noise(0.08, 0.35 * v, 4000, { type: 'highpass', rate: 0.5 });
+  },
+  knock() { this.crunch(1); beep(600, 0.5, 'sawtooth', 0.07, 60, { lp: 1800, delay: 0.05 }); this.crowd('ooh', 0.6); },
+  bump() { if (sfxGate('bump', 120)) this.crunch(0.55); },
+  wall() { noise(0.18, 0.4, 900, { type: 'lowpass', sweepTo: 150, crush: true }); beep(80, 0.18, 'sine', 0.4, 40); },
+  boom(v = 1) { // bomb blast: sub drop + roaring noise sweep + crackle
+    beep(110, 1.1, 'sine', 0.8 * v, 24, { slideT: 0.6 });
+    noise(1.3, 0.75 * v, 2500, { type: 'lowpass', sweepTo: 90, sweepT: 1.1, crush: true });
+    noise(0.25, 0.4 * v, 5000, { type: 'highpass', delay: 0.02 });
+    if (v > 0.6) noise(0.6, 0.2 * v, 1200, { type: 'bandpass', q: 3, delay: 0.15, sweepTo: 300 });
+  },
+  boostOn() { noise(0.45, 0.35, 300, { type: 'lowpass', sweepTo: 2500, sweepT: 0.15 }); beep(60, 0.35, 'sawtooth', 0.12, 140, { lp: 700 }); },
+  horn() { // stadium air horn: two detuned saw chords
+    [233, 294, 350].forEach((f, i) => { beep(f, 1.25, 'sawtooth', 0.11, f * 0.97, { lp: 2200, q: 2, attack: 0.04 }); beep(f * 1.006, 1.2, 'sawtooth', 0.07, null, { lp: 1800, attack: 0.05 }); });
+  },
+  crowd(kind = 'cheer', v = 1) { // crowd = layered formant-filtered noise swells
+    if (!sfxGate('crowd', 250)) return;
+    const dur = kind === 'cheer' ? 2.4 : kind === 'ooh' ? 1.1 : 1.4;
+    const forms = kind === 'ooh' ? [380, 800] : kind === 'aww' ? [700, 1150] : [600, 1300, 2600];
+    forms.forEach((f, i) => noise(dur, (kind === 'cheer' ? 0.28 : 0.22) * v / (i + 1) * 1.5, f, { type: 'bandpass', q: 3, attack: kind === 'cheer' ? 0.15 : 0.25, sweepTo: kind === 'ooh' ? f * 0.7 : f * 1.15, rate: 0.7 + i * 0.2 }));
+    if (kind === 'cheer') for (let i = 0; i < 4; i++) noise(0.18, 0.12 * v, 2400 + Math.random() * 1500, { type: 'bandpass', q: 6, delay: 0.2 + Math.random() * 1.2 }); // whistles / claps
+  },
+  goal() { this.horn(); setTimeout(() => this.crowd('cheer', 1.2), 120); },
+  trick(label) { this.crowd(/OWN GOAL|FALL/.test(label) ? 'aww' : 'cheer', /CHAIN|CLOTHES|THEFT|TIED OFF|MINEFIELD|COMBO|BIND/.test(label) ? 0.9 : 0.6); },
+};
+for (const k of Object.keys(SFX)) { const fn = SFX[k]; SFX[k] = (...a) => { logSfx(k); if (!AC || muted) return; try { fn.apply(SFX, a); } catch (e) {} }; }
+Object.assign(sfx, SFX); window.__rjSfx = sfx;
+const _oldFling = sfx.fling, _oldDisp = sfx.dispense;
+sfx.fling = () => { logSfx('fling'); noise(0.3, 0.3, 600, { type: 'bandpass', q: 2, sweepTo: 3000 }); beep(300, 0.2, 'triangle', 0.06, 900); };
+sfx.spawn = () => { logSfx('spawn'); beep(80, 0.5, 'sawtooth', 0.12, 220, { lp: 900 }); noise(0.4, 0.2, 300, { type: 'lowpass', sweepTo: 2000 }); };
+sfx.runover = () => { logSfx('runover'); SFX.crunch(0.5); };
+const TRICK_LABELS = /BALL AND CHAIN|CLOTHESLINE|ROCKET THEFT|ROCKET TIED OFF|MINEFIELD|BOMBED|COMBO|BIND|TIE-UP|ANCHOR|BALL STEAL|OWN GOAL/;
 
 // ---------- world ----------
 function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -668,6 +765,7 @@ function award(r, pts, label, x, y) {
   r.score = Math.max(0, r.score + pts);
   pops.push({ x: x == null ? r.x : x, y: (y == null ? r.y : y) - 24, text: (pts >= 0 ? '+' : '') + pts + ' ' + label, color: pts < 0 ? '#f55' : r.isPlayer ? '#ffdd33' : r.color, t: 1.6, mine: r.isPlayer });
   if (pops.length > 24) pops.shift();
+  if (TRICK_LABELS.test(label) && (r.isPlayer || onScreen(x == null ? r.x : x, y == null ? r.y : y))) sfx.trick(label); // v1.0 crowd reaction
 }
 function noteHit(victim, by) { if (victim && by && victim !== by) { victim.lastBy = by; victim.lastByT = gameT; } } // credit tracking
 function creditFor(o, by) {
@@ -851,8 +949,9 @@ function handlePointer(x, y) {
 
 function onTouchStart(e) {
   e.preventDefault(); isTouch = true;
-  if (state !== 'play') { const t = e.changedTouches[0]; handlePointer(t.clientX, t.clientY); return; }
+  if (state !== 'play') { const t = e.changedTouches[0]; if (!hitSoundBtn(t.clientX, t.clientY)) handlePointer(t.clientX, t.clientY); return; }
   ensureAudio();
+  if (paused) togglePause(false);
   for (const t of e.changedTouches) {
     const x = t.clientX, y = t.clientY;
     const b = hitButton(x, y);
@@ -896,35 +995,117 @@ cv.addEventListener('touchcancel', onTouchEnd, { passive: false });
 document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
-cv.addEventListener('mousedown', e => { if (!isTouch || state !== 'play') handlePointer(e.clientX, e.clientY); });
+// ---------- v1.0 keyboard + mouse (laptop play) ----------
+const mouse = { x: 0, y: 0, seen: false, side: -1 };   // side: cable held by the left mouse button (0 = <L, 1 = R>), -1 none
+const fireAim = [null, null];                          // aim override for the next queued fire (mouse / bomb key)
+const relLock = [false, false];                        // right-click / X: hold suppressed until the cable inputs are let go
+let kbmSeen = false, grabSide = -1;
+const GAME_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'Tab', 'PageUp', 'PageDown', 'Home', 'End', 'Backspace', 'Slash', 'Quote'];
+function noteKbm() { if (!kbmSeen || isTouch) { kbmSeen = true; isTouch = false; } }
+function screenToWorld(x, y) { const s = cam.scale || 1; return [cam.x + (x - VW / 2) / s, cam.y + (y - VH / 2) / s]; }
+function aimAtScreen(r, x, y) { // mouse aim: cursor direction, softly snapped onto auto-aim's lead when they agree
+  const [wx, wy] = screenToWorld(x, y), a = Math.atan2(wy - r.y, wx - r.x), side = angDiff(a, r.ang) > 0 ? 1 : 0;
+  const aa = autoAim(r, side);
+  return { side, aim: Math.abs(angDiff(aa, a)) < 0.22 ? aa : a };
+}
+function releaseAll() { relLock[0] = relLock[1] = true; mouse.side = -1; grabSide = -1; }
+function mouseFire() {
+  if (state !== 'play' || paused || !player || !player.onRocket) return;
+  const { side, aim } = aimAtScreen(player, mouse.x, mouse.y);
+  fireQ[side] = true; fireAim[side] = aim; mouse.side = side; relLock[side] = false;
+}
+function bombGrab() { // G: hook the nearest grabbable bomb / ball in cable reach (hold G, let go = fling)
+  if (state !== 'play' || paused || !player || !player.onRocket) return;
+  let best = null, bd = 1e9;
+  for (const b of bombs) { if (!bombGrabbable(b, player)) continue; const d = hyp(b.x - player.x, b.y - player.y); if (d < cableMax(player) && d < bd) { bd = d; best = b; } }
+  let a = best ? Math.atan2(best.y - player.y, best.x - player.x) : player.ang;
+  if (best) { const ft = bd / CABLE_SPEED; a = Math.atan2(best.y + ((best.vy || 0) - player.vy) * ft - player.y, best.x + ((best.vx || 0) - player.vx) * ft - player.x); }
+  const side = angDiff(a, player.ang) > 0 ? 1 : 0;
+  fireQ[side] = true; fireAim[side] = a; grabSide = side; relLock[side] = false;
+}
+function togglePause(on) {
+  if (state !== 'play') { paused = false; return; }
+  paused = on == null ? !paused : on;
+  if (AC) { if (paused) AC.suspend(); else AC.resume(); }
+  if (!paused) last = performance.now();
+}
+cv.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') { mouse.x = e.clientX; mouse.y = e.clientY; if (!mouse.seen) { mouse.seen = true; noteKbm(); } } });
+cv.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'mouse') return; // touch has its own handlers
+  mouse.x = e.clientX; mouse.y = e.clientY; noteKbm(); ensureAudio();
+  if (state !== 'play') { if (e.button === 0 && !hitSoundBtn(e.clientX, e.clientY)) handlePointer(e.clientX, e.clientY); return; }
+  if (paused) { if (hitSoundBtn(e.clientX, e.clientY)) return; if (e.button === 0) togglePause(false); return; }
+  if (e.button === 0) mouseFire(); else if (e.button === 2) releaseAll(); else if (e.button === 1) { tieQ = true; e.preventDefault(); }
+});
+// chorded presses (right / middle while the left button is held) don't fire pointerdown, so also catch them as mousedown
+cv.addEventListener('mousedown', e => { if (state !== 'play' || paused || !(e.buttons & 1) || e.button === 0) return; if (e.button === 2) releaseAll(); else if (e.button === 1) { tieQ = true; e.preventDefault(); } });
+window.addEventListener('pointerup', e => { if (e.pointerType === 'mouse' && e.button === 0) mouse.side = -1; });
+cv.addEventListener('wheel', e => e.preventDefault(), { passive: false });
 
 window.addEventListener('keydown', e => {
   const c = e.code;
-  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(c)) e.preventDefault();
+  if (!e.ctrlKey && !e.metaKey && (GAME_KEYS.includes(c) || (state === 'play' && /^Key|^Shift|^Digit/.test(c)))) e.preventDefault();
+  noteKbm(); ensureAudio();
   if (!e.repeat) {
-    if (c === 'KeyQ') fireQ[0] = true;
-    if (c === 'KeyE') fireQ[1] = true;
-    if (c === 'KeyT') tieQ = true;
-    if (ALTITUDE_ENABLED && (c === 'KeyR' || c === 'PageUp')) { altQ += 1; e.preventDefault(); }
-    if (ALTITUDE_ENABLED && (c === 'KeyF' || c === 'PageDown')) { altQ -= 1; e.preventDefault(); }
-    if (c === 'Digit1' || c === 'Numpad1') applyDifficulty('Easy');
-    if (c === 'Digit2' || c === 'Numpad2') applyDifficulty('Normal');
-    if (c === 'Digit3' || c === 'Numpad3') applyDifficulty('Hard');
-    if (c === 'KeyM' && state !== 'play') setMode(gameMode === 'war' ? 'ball' : 'war'); // v0.9.6
-    if (c === 'Space' || c === 'Enter') handleTap();
+    if (c === 'KeyN') toggleMute();
+    if (c === 'Minus' || c === 'NumpadSubtract' || c === 'BracketLeft') setVolume(volume - 0.1);
+    if (c === 'Equal' || c === 'NumpadAdd' || c === 'BracketRight') setVolume(volume + 0.1);
+    if (state === 'play' && (c === 'Escape' || c === 'KeyP')) { togglePause(); keys[c] = true; return; }
+    if (paused) { if (c === 'Enter' || c === 'Space') togglePause(false); if (c === 'Backspace') { togglePause(false); endRound(); } keys[c] = true; return; }
+    if (state === 'play') {
+      if (c === 'KeyQ') { fireQ[0] = true; fireAim[0] = null; relLock[0] = false; }
+      if (c === 'KeyE') { fireQ[1] = true; fireAim[1] = null; relLock[1] = false; }
+      if (c === 'KeyT' || c === 'KeyC') tieQ = true;
+      if (c === 'KeyG') bombGrab();
+      if (c === 'KeyX') releaseAll();
+    }
+    if (ALTITUDE_ENABLED && (c === 'KeyR' || c === 'PageUp')) altQ += 1;
+    if (ALTITUDE_ENABLED && (c === 'KeyF' || c === 'PageDown')) altQ -= 1;
+    if (state !== 'play') { // menus: 1/2/3 or LEFT/RIGHT difficulty, M or UP/DOWN mode, Space/Enter start
+      if (c === 'Digit1' || c === 'Numpad1') applyDifficulty('Easy');
+      if (c === 'Digit2' || c === 'Numpad2') applyDifficulty('Normal');
+      if (c === 'Digit3' || c === 'Numpad3') applyDifficulty('Hard');
+      if (c === 'ArrowLeft' || c === 'ArrowRight' || c === 'KeyA' || c === 'KeyD') { const i = DIFF_NAMES.indexOf(difficulty), n = DIFF_NAMES.length; applyDifficulty(DIFF_NAMES[(i + (c === 'ArrowLeft' || c === 'KeyA' ? n - 1 : 1)) % n]); }
+      if (c === 'KeyM' || c === 'ArrowUp' || c === 'ArrowDown' || c === 'KeyW' || c === 'KeyS') setMode(gameMode === 'war' ? 'ball' : 'war'); // v0.9.6
+      if (c === 'Space' || c === 'Enter') handleTap();
+    }
   }
   keys[c] = true;
 });
-window.addEventListener('keyup', e => { keys[e.code] = false; });
-window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; touchMap.clear(); touchExtra.clear(); stick.active = false; });
+window.addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'KeyG') grabSide = -1; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; touchMap.clear(); touchExtra.clear(); stick.active = false; mouse.side = -1; grabSide = -1; togglePause(true); });
 document.addEventListener('visibilitychange', () => {
   if (!AC) return;
-  if (document.hidden) AC.suspend(); else if (state === 'play') AC.resume();
+  if (document.hidden) AC.suspend(); else if (state === 'play' && !paused) AC.resume();
 });
+// sound button (top-right, all screens): tap = mute toggle; on title/results also - / + volume
+function soundBtns() { const s = clamp(Math.min(VW, VH) / 390, 0.8, 1.4), r = 16 * s, y = 22 * s + r * 0.2, x = VW - 24 * s;
+  const b = { mute: { x, y, r } }; if (state !== 'play') { b.up = { x: x - 44 * s, y, r: r * 0.85 }; b.dn = { x: x - 84 * s, y, r: r * 0.85 }; } return b; }
+function hitSoundBtn(x, y) {
+  const b = soundBtns();
+  for (const k in b) if (hyp(x - b[k].x, y - b[k].y) < b[k].r * 1.3) { ensureAudio(); if (k === 'mute') toggleMute(); else setVolume(volume + (k === 'up' ? 0.1 : -0.1)); return k; }
+  return null;
+}
+function drawSoundBtns() {
+  const b = soundBtns();
+  for (const k in b) { const q = b[k];
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.strokeStyle = muted && k === 'mute' ? '#f55' : '#8ab'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, TAU); ctx.fill(); ctx.stroke();
+    txt(k === 'mute' ? (muted ? 'X' : '\u266A') : k === 'up' ? '+' : '-', q.x, q.y + 1, q.r * 1.1, muted && k === 'mute' ? '#f55' : '#cde', 'center', false);
+  }
+  if (state !== 'play') txt('VOL ' + Math.round(volume * 10) + (muted ? ' MUTED' : ''), b.dn.x - b.dn.r - 6, b.dn.y + 1, 11, '#8ab', 'right', false);
+}
+function drawPause(sc) {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, VW, VH);
+  txt('PAUSED', VW / 2, VH * 0.36, 40 * sc, '#fc0', 'center');
+  txt('ESC / P / CLICK: RESUME     BACKSPACE: END ROUND', VW / 2, VH * 0.5, 13 * sc, '#fff', 'center');
+  txt('N: MUTE ' + (muted ? '(MUTED)' : '') + '     - / + : VOLUME ' + Math.round(volume * 10), VW / 2, VH * 0.58, 13 * sc, '#8ab', 'center');
+}
 
 // ---------- game flow ----------
 function setMode(m) { applyMode(m); if (state === 'title') resetWorld(); }
 function startGame() {
+  paused = false; mouse.side = -1; grabSide = -1; relLock[0] = relLock[1] = false;
   resetWorld();
   state = 'play'; timeLeft = ROUND_TIME; overT = 0;
   fireQ[0] = fireQ[1] = false; tieQ = false; altQ = 0;
@@ -955,11 +1136,15 @@ function playerControl(r) {
   const DZ = 0.08;
   if (stick.active && Math.abs(stick.h) > DZ) c.turn = Math.sign(stick.h) * (Math.abs(stick.h) - DZ) / (1 - DZ);
   else c.turn = kt;
-  c.boost = !!(keys.ShiftLeft || keys.ShiftRight || keys.ArrowUp || keys.KeyW || heldBtn('B') || heldBtn('BL'));
-  c.hold[0] = !!(keys.KeyQ || heldBtn('L'));
-  c.hold[1] = !!(keys.KeyE || heldBtn('R'));
+  c.boost = !!(keys.ShiftLeft || keys.ShiftRight || keys.ArrowUp || keys.KeyW || keys.Space || heldBtn('B') || heldBtn('BL'));
+  for (let s = 0; s < 2; s++) { // v1.0: keyboard Q/E, mouse button (side under the cursor), G bomb grab; right-click / X locks a release
+    const kb = !!(keys[s ? 'KeyE' : 'KeyQ'] || mouse.side === s || grabSide === s), tc = heldBtn(s ? 'R' : 'L');
+    if (relLock[s] && !kb) relLock[s] = false;
+    c.hold[s] = tc || (kb && !relLock[s]);
+  }
   c.fire[0] = fireQ[0]; c.fire[1] = fireQ[1]; c.tie = tieQ; c.alt = ALTITUDE_ENABLED ? clamp(altQ, -2, 2) : 0;
-  fireQ[0] = fireQ[1] = false; tieQ = false; altQ = 0;
+  if (fireAim[0] != null || fireAim[1] != null) c.aim = [fireQ[0] && fireAim[0] != null ? fireAim[0] : autoAim(r, 0), fireQ[1] && fireAim[1] != null ? fireAim[1] : autoAim(r, 1)];
+  fireQ[0] = fireQ[1] = false; fireAim[0] = fireAim[1] = null; tieQ = false; altQ = 0;
   return c;
 }
 function playerFoot() {
@@ -1485,8 +1670,8 @@ function latchCable(r, k, target) {
     k.swept = 0; k.age = 0; k.lastA = Math.atan2(r.y - o.y, r.x - o.x); k.immune = new Map(); k.sides = new Map();
     if (!r.isPlayer || aiAll) aiStats.posts++;
   }
+  if (state === 'play' && (r.isPlayer || onScreen(o.x, o.y))) sfx.latch(target.kind); // v1.0: squish on riders, clank on objects
   if (r.isPlayer) {
-    sfx.latch();
     if (state === 'play') {
       if (target.kind === 'rocket') msg('DRAGGING ' + target.r.name + "'S ROCKET!", '#fc0');
       else if (target.kind === 'foot') msg('DRAGGING ' + target.r.name + '!', '#fc0');
@@ -1913,7 +2098,7 @@ function scoreGoal(b, g) { // v0.9.9: the team attacking goal g scores; credited
   if (state === 'play') {
     goalBanner = { text: own ? 'OWN GOAL! ' + TEAMS[atk].name + ' SCORES' : 'GOAL! ' + (s ? s.name : TEAMS[atk].name), color: TEAMS[atk].color, t: 1.4,
       sub: TEAMS[0].name + ' ' + teamGoals[0] + ' - ' + teamGoals[1] + ' ' + TEAMS[1].name + (own ? '   (' + s.name + ' ' + PTS_OWN_GOAL + ')' : '   +' + PTS_GOAL + (dunk ? ' DUNK' : '') + (lastGoal.assist ? '  ASSIST ' + lastGoal.assist + ' +' + PTS_ASSIST : '')) };
-    [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.14, 'square', 0.07), i * 80)); noise(0.6, 0.25, 1200);
+    sfx.goal(); // v1.0: air horn + crowd cheer
     shake = Math.max(shake, 7);
   }
   ballDisp.cool = Math.max(ballDisp.cool, BALL_REPLACE); // v0.9.9: no reset; dispenser replaces the ball shortly
@@ -2755,9 +2940,14 @@ function updateEngine() {
   const t = AC.currentTime;
   const on = state === 'play' && player.onRocket;
   const sp = hyp(player.vx, player.vy);
-  eng.g.gain.setTargetAtTime(on ? (player.boosting ? 0.07 : 0.035) : 0, t, 0.08);
-  eng.o.frequency.setTargetAtTime(40 + sp * 0.16, t, 0.1);
-  eng.f.frequency.setTargetAtTime(player.boosting ? 1200 : 450, t, 0.1);
+  const run = on && !paused, bst = run && player.boosting, hz = 42 + sp * 0.17;
+  eng.g.gain.setTargetAtTime(run ? (bst ? 0.16 : 0.09) : 0, t, 0.08);
+  eng.o.frequency.setTargetAtTime(hz, t, 0.1); eng.o2.frequency.setTargetAtTime(hz, t, 0.1); eng.sub.frequency.setTargetAtTime(hz / 2, t, 0.1);
+  eng.f.frequency.setTargetAtTime((bst ? 1100 : 380) + sp * 0.8, t, 0.1);
+  eng.rg.gain.setTargetAtTime(bst ? 0.32 : run ? 0.03 + sp * 0.00006 : 0, t, bst ? 0.05 : 0.12); // boost roar
+  eng.rf.frequency.setTargetAtTime(bst ? 1600 : 500, t, 0.1);
+  if (bst && !eng.wasBoost && sfxGate('boostOn', 350)) sfx.boostOn();
+  eng.wasBoost = bst;
 }
 
 // ---------- rendering ----------
@@ -3154,6 +3344,8 @@ function render(now) {
   if (state === 'play') drawHUD(now);
   else if (state === 'title') drawTitle(now);
   else drawResults(now);
+  if (paused && state === 'play') drawPause(clamp(Math.min(VW, VH) / 390, 0.8, 1.4));
+  if (state !== 'play' || paused) drawSoundBtns(); // v1.0
   ctx.fillStyle = getScan(); ctx.fillRect(0, 0, VW, VH);
 }
 
@@ -3244,7 +3436,7 @@ function drawHUD(now) {
   }
   drawMinimap(sc);
   if (isTouch) drawTouch(sc, now);
-  else txt(player.onRocket ? 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables (hold)  T tie' + (ALTITUDE_ENABLED ? '  R/F altitude' : '') : 'ARROWS/WASD run to your rocket', VW / 2, VH - 14, 12, '#678', 'center', false);
+  else txt(player.onRocket ? 'A/D steer  W/SHIFT/SPACE boost  CLICK aim+hold cable  R-CLICK/X drop  Q/E cables  T tie  G bomb  ESC pause' + (ALTITUDE_ENABLED ? '  R/F altitude' : '') : 'ARROWS/WASD run to your rocket', VW / 2, VH - 14, 12, '#678', 'center', false);
 }
 function drawBallHUD(sc, now) {
   // v0.9.9 team score under the clock: BLUE 3 - 2 ORANGE
@@ -3367,16 +3559,17 @@ function drawBigTitle(text, x, y, size) {
   ctx.fillStyle = g; ctx.fillText(text, x, y);
   ctx.lineWidth = Math.max(1.5, size / 30); ctx.strokeStyle = '#000'; ctx.strokeText(text, x, y);
 }
+const KBM_HINT = 'A/D steer  W/SHIFT/SPACE boost  CLICK aim+hold cable  R-CLICK/X drop  Q/E cables  T tie  G bomb  ESC pause  N mute';
 function drawTitle(now) {
   ctx.fillStyle = 'rgba(0,0,10,0.55)'; ctx.fillRect(0, 0, VW, VH);
   const size = Math.min(VW / 9, VH / 5, 90);
   drawBigTitle('ROCKET JOCKEY', VW / 2, VH * 0.27, size);
   const sc = clamp(VH / 390, 0.8, 1.6);
-  txt('v0.9.9  ROCKET WAR + ROCKETBALL 2v2', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
+  txt('v1.0  ROCKET WAR + ROCKETBALL 2v2', VW / 2, VH * 0.27 + size * 0.75, 14 * sc, '#0ff', 'center');
   if (isBall()) { // v0.9.6
     txt('ROCKETBALL 2v2: YOU + GOLD (BLUE) vs RED + GREEN (ORANGE). Hook the ball, carry, FLING.', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
     txt('Put it in the ORANGE goal (right): +' + PTS_GOAL + ' to the last hooker, ASSIST +' + PTS_ASSIST + '. Most goals wins.', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#fc6', 'center');
-    txt(isTouch ? 'LEFT: steer + BOOST   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie  M mode', VW / 2, VH * 0.48 + 34 * sc, 11 * sc, '#8ab', 'center');
+    txt(isTouch ? 'LEFT: steer + BOOST   RIGHT: hold <L  R> cables + BOOST' : KBM_HINT, VW / 2, VH * 0.48 + 34 * sc, isTouch ? 11 * sc : Math.min(11 * sc, VW * 0.94 / (KBM_HINT.length * 0.62)), '#8ab', 'center');
     txt('STEAL +' + PTS_BALL_STEAL + '  KO +' + PTS_KO * RB_KO_MULT + '  CLOTHES +' + PTS_CLOTHES * RB_KO_MULT + '  FALL -' + PTS_FALL + '  OWN GOAL ' + PTS_OWN_GOAL + '.  Cables pass through teammates.  No bombs.',
       VW / 2, VH * 0.48 + 50 * sc, 9 * sc, '#9c9', 'center', false);
     drawDiffPicker('title', now);
@@ -3385,7 +3578,7 @@ function drawTitle(now) {
   }
   txt('Grapple posts to whip around corners.  Hit RIDER to yank; NOSE/TAIL to tow!', VW / 2, VH * 0.48, 13 * sc, '#ccc', 'center');
   txt('Hook two things, then TIE: clotheslines & tie-ups!', VW / 2, VH * 0.48 + 16 * sc, 13 * sc, '#f93', 'center');
-  txt(isTouch ? 'LEFT: steer + BOOST   RIGHT: hold <L  R> cables + BOOST' : 'ARROWS/WASD steer  SHIFT/W boost  Q/E cables  T tie', VW / 2, VH * 0.48 + 34 * sc, 11 * sc, '#8ab', 'center');
+  txt(isTouch ? 'LEFT: steer + BOOST   RIGHT: hold <L  R> cables + BOOST' : KBM_HINT, VW / 2, VH * 0.48 + 34 * sc, isTouch ? 11 * sc : Math.min(11 * sc, VW * 0.94 / (KBM_HINT.length * 0.62)), '#8ab', 'center');
   txt('SCORING: KO +' + PTS_KO + '  CLOTHES +' + PTS_CLOTHES + '  BIND +' + PTS_BIND + '  TIE +' + PTS_TIE + '  HOOK +' + PTS_HOOK + '  COMBO +' + PTS_COMBO + '  BALL&CHAIN +' + (PTS_KO + PTS_CHAIN_TRICK) + '  MINEFIELD +' + (PTS_KO + PTS_MINE_TRICK) + '  FALL -' + PTS_FALL,
     VW / 2, VH * 0.48 + 50 * sc, 9 * sc, '#9c9', 'center', false);
   txt('NEW: BOMB + enemy + TIE = BALL AND CHAIN!   BOMB + post = MINE', VW / 2, VH * 0.48 + (ALTITUDE_ENABLED ? 78 : 64) * sc, 11 * sc, '#ffcc33', 'center');
@@ -3446,7 +3639,7 @@ function frame(now) {
   let dt = (now - last) / 1000; last = now;
   if (dt > 0.1) dt = 0.1; if (dt < 0) dt = 0;
   const portrait = VH > VW;
-  if (!portrait) {
+  if (!portrait && !paused) {
     acc += dt;
     let n = 0;
     while (acc >= STEP && n < 8) { update(STEP); acc -= STEP; n++; }
@@ -3479,6 +3672,9 @@ window.RJ = { get state() { return state; }, get riders() { return riders; }, ge
   chainVictim, updateTethers, RESULTS_LAYOUT, stealInfo, stealCable, stealTie, remount, latchCable, STEAL: { STEAL_DIST, PTS_STEAL, PTS_STEAL_TIE, PTS_STEAL_TIE_BONUS, STEAL_TOW_MAX, STEAL_TIE_LIFE, STEAL_YANK }, get overT() { return overT; }, set overT(v) { overT = v; },
   get AI() { return { AI_ERR, AI_REACT, AI_RETARGET, AI_FIRE_COOL, AI_HOLD_POST, AI_TIE_CHANCE, AI_POST_RANGE, AI_HOOK_FRAC, AI_ZONE_YANK, AI_PU_CHANCE, AI_PU_RANGE, AI_THINK, AI_SWING_ENEMY, AI_SWING_IDLE, AI_PLAYER_PULL, AI_CROWD, AI_REVENGE, AI_STICKY, AI_FOLLOWUP, AI_PERSONA,
     AI_BOMB_CHANCE, AI_BOMB_RANGE, AI_BOMB_ACC, AI_BOMB_LEAD, AI_BOMB_TIE, AI_BOMB_PANIC, AI_BOMB_DODGE, AI_BOMB_MAXD, AI_BOMB_CHAIN, AI_BOMB_MINE, AI_BOMB_YOU, AI_CHAIN_ESCAPE, AI_STEAL_CHANCE, AI_STEAL_RANGE, AI_STEAL_YOU, AI_STEAL_TIE, AI_BALL_ERR, AI_BALL_CHASE, AI_BALL_STEAL, AI_BALL_DEFEND, AI_BALL_RANGE }; } };
+// v1.0 test hooks
+Object.defineProperties(window.RJ, { AC: { get: () => AC }, voices: { get: () => voices }, paused: { get: () => paused }, volume: { get: () => volume }, muted: { get: () => muted }, isTouch: { get: () => isTouch }, kbmSeen: { get: () => kbmSeen } });
+Object.assign(window.RJ, { sfx, sfxLog, setVolume, toggleMute, togglePause, mouse, screenToWorld, MAX_VOICES, eng: () => eng });
 })();
 </script>
 </body>
