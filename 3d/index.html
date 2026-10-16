@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Rocket Jockey 3D test v0.1</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
+canvas{display:block;touch-action:none}
+.hud{position:fixed;color:#fff;text-shadow:0 0 3px #000,1px 1px 0 #000;pointer-events:none;z-index:5}
+#ver{top:6px;left:8px;font-size:13px;opacity:.85}
+#fps{top:6px;right:8px;font-size:13px;font-family:monospace}
+#score{top:6px;left:50%;transform:translateX(-50%);font-size:20px;font-weight:bold}
+#msg{top:34%;left:50%;transform:translate(-50%,-50%);font-size:26px;font-weight:bold;color:#ffd84a;opacity:0;transition:opacity .25s}
+#topbtns{position:fixed;top:28px;right:8px;z-index:6;display:flex;gap:6px}
+#topbtns button{background:rgba(0,0,0,.45);color:#fff;border:1px solid #fff8;border-radius:6px;font-size:12px;padding:4px 8px}
+.btn{position:fixed;z-index:6;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:14px;border:3px solid rgba(255,255,255,.7);touch-action:none}
+.btn.on{filter:brightness(1.6);transform:scale(.94)}
+#bBoost{right:24px;bottom:22px;width:96px;height:96px;background:rgba(255,120,30,.45)}
+#bL{right:150px;bottom:70px;width:78px;height:78px;background:rgba(40,200,255,.4)}
+#bR{right:46px;bottom:140px;width:78px;height:78px;background:rgba(255,80,200,.4)}
+#stickBase,#stickKnob{position:fixed;z-index:6;border-radius:50%;pointer-events:none;display:none}
+#stickBase{width:120px;height:120px;margin:-60px 0 0 -60px;border:3px solid rgba(255,255,255,.5);background:rgba(255,255,255,.08)}
+#stickKnob{width:54px;height:54px;margin:-27px 0 0 -27px;background:rgba(255,255,255,.55)}
+#stickHint{left:40px;bottom:40px;font-size:12px;opacity:.6}
+.mk{position:fixed;z-index:4;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:3px solid;pointer-events:none;display:none;box-sizing:border-box}
+#mkL{border-color:#3cf}#mkR{border-color:#f5c}#mkX{border-color:#ff4;border-style:dashed;width:44px;height:44px;margin:-22px 0 0 -22px}
+#cross{position:fixed;left:50%;top:42%;width:14px;height:14px;margin:-7px;border:2px solid #fff9;border-radius:50%;z-index:4;pointer-events:none}
+#rot{position:fixed;inset:0;background:#111;color:#fff;z-index:20;display:none;align-items:center;justify-content:center;font-size:22px;text-align:center}
+@media (orientation:portrait) and (pointer:coarse){#rot{display:flex}}
+.desk .btn,.desk #stickHint{display:none}
+body:not(.desk) #cross{display:none}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
+</head><body>
+<div id="ver" class="hud">3D test v0.1</div>
+<div id="score" class="hud">KO 0</div>
+<div id="fps" class="hud">-- fps</div>
+<div id="msg" class="hud"></div>
+<div id="topbtns"><button id="bLQ">LQ: on</button><button id="bFS">⛶</button></div>
+<div id="cross"></div>
+<div id="mkL" class="mk"></div><div id="mkR" class="mk"></div><div id="mkX" class="mk"></div>
+<div id="stickBase"></div><div id="stickKnob"></div><div id="stickHint" class="hud">drag left side to steer</div>
+<div id="bL" class="btn">◀ CABLE</div><div id="bR" class="btn">CABLE ▶</div><div id="bBoost" class="btn">BOOST</div>
+<div id="rot">Rotate to landscape ↻</div>
+<script type="module">
+import * as THREE from 'three';
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const TOUCH = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
+if (!TOUCH) document.body.classList.add('desk');
+
+// ---------------- tuning ----------------
+const T = {
+  BASE: 20, BOOST: 36, ACCEL: 1.6, TURN: 2.9, LAT_GRIP: 9, GRIP: 3.0, HOVER: 1.1,
+  CABLE_MAX: 30, CABLE_SPEED: 150, REEL: 1.5, MIN_LEN: 4, ARENA: 75, POST_R: 0.9, RIDER_R: 1.2,
+  CAM_D: 9, CAM_H: 4.2, CAM_D_SWING: 13.5, CAM_H_SWING: 6.5, REMOUNT: 3,
+};
+
+// ---------------- audio (ported from 2D v1.0) ----------------
+let AC = null, master, sfxBus, noiseBuf, crushCurve, eng, voices = 0;
+const sfxLog = {};
+function ensureAudio() {
+  try {
+    if (!AC) {
+      const A = window.AudioContext || window.webkitAudioContext; if (!A) return;
+      AC = new A();
+      master = AC.createGain(); master.gain.value = 0.7;
+      const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.knee.value = 8; comp.ratio.value = 5; comp.attack.value = 0.003; comp.release.value = 0.2;
+      master.connect(comp); comp.connect(AC.destination);
+      sfxBus = AC.createGain(); sfxBus.connect(master);
+      noiseBuf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      crushCurve = new Float32Array(256); for (let i = 0; i < 256; i++) crushCurve[i] = Math.tanh((i / 128 - 1) * 4);
+      const o1 = AC.createOscillator(), o2 = AC.createOscillator(), sub = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+      o1.type = 'sawtooth'; o2.type = 'sawtooth'; sub.type = 'sine'; o1.frequency.value = 55; o2.frequency.value = 55; o2.detune.value = 14; sub.frequency.value = 27.5;
+      const sg = AC.createGain(); sg.gain.value = 0.9;
+      f.type = 'lowpass'; f.frequency.value = 420; f.Q.value = 3; g.gain.value = 0;
+      o1.connect(f); o2.connect(f); sub.connect(sg); sg.connect(g); f.connect(g); g.connect(master);
+      const rs = AC.createBufferSource(); rs.buffer = noiseBuf; rs.loop = true;
+      const rf = AC.createBiquadFilter(); rf.type = 'lowpass'; rf.frequency.value = 900; rf.Q.value = 0.7;
+      const rg = AC.createGain(); rg.gain.value = 0; rs.connect(rf); rf.connect(rg); rg.connect(master);
+      const lfo = AC.createOscillator(), lg = AC.createGain(); lfo.frequency.value = 23; lg.gain.value = 0.25; lfo.connect(lg); lg.connect(rg.gain);
+      o1.start(); o2.start(); sub.start(); rs.start(); lfo.start();
+      eng = { o1, o2, sub, f, g, rf, rg, wasBoost: false };
+    }
+    if (AC.state === 'suspended') AC.resume();
+  } catch (e) { AC = null; }
+}
+function beep(freq, dur, type, vol, slideTo, opt) {
+  if (!AC || voices > 40) return; opt = opt || {};
+  const t = AC.currentTime + (opt.delay || 0), o = AC.createOscillator(), g = AC.createGain();
+  o.type = type || 'square'; o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t + (opt.slideT || dur));
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol || 0.08, t + (opt.attack || 0.004)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let n = o; if (opt.lp) { const f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = opt.lp; f.Q.value = opt.q || 1; n.connect(f); n = f; }
+  n.connect(g); g.connect(sfxBus); voices++; o.onended = () => voices--; o.start(t); o.stop(t + dur + 0.03);
+}
+function noise(dur, vol, freq, opt) {
+  if (!AC || voices > 40) return; opt = opt || {};
+  const t = AC.currentTime + (opt.delay || 0), s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+  s.buffer = noiseBuf; s.playbackRate.value = opt.rate || 1; f.type = opt.type || 'bandpass'; f.Q.value = opt.q || 1;
+  f.frequency.setValueAtTime(freq || 800, t); if (opt.sweepTo) f.frequency.exponentialRampToValueAtTime(opt.sweepTo, t + (opt.sweepT || dur));
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol || 0.2, t + (opt.attack || 0.003)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let n = s; n.connect(f); n = f; if (opt.crush) { const w = AC.createWaveShaper(); w.curve = crushCurve; n.connect(w); n = w; }
+  n.connect(g); g.connect(sfxBus); voices++; s.onended = () => voices--; s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.03);
+}
+const sfx = {
+  fire() { noise(0.14, 0.22, 2500, { type: 'highpass', sweepTo: 6000 }); beep(1400, 0.1, 'triangle', 0.05, 600); },
+  squish() { beep(190, 0.22, 'sine', 0.5, 45, { slideT: 0.14 }); noise(0.28, 0.5, 2600, { type: 'lowpass', q: 9, sweepTo: 220, sweepT: 0.2 }); noise(0.05, 0.35, 3500, { type: 'highpass' }); beep(520, 0.12, 'sine', 0.12, 140, { delay: 0.05 }); },
+  clank() { beep(1230, 0.18, 'square', 0.07, 1180, { lp: 4000 }); beep(1847, 0.12, 'square', 0.05, null, { lp: 5000 }); noise(0.04, 0.35, 5000, { type: 'highpass' }); beep(240, 0.09, 'triangle', 0.25, 120); },
+  release() { noise(0.12, 0.2, 3000, { type: 'bandpass', sweepTo: 700 }); beep(700, 0.08, 'triangle', 0.06, 250); },
+  crunch(v = 1) { noise(0.35, 0.6 * v, 1800, { type: 'lowpass', sweepTo: 200, crush: true }); beep(95, 0.3, 'sine', 0.55 * v, 38); noise(0.08, 0.35 * v, 4000, { type: 'highpass', rate: 0.5 }); },
+  knock() { this.crunch(1); beep(600, 0.5, 'sawtooth', 0.07, 60, { lp: 1800, delay: 0.05 }); },
+  wall() { noise(0.18, 0.4, 900, { type: 'lowpass', sweepTo: 150, crush: true }); beep(80, 0.18, 'sine', 0.4, 40); },
+  boostOn() { noise(0.45, 0.35, 300, { type: 'lowpass', sweepTo: 2500, sweepT: 0.15 }); beep(60, 0.35, 'sawtooth', 0.12, 140, { lp: 700 }); },
+  remount() { beep(300, 0.25, 'triangle', 0.08, 900); },
+};
+const lastT = {};
+for (const k of Object.keys(sfx)) { const fn = sfx[k]; sfx[k] = (...a) => { sfxLog[k] = (sfxLog[k] || 0) + 1; if (!AC) return; try { fn.apply(sfx, a); } catch (e) {} }; }
+function gate(n, ms) { const t = performance.now(); if (t - (lastT[n] || 0) < ms) return false; lastT[n] = t; return true; }
+function updateEngine(spd, boost) {
+  if (!eng) return; const t = AC.currentTime, k = clamp(spd / T.BOOST, 0, 1.3);
+  eng.o1.frequency.setTargetAtTime(48 + k * 70, t, 0.08); eng.o2.frequency.setTargetAtTime(48 + k * 70, t, 0.08); eng.sub.frequency.setTargetAtTime(24 + k * 35, t, 0.08);
+  eng.f.frequency.setTargetAtTime(300 + k * 900 + (boost ? 600 : 0), t, 0.1); eng.g.gain.setTargetAtTime(0.05 + k * 0.08, t, 0.1);
+  eng.rg.gain.setTargetAtTime(boost ? 0.32 : 0.0, t, boost ? 0.05 : 0.2); eng.rf.frequency.setTargetAtTime(boost ? 1600 : 700, t, 0.1);
+  if (boost && !eng.wasBoost) sfx.boostOn(); eng.wasBoost = boost;
+}
+
+// ---------------- renderer / scene ----------------
+let lowQ = localStorage.getItem('rj3d_lq') !== '0';
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const SKY = 0x7fb8e8; scene.background = new THREE.Color(SKY); scene.fog = new THREE.Fog(SKY, 50, 170);
+const camera = new THREE.PerspectiveCamera(65, 1, 0.3, 400);
+scene.add(new THREE.HemisphereLight(0xdfefff, 0x4a5a30, 1.3));
+const sun = new THREE.DirectionalLight(0xfff3d8, 1.9); sun.position.set(40, 70, 25);
+sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 10, far: 180 });
+scene.add(sun, sun.target);
+function applyQuality() {
+  renderer.setPixelRatio(lowQ ? Math.min(1, devicePixelRatio) * (TOUCH ? 0.85 : 1) : Math.min(2, devicePixelRatio));
+  renderer.shadowMap.enabled = !lowQ; sun.castShadow = !lowQ;
+  scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+  $('bLQ').textContent = 'LQ: ' + (lowQ ? 'on' : 'off'); resize();
+}
+function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.fov = w / h < 1.3 ? 75 : 65; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize);
+const M = c => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
+function box(w, h, d, c, x = 0, y = 0, z = 0, parent = scene) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(c)); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; parent.add(m); return m; }
+
+// ground: checker of big flat tiles
+const A = T.ARENA;
+{ const g = new THREE.PlaneGeometry(A * 2, A * 2, 10, 10).toNonIndexed(); g.rotateX(-Math.PI / 2);
+  const col = [], c1 = new THREE.Color(0x5f8f3a), c2 = new THREE.Color(0x6e9c44);
+  for (let i = 0; i < g.attributes.position.count; i += 6) { const c = ((i / 6) + Math.floor(i / 60)) % 2 ? c1 : c2; for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b); }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const gm = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true })); gm.receiveShadow = true; scene.add(gm);
+  const out = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), M(0x8a7a55)); out.rotation.x = -Math.PI / 2; out.position.y = -0.05; scene.add(out);
+  // center ring markings
+  const ring = new THREE.Mesh(new THREE.RingGeometry(14, 15, 24), new THREE.MeshBasicMaterial({ color: 0xf0f0d0 })); ring.rotation.x = -Math.PI / 2; ring.position.y = 0.02; scene.add(ring);
+}
+// walls: alternating colored blocks + grandstands
+const wallCols = [0xd23a2a, 0xf0e8d0];
+for (let s = 0; s < 4; s++) for (let i = 0; i < 10; i++) {
+  const t = -A + (i + 0.5) * (A * 2 / 10), c = wallCols[(i + s) % 2], L = A * 2 / 10;
+  const [x, z, w, d] = s === 0 ? [t, -A - 1, L, 2] : s === 1 ? [t, A + 1, L, 2] : s === 2 ? [-A - 1, t, 2, L] : [A + 1, t, 2, L];
+  box(w, 3.5, d, c, x, 1.75, z);
+  const sx = s < 2 ? 0 : (s === 2 ? -1 : 1), sz = s < 2 ? (s === 0 ? -1 : 1) : 0;
+  for (let r = 0; r < 3; r++) box(s < 2 ? L : 3, 2 + r * 2.2, s < 2 ? 3 : L, [0x445566, 0x556677, 0x3a4a5a][(i + r) % 3], x + sx * (4 + r * 3), 1 + r * 1.1, z + sz * (4 + r * 3));
+}
+// posts (short striped) and pylons (tall towers)
+const anchors = [];
+function addPost(x, z, tall) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); scene.add(g);
+  const h = tall ? 9 : 4.5, cols = tall ? [0x2a6fd6, 0xf2f2f2] : [0xffc21a, 0x222222];
+  const n = tall ? 5 : 3;
+  for (let i = 0; i < n; i++) { const m = new THREE.Mesh(new THREE.CylinderGeometry(T.POST_R * (tall ? 1.3 : 1), T.POST_R * (tall ? 1.3 : 1), h / n, 6), M(cols[i % 2])); m.position.y = h / n * (i + 0.5); m.castShadow = true; g.add(m); }
+  box(tall ? 3.2 : 2.2, 0.6, tall ? 3.2 : 2.2, tall ? 0xe04040 : 0xff7a1a, 0, h + 0.3, 0, g);
+  anchors.push({ kind: 'post', x, z, r: T.POST_R * (tall ? 1.3 : 1), hookY: T.HOVER + 0.6, tall, obj: g });
+}
+[[0, 0, 1], [-30, -30, 1], [30, 30, 1], [-30, 30, 1], [30, -30, 1], [0, 45, 0], [0, -45, 0], [45, 0, 0], [-45, 0, 0], [-18, 12, 0], [18, -12, 0], [55, 55, 0], [-55, -55, 0], [55, -55, 0], [-55, 55, 0], [-15, -52, 0], [15, 52, 0]].forEach(p => addPost(p[0], p[1], p[2]));
+
+// ---------------- riders ----------------
+function makeRocket(col) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 3.2, 6), M(col)); body.rotation.x = Math.PI / 2; body.castShadow = true; g.add(body);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.2, 6), M(0xeeeeee)); nose.rotation.x = Math.PI / 2; nose.position.z = 2.2; g.add(nose);
+  box(0.12, 0.9, 0.8, 0x333333, 0, 0.45, -1.3, g); box(1.8, 0.12, 0.7, 0x333333, 0, 0, -1.3, g);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.6, 6), new THREE.MeshBasicMaterial({ color: 0xffa020 })); flame.rotation.x = -Math.PI / 2; flame.position.z = -2.4; g.add(flame);
+  scene.add(g); return { g, flame };
+}
+function makeJockey(col) {
+  const g = new THREE.Group();
+  box(0.8, 1.0, 0.5, col, 0, 0.9, 0, g); box(0.55, 0.55, 0.55, 0xf0c090, 0, 1.7, 0.05, g); box(0.6, 0.25, 0.6, col, 0, 2.0, 0, g);
+  box(0.25, 0.8, 0.25, 0x333344, -0.3, 0.25, 0.2, g); box(0.25, 0.8, 0.25, 0x333344, 0.3, 0.25, 0.2, g);
+  box(0.9, 0.2, 0.2, col, 0, 1.2, 0.4, g);
+  scene.add(g); return g;
+}
+const riders = [];
+function addRider(name, col, x, z, h, ai) {
+  const r = { name, col, x, z, vx: 0, vz: 0, h, steer: 0, boost: false, ai, mounted: true, offT: 0, ko: 0,
+    cable: { st: 'none', tgt: null, len: 0, ext: 0, side: 0, hx: 0, hz: 0, t: 0 }, rocket: makeRocket(col), jockey: makeJockey(col),
+    tum: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, rz: 0, wx: 0, wz: 0 }, bank: 0,
+    brain: { wx: rand(-50, 50), wz: rand(-50, 50), cool: rand(2, 4), hold: 0, boostT: 0 } };
+  const cm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1, 4), new THREE.MeshBasicMaterial({ color: ai ? 0xffeeaa : 0xffffff }));
+  cm.visible = false; scene.add(cm); r.cableMesh = cm;
+  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), M(0xdddddd)); tip.visible = false; scene.add(tip); r.tipMesh = tip;
+  if (!ai) anchors.length; else anchors.push({ kind: 'rider', rider: r, get x() { return r.x; }, get z() { return r.z; }, r: T.RIDER_R, hookY: T.HOVER + 1.4 });
+  riders.push(r); return r;
+}
+const player = addRider('YOU', 0x2ad04a, 0, -20, 0, false);
+addRider('RED', 0xe03030, -25, 20, Math.PI, true);
+addRider('GOLD', 0xe0b020, 25, 15, Math.PI * 0.7, true);
+let score = 0;
+
+// ---------------- input ----------------
+const inp = { stickX: 0, keyL: false, keyR: false, boostT: false, boostK: false, cabL: false, cabR: false, cabK: [false, false], mouse: false, mouseTgt: null };
+let anyInput = false;
+function firstInput() { anyInput = true; ensureAudio(); }
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; firstInput(); if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp'].includes(e.code)) e.preventDefault(); });
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+let stickId = null, stickX0 = 0, stickY0 = 0;
+const cvs = renderer.domElement;
+cvs.addEventListener('touchstart', e => { e.preventDefault(); firstInput();
+  for (const t of e.changedTouches) if (stickId === null && t.clientX < innerWidth * 0.5) { stickId = t.identifier; stickX0 = t.clientX; stickY0 = t.clientY; showStick(t.clientX, t.clientY); }
+}, { passive: false });
+cvs.addEventListener('touchmove', e => { e.preventDefault();
+  for (const t of e.changedTouches) if (t.identifier === stickId) { const dx = clamp(t.clientX - stickX0, -60, 60); inp.stickX = dx / 60; $('stickKnob').style.left = (stickX0 + dx) + 'px'; $('stickKnob').style.top = (stickY0 + clamp(t.clientY - stickY0, -60, 60)) + 'px'; }
+}, { passive: false });
+const endT = e => { for (const t of e.changedTouches) if (t.identifier === stickId) { stickId = null; inp.stickX = 0; $('stickBase').style.display = $('stickKnob').style.display = 'none'; } };
+cvs.addEventListener('touchend', endT); cvs.addEventListener('touchcancel', endT);
+function showStick(x, y) { for (const id of ['stickBase', 'stickKnob']) { const s = $(id).style; s.display = 'block'; s.left = x + 'px'; s.top = y + 'px'; } }
+const btnIds = [];
+function bindBtn(id, key) {
+  const el = $(id), ids = new Set(); btnIds.push({ ids, set: v => set(v) });
+  const set = v => { inp[key] = v; el.classList.toggle('on', v); };
+  el.addEventListener('touchstart', e => { e.preventDefault(); firstInput(); for (const t of e.changedTouches) ids.add(t.identifier); set(true); }, { passive: false });
+  el.addEventListener('mousedown', e => { firstInput(); set(true); }); el.addEventListener('mouseup', () => set(false)); el.addEventListener('mouseleave', () => { if (!ids.size) set(false); });
+}
+const btnEnd = e => { const live = new Set([...e.touches].map(t => t.identifier));
+  for (const b of btnIds) { for (const t of e.changedTouches) b.ids.delete(t.identifier); for (const i of [...b.ids]) if (!live.has(i)) b.ids.delete(i); if (!b.ids.size) b.set(false); } };
+document.addEventListener('touchend', btnEnd, true); document.addEventListener('touchcancel', btnEnd, true);
+bindBtn('bBoost', 'boostT'); bindBtn('bL', 'cabL'); bindBtn('bR', 'cabR');
+cvs.addEventListener('mousedown', e => { if (e.button === 0) { firstInput(); inp.mouse = true; } });
+addEventListener('mouseup', e => { if (e.button === 0) inp.mouse = false; });
+cvs.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+$('bLQ').addEventListener('click', () => { lowQ = !lowQ; localStorage.setItem('rj3d_lq', lowQ ? '1' : '0'); applyQuality(); });
+$('bFS').addEventListener('click', () => { firstInput(); const d = document.documentElement; if (!document.fullscreenElement) { (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d)?.then?.(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {}); } else document.exitFullscreen?.(); });
+
+// ---------------- cables ----------------
+const fwdOf = h => [Math.sin(h), Math.cos(h)];
+const rightOf = h => [-Math.cos(h), Math.sin(h)];
+function pickSide(r, side) { // side: -1 left, +1 right
+  const [fx, fz] = fwdOf(r.h), [rx, rz] = rightOf(r.h); let best = null, bs = 1e9;
+  for (const a of anchors) {
+    if (a.kind === 'rider' && (a.rider === r || !a.rider.mounted)) continue;
+    const dx = a.x - r.x, dz = a.z - r.z, d = Math.hypot(dx, dz); if (d > T.CABLE_MAX || d < 1.5) continue;
+    const s = (dx * rx + dz * rz) * side, f = dx * fx + dz * fz; if (s < 0.3 * d * 0.5) continue;
+    let sc = d + (f < 0 ? -f * 0.6 : 0); if (a.kind === 'rider') sc *= 0.75;
+    if (sc < bs) { bs = sc; best = a; }
+  }
+  return best;
+}
+const _v = new THREE.Vector3();
+function pickScreen(r) { // nearest to crosshair (screen 50%,42%) among in-range targets in front of the camera
+  let best = null, bs = 0.35;
+  for (const a of anchors) {
+    if (a.kind === 'rider' && (a.rider === r || !a.rider.mounted)) continue;
+    if (Math.hypot(a.x - r.x, a.z - r.z) > T.CABLE_MAX) continue;
+    _v.set(a.x, a.hookY, a.z).project(camera); if (_v.z > 1) continue;
+    const d = Math.hypot(_v.x, (_v.y - 0.16) / camera.aspect * 1.0); if (d < bs) { bs = d; best = a; }
+  }
+  return best;
+}
+function fireCable(r, tgt, side) {
+  const c = r.cable; if (c.st !== 'none') return;
+  c.side = side; c.ext = 0; c.t = 0; c.tgt = tgt; c.st = 'fly';
+  if (!tgt) { const [rx, rz] = rightOf(r.h), [fx, fz] = fwdOf(r.h); c.hx = r.x + (rx * side * 0.8 + fx * 0.6) * T.CABLE_MAX; c.hz = r.z + (rz * side * 0.8 + fz * 0.6) * T.CABLE_MAX; c.miss = true; } else c.miss = false;
+  if (!r.ai || dist2(r, player) < 1600) sfx.fire();
+}
+const dist2 = (a, b) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
+function releaseCable(r, quiet) { const c = r.cable; if (c.st === 'latched' && !quiet && (!r.ai || dist2(r, player) < 1600)) sfx.release(); c.st = 'none'; c.tgt = null; }
+function knockOff(victim, by) {
+  victim.mounted = false; victim.offT = T.REMOUNT; victim.ko++; releaseCable(victim, true);
+  const dx = by.x - victim.x, dz = by.z - victim.z, d = Math.hypot(dx, dz) || 1, t = victim.tum;
+  Object.assign(t, { x: victim.x, y: T.HOVER + 0.4, z: victim.z, vx: dx / d * 14 + victim.vx * 0.4, vy: 9, vz: dz / d * 14 + victim.vz * 0.4, rx: 0, rz: 0, wx: rand(-9, 9), wz: rand(-12, 12) });
+  if (by === player) { score++; $('score').textContent = 'KO ' + score; flash('KNOCKOFF!'); }
+  if (victim === player) flash(by.name + ' got you!');
+  by.vx -= dx / d * 4; by.vz -= dz / d * 4;
+  sfx.squish(); setTimeout(() => sfx.knock(), 60);
+  stats.knockoffs.push({ victim: victim.name, by: by.name, t: performance.now() });
+}
+let msgT = 0; function flash(s) { $('msg').textContent = s; $('msg').style.opacity = 1; msgT = 1.4; }
+function updateCable(r, dt, holding) {
+  const c = r.cable; c.t += dt;
+  if (c.st === 'fly') {
+    if (!holding && !r.ai) { releaseCable(r, true); return; }
+    const tx = c.tgt ? c.tgt.x : c.hx, tz = c.tgt ? c.tgt.z : c.hz, d = Math.hypot(tx - r.x, tz - r.z);
+    if (c.tgt && c.tgt.kind === 'rider' && !c.tgt.rider.mounted) { releaseCable(r, true); return; }
+    c.ext += T.CABLE_SPEED * dt;
+    if (c.ext >= d) {
+      if (c.miss) { releaseCable(r, true); return; }
+      if (c.tgt.kind === 'rider') { knockOff(c.tgt.rider, r); c.st = 'yank'; c.t = 0; c.yx = c.tgt.x; c.yz = c.tgt.z; return; }
+      c.st = 'latched'; c.len = Math.max(T.MIN_LEN, d); c.t = 0; stats.latches++; if (!r.ai) stats.playerLatches++;
+      if (!r.ai || dist2(r, player) < 1600) sfx.clank();
+    }
+  } else if (c.st === 'yank') { if (c.t > 0.25) releaseCable(r, true); }
+  else if (c.st === 'latched') {
+    if (!holding) { releaseCable(r); return; }
+    c.len = Math.max(T.MIN_LEN, c.len - T.REEL * dt);
+  }
+}
+function applyTether(r) {
+  const c = r.cable; if (c.st !== 'latched') return;
+  const a = c.tgt, dx = r.x - a.x, dz = r.z - a.z, d = Math.hypot(dx, dz);
+  if (d > c.len) { const nx = dx / d, nz = dz / d; r.x = a.x + nx * c.len; r.z = a.z + nz * c.len; const vr = r.vx * nx + r.vz * nz; if (vr > 0) { r.vx -= nx * vr; r.vz -= nz * vr; r.swingTension = vr; } }
+}
+
+// ---------------- physics ----------------
+function stepRider(r, dt) {
+  if (!r.mounted) {
+    const t = r.tum; t.vy -= 25 * dt; t.x += t.vx * dt; t.y += t.vy * dt; t.z += t.vz * dt; t.rx += t.wx * dt; t.rz += t.wz * dt;
+    if (t.y < 0.3) { t.y = 0.3; if (t.vy < -3) { t.vy *= -0.35; if (gate('thud' + r.name, 200) && dist2(r, player) < 2500) sfx.crunch(0.4); } else t.vy = 0; t.vx *= 0.9; t.vz *= 0.9; t.wx *= 0.9; t.wz *= 0.9; }
+    t.x = clamp(t.x, -A + 1, A - 1); t.z = clamp(t.z, -A + 1, A - 1);
+    // empty rocket coasts to a stop
+    r.vx *= Math.exp(-1.5 * dt); r.vz *= Math.exp(-1.5 * dt); r.x += r.vx * dt; r.z += r.vz * dt; collide(r);
+    r.offT -= dt; if (r.offT <= 0) { r.mounted = true; r.x = r.x; if (dist2(r, player) < 2500) sfx.remount(); }
+    return;
+  }
+  const latched = r.cable.st === 'latched';
+  r.h += -r.steer * T.TURN * dt * (latched ? 0.6 : 1);
+  const [fx, fz] = fwdOf(r.h), [rx, rz] = rightOf(r.h);
+  let vf = r.vx * fx + r.vz * fz, vl = r.vx * rx + r.vz * rz;
+  const target = r.boost ? T.BOOST : T.BASE;
+  vf += (target - vf) * (1 - Math.exp(-T.ACCEL * dt * (r.boost ? 1.6 : 1)));
+  if (!latched) vl *= Math.exp(-T.LAT_GRIP * dt); else vl *= Math.exp(-0.4 * dt);
+  r.vx = fx * vf + rx * vl; r.vz = fz * vf + rz * vl;
+  if (latched) { // nose follows the swing (GRIP) like 2D
+    const sp = Math.hypot(r.vx, r.vz); if (sp > 2) { const vh = Math.atan2(r.vx, r.vz); let dh = vh - r.h; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); r.h += dh * (1 - Math.exp(-T.GRIP * dt)); }
+    const sp2 = Math.hypot(r.vx, r.vz), cap = T.BOOST * 1.35; if (sp2 > cap) { r.vx *= cap / sp2; r.vz *= cap / sp2; }
+  }
+  r.x += r.vx * dt; r.z += r.vz * dt;
+  applyTether(r); collide(r);
+}
+function collide(r) {
+  const lim = A - 1.2;
+  if (Math.abs(r.x) > lim) { r.x = Math.sign(r.x) * lim; if (Math.abs(r.vx) > 6 && r === player && gate('wall', 250)) sfx.wall(); r.vx *= -0.4; }
+  if (Math.abs(r.z) > lim) { r.z = Math.sign(r.z) * lim; if (Math.abs(r.vz) > 6 && r === player && gate('wall', 250)) sfx.wall(); r.vz *= -0.4; }
+  for (const a of anchors) { if (a.kind !== 'post') continue; const dx = r.x - a.x, dz = r.z - a.z, d = Math.hypot(dx, dz), m = a.r + 0.9;
+    if (d < m && d > 0) { const nx = dx / d, nz = dz / d; r.x = a.x + nx * m; r.z = a.z + nz * m; const vn = r.vx * nx + r.vz * nz; if (vn < 0) { r.vx -= 1.5 * vn * nx; r.vz -= 1.5 * vn * nz; if (r === player && vn < -6 && gate('post', 250)) sfx.crunch(0.5); } } }
+}
+function riderBumps() {
+  for (let i = 0; i < riders.length; i++) for (let j = i + 1; j < riders.length; j++) {
+    const a = riders[i], b = riders[j]; if (!a.mounted || !b.mounted) continue;
+    const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz); if (d > 2.2 || d === 0) continue;
+    const nx = dx / d, nz = dz / d, push = (2.2 - d) / 2; a.x -= nx * push; a.z -= nz * push; b.x += nx * push; b.z += nz * push;
+    const rv = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz; if (rv < 0) { a.vx += rv * nx; a.vz += rv * nz; b.vx -= rv * nx; b.vz -= rv * nz; }
+    if ((a === player || b === player) && gate('bump', 200)) sfx.crunch(0.55);
+  }
+}
+
+// ---------------- AI ----------------
+function aiThink(r, dt) {
+  const b = r.brain; if (!r.mounted) return;
+  if (Math.hypot(b.wx - r.x, b.wz - r.z) < 8 || Math.random() < dt * 0.1) { b.wx = rand(-60, 60); b.wz = rand(-60, 60); if (Math.random() < 0.35 && player.mounted) { b.wx = player.x; b.wz = player.z; } }
+  // steer toward waypoint, avoid walls
+  let tx = b.wx, tz = b.wz; if (Math.abs(r.x) > A - 12 || Math.abs(r.z) > A - 12) { tx = 0; tz = 0; }
+  let dh = Math.atan2(tx - r.x, tz - r.z) - r.h; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+  r.steer = clamp(-dh * 2, -1, 1);
+  b.boostT -= dt; if (b.boostT <= 0) { r.boost = Math.random() < 0.3; b.boostT = rand(1, 3); }
+  // cables: swing on a nearby post, or hook the player if close
+  const c = r.cable; b.cool -= dt;
+  if (c.st === 'latched') { b.hold -= dt; r.steer *= 0.3; r.aiHold = b.hold > 0; }
+  else if (c.st === 'none' && b.cool <= 0) {
+    r.aiHold = true;
+    for (const side of [-1, 1]) { const t = pickSide(r, side); if (!t) continue;
+      if (t.kind === 'rider' && dist2(r, t) < 20 * 20 && Math.random() < 0.15 && !window.__rj3dNoAIHook) { fireCable(r, t, side); b.cool = rand(4, 8); break; }
+      if (t.kind === 'post' && dist2(r, t) < 16 * 16 && Math.random() < 0.6) { fireCable(r, t, side); b.hold = rand(1.2, 2.8); b.cool = rand(3, 6); break; }
+    }
+    if (c.st === 'none') b.cool = rand(0.3, 1);
+  }
+}
+
+// ---------------- camera ----------------
+const camPos = new THREE.Vector3(0, 6, -30), camLook = new THREE.Vector3();
+let swingBlend = 0, camYaw = 0;
+function updateCamera(dt) {
+  const r = player, latched = r.cable.st === 'latched' || r.cable.st === 'fly';
+  swingBlend += ((latched ? 1 : 0) - swingBlend) * (1 - Math.exp(-3 * dt));
+  const px = r.mounted ? r.x : r.tum.x, pz = r.mounted ? r.z : r.tum.z;
+  let dh = r.h - camYaw; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); camYaw += dh * (1 - Math.exp(-(latched ? 3.5 : 6) * dt));
+  const D = T.CAM_D + (T.CAM_D_SWING - T.CAM_D) * swingBlend, H = T.CAM_H + (T.CAM_H_SWING - T.CAM_H) * swingBlend;
+  const [fx, fz] = fwdOf(camYaw);
+  let lx = px + fx * 6, lz = pz + fz * 6;
+  if (r.cable.tgt && latched) { const k = 0.35 * swingBlend; lx += (r.cable.tgt.x - lx) * k; lz += (r.cable.tgt.z - lz) * k; }
+  const want = new THREE.Vector3(px - fx * D, H, pz - fz * D);
+  if (r.cable.tgt && r.cable.st === 'latched') { const ox = px - r.cable.tgt.x, oz = pz - r.cable.tgt.z, od = Math.hypot(ox, oz) || 1; want.x += ox / od * 5 * swingBlend; want.z += oz / od * 5 * swingBlend; }
+  want.x = clamp(want.x, -A - 6, A + 6); want.z = clamp(want.z, -A - 6, A + 6);
+  camPos.lerp(want, 1 - Math.exp(-8 * dt)); camLook.lerp(new THREE.Vector3(lx, 1.2, lz), 1 - Math.exp(-10 * dt));
+  camera.position.copy(camPos); camera.lookAt(camLook);
+  sun.position.set(px + 30, 70, pz + 20); sun.target.position.set(px, 0, pz);
+}
+
+// ---------------- render sync ----------------
+const up = new THREE.Vector3(0, 1, 0), _a = new THREE.Vector3(), _b = new THREE.Vector3();
+function sync(r, dt, time) {
+  const rk = r.rocket.g; rk.position.set(r.x, T.HOVER + Math.sin(time * 3 + r.x) * 0.08, r.z); rk.rotation.set(0, r.h, 0, 'YXZ');
+  const [rx, rz] = rightOf(r.h), vl = r.vx * rx + r.vz * rz; r.bank += (clamp(-vl * 0.04 + r.steer * 0.25, -0.6, 0.6) - r.bank) * (1 - Math.exp(-6 * dt));
+  rk.rotation.z = r.bank;
+  r.rocket.flame.visible = r.mounted; r.rocket.flame.scale.set(1, r.boost ? 1.6 + Math.random() * 0.4 : 0.7 + Math.random() * 0.2, 1);
+  const j = r.jockey;
+  if (r.mounted) { j.position.set(r.x, T.HOVER + 0.15, r.z); j.rotation.set(0, r.h, r.bank, 'YXZ'); j.visible = true; }
+  else { const t = r.tum; j.position.set(t.x, t.y, t.z); j.rotation.set(t.rx, r.h, t.rz); j.visible = r.offT > 0.5 || Math.floor(time * 10) % 2 === 0; }
+  const c = r.cable, cm = r.cableMesh;
+  if (c.st === 'none') { cm.visible = false; r.tipMesh.visible = false; return; }
+  const sx = r.mounted ? r.x : r.tum.x, sz = r.mounted ? r.z : r.tum.z;
+  _a.set(sx, T.HOVER + 0.9, sz);
+  if (c.st === 'yank') _b.set(c.yx, T.HOVER + 1.4, c.yz);
+  else { const tx = c.tgt ? c.tgt.x : c.hx, tz = c.tgt ? c.tgt.z : c.hz, ty = c.tgt ? c.tgt.hookY : T.HOVER + 0.6; _b.set(tx, ty, tz); if (c.st === 'fly') { const L = _b.distanceTo(_a); _b.lerp(_a, 1 - clamp(c.ext / L, 0, 1)); } }
+  const L = _a.distanceTo(_b); cm.visible = L > 0.1; cm.position.copy(_a).add(_b).multiplyScalar(0.5); cm.scale.set(1, L, 1);
+  cm.quaternion.setFromUnitVectors(up, _b.clone().sub(_a).normalize());
+  r.tipMesh.visible = true; r.tipMesh.position.copy(_b);
+}
+function placeMarker(id, a) {
+  const s = $(id).style; if (!a) { s.display = 'none'; return; }
+  _v.set(a.x, a.hookY, a.z).project(camera); if (_v.z > 1) { s.display = 'none'; return; }
+  s.display = 'block'; s.left = ((_v.x + 1) / 2 * innerWidth) + 'px'; s.top = ((1 - _v.y) / 2 * innerHeight) + 'px';
+}
+
+// ---------------- main loop ----------------
+const stats = { frames: 0, fps: 0, latches: 0, playerLatches: 0, knockoffs: [], maxSwingAngle: 0 };
+let last = performance.now(), fpsAcc = 0, fpsN = 0, simTime = 0, swingStartAng = null, swingAccum = 0, lastAng = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = Math.min(0.05, (now - last) / 1000); last = now;
+  fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { stats.fps = fpsN / fpsAcc; $('fps').textContent = stats.fps.toFixed(0) + ' fps' + (lowQ ? ' LQ' : ''); fpsAcc = 0; fpsN = 0; }
+  stats.frames++;
+  // player input
+  const kSteer = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  player.steer = clamp(kSteer + inp.stickX * 1.15, -1, 1);
+  player.boost = !!(keys.KeyW || keys.ShiftLeft || keys.ShiftRight || keys.ArrowUp || inp.boostT);
+  const holdL = !!(keys.KeyQ || inp.cabL), holdR = !!(keys.KeyE || inp.cabR), holdM = inp.mouse;
+  const sideL = pickSide(player, -1), sideR = pickSide(player, 1), scr = TOUCH ? null : pickScreen(player);
+  if (player.mounted && player.cable.st === 'none') {
+    if (holdL && !player._hl) fireCable(player, sideL, -1); else if (holdR && !player._hr) fireCable(player, sideR, 1); else if (holdM && !player._hm) { fireCable(player, scr, 0); player.cable.mouse = true; }
+  }
+  if (player.cable.st === 'fly' && player.cable.side === 0 && !player.cable.mouse) {}
+  player._hl = holdL; player._hr = holdR; player._hm = holdM;
+  const c = player.cable, playerHold = c.side < 0 ? holdL : c.side > 0 ? holdR : holdM;
+  // sim (fixed substeps)
+  const N = Math.ceil(dt / (1 / 120)), h = dt / N;
+  for (const r of riders) if (r.ai) aiThink(r, dt);
+  for (let s = 0; s < N; s++) {
+    for (const r of riders) { updateCable(r, h, r.ai ? r.aiHold : playerHold); if (r.cable.st === 'fly' && r.cable.side === 0 && !r.ai && !holdM) releaseCable(r, true); stepRider(r, h); }
+    riderBumps();
+  }
+  simTime += dt;
+  // swing angle tracking (for tests)
+  if (c.st === 'latched') { const ang = Math.atan2(player.x - c.tgt.x, player.z - c.tgt.z); if (swingStartAng === null) { swingStartAng = ang; swingAccum = 0; lastAng = ang; } else { let d = ang - lastAng; d = Math.atan2(Math.sin(d), Math.cos(d)); swingAccum += d; lastAng = ang; stats.maxSwingAngle = Math.max(stats.maxSwingAngle, Math.abs(swingAccum)); } }
+  else swingStartAng = null;
+  updateEngine(player.mounted ? Math.hypot(player.vx, player.vz) : 0, player.boost && player.mounted);
+  for (const r of riders) sync(r, dt, simTime);
+  updateCamera(dt);
+  placeMarker('mkL', player.cable.st === 'none' ? sideL : null); placeMarker('mkR', player.cable.st === 'none' ? sideR : null); placeMarker('mkX', player.cable.st === 'none' ? scr : null);
+  if (msgT > 0) { msgT -= dt; if (msgT <= 0) $('msg').style.opacity = 0; }
+  renderer.render(scene, camera);
+}
+applyQuality();
+requestAnimationFrame(frame);
+
+// ---------------- test hooks ----------------
+const gl = renderer.getContext();
+window.__rj3d = {
+  version: '3D test v0.1', ready: true,
+  renderer: () => ({ webgl: !!gl, isWebGL2: renderer.capabilities.isWebGL2, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
+  state: () => ({ player: { x: player.x, z: player.z, h: player.h, vx: player.vx, vz: player.vz, mounted: player.mounted, cable: player.cable.st, cableKind: player.cable.tgt?.kind || null, len: player.cable.len },
+    ai: riders.filter(r => r.ai).map(r => ({ name: r.name, x: r.x, z: r.z, mounted: r.mounted, ko: r.ko, cable: r.cable.st })),
+    score, fps: stats.fps, frames: stats.frames, latches: stats.latches, playerLatches: stats.playerLatches, maxSwingAngle: stats.maxSwingAngle, knockoffs: stats.knockoffs.length, lowQ, audio: AC ? AC.state : 'none', sfx: { ...sfxLog }, anyInput }),
+  setPlayer(x, z, h, v = 0) { Object.assign(player, { x, z, h, vx: Math.sin(h) * v, vz: Math.cos(h) * v }); camYaw = h; },
+  placeAI(i, x, z, h) { const r = riders.filter(r => r.ai)[i]; Object.assign(r, { x, z, h, vx: 0, vz: 0, mounted: true }); r.brain.cool = 99; },
+  freezeAI(on) { window.__rj3dNoAIHook = on; for (const r of riders) if (r.ai) { r.brain.cool = on ? 1e9 : 2; releaseCable(r, true); } },
+};
+</script>
+</body></html>
