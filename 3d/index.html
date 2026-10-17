@@ -4,7 +4,7 @@
 <link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.3.1</title>
+<title>Rocket Jockey 3D test v0.4</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -20,6 +20,9 @@ canvas{display:block;touch-action:none}
 #bBoost{right:24px;bottom:22px;width:96px;height:96px;background:rgba(255,120,30,.45)}
 #bL{right:150px;bottom:70px;width:78px;height:78px;background:rgba(40,200,255,.4)}
 #bR{right:46px;bottom:140px;width:78px;height:78px;background:rgba(255,80,200,.4)}
+#bT{left:22px;bottom:150px;width:66px;height:66px;background:rgba(255,170,40,.45);font-size:15px}
+#bT.off{opacity:.35}
+#trick{top:20%;left:50%;transform:translateX(-50%);font-size:20px;font-weight:bold;color:#ff9a3a;text-align:center;line-height:1.25}
 #stickBase,#stickKnob{position:fixed;z-index:6;border-radius:50%;pointer-events:none;display:none}
 #stickBase{width:120px;height:120px;margin:-60px 0 0 -60px;border:3px solid rgba(255,255,255,.5);background:rgba(255,255,255,.08)}
 #stickKnob{width:54px;height:54px;margin:-27px 0 0 -27px;background:rgba(255,255,255,.55)}
@@ -28,19 +31,20 @@ canvas{display:block;touch-action:none}
 #rot{position:fixed;inset:0;background:#111;color:#fff;z-index:20;display:none;align-items:center;justify-content:center;font-size:22px;text-align:center}
 @media (orientation:portrait) and (pointer:coarse){#rot{display:flex}}
 .desk .btn,.desk #stickHint{display:none}
+#stickHint{bottom:24px}
 body:not(.desk) #cross,body.touched #cross{display:none!important}
 @media (pointer:coarse){#cross{display:none!important}}
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.3.1</div>
+<div id="ver" class="hud">3D test v0.4</div>
 <div id="score" class="hud">KO 0</div>
 <div id="fps" class="hud">-- fps</div>
-<div id="msg" class="hud"></div>
+<div id="msg" class="hud"></div><div id="trick" class="hud"></div>
 <div id="topbtns"><button id="bLQ">LQ: on</button><button id="bFS">⛶</button></div>
 <div id="cross"></div>
 <div id="stickBase"></div><div id="stickKnob"></div><div id="stickHint" class="hud">drag left side to steer</div>
-<div id="bL" class="btn">◀ CABLE</div><div id="bR" class="btn">CABLE ▶</div><div id="bBoost" class="btn">BOOST</div>
+<div id="bL" class="btn">◀ CABLE</div><div id="bR" class="btn">CABLE ▶</div><div id="bBoost" class="btn">BOOST</div><div id="bT" class="btn off">TIE</div>
 <div id="rot">Rotate to landscape ↻</div>
 <script type="module">
 import * as THREE from 'three';
@@ -54,7 +58,7 @@ if (!TOUCH) document.body.classList.add('desk');
 const T = {
   BASE: 20, BOOST: 36, ACCEL: 1.6, TURN: 2.0, LATCH_STEER: 1.0, LAT_GRIP: 9, GRIP: 3.0, HOVER: 1.1,
   CABLE_MAX: 26, CABLE_SPEED: 45, CABLE_LIFE: 2.75, CABLE_FWD: 15 * Math.PI / 180, REEL: 1.5, MIN_LEN: 4, TIP_DRAG: 0.8, TIP_MASS: 0.03, PAY_OUT: 9, REEL_IN: 7, ROPE_MAX: 34, ROPE_K: 18, SLING_T: 0.45, ARENA: 75, POST_R: 0.9, RIDER_R: 1.2,
-  CAM_D: 9, CAM_H: 4.2, CAM_D_SWING: 13.5, CAM_H_SWING: 6.5, REMOUNT: 3,
+  CAM_D: 9, CAM_H: 4.2, CAM_D_SWING: 13.5, CAM_H_SWING: 6.5, REMOUNT: 3, AI_TIE: 0.9, AI_GRAB: 0.6, RETRACT_T: 0.22, HOLD_MAX: 6, TIE_TIME: 4.5, TIE_REACH: 18, TIE_L: 6, BIND_L: 4, CLOTHES_LIFE: 20, PTS_KO: 10, PTS_CLOTHES: 20, PTS_TIE: 5, PTS_BIND: 8, PTS_HOOK: 2,
   LEAN: 13 * Math.PI / 180, LEAN_RET: 5, HEAD_K: 22, CAM_W: 6, LOOK_W: 9, SWING_RAMP: 0.7, CAM_POST_MIN: 4,
 };
 
@@ -116,6 +120,18 @@ const sfx = {
   wall() { noise(0.18, 0.4, 900, { type: 'lowpass', sweepTo: 150, crush: true }); beep(80, 0.18, 'sine', 0.4, 40); },
   boostOn() { noise(0.45, 0.35, 300, { type: 'lowpass', sweepTo: 2500, sweepT: 0.15 }); beep(60, 0.35, 'sawtooth', 0.12, 140, { lp: 700 }); },
   remount() { beep(300, 0.25, 'triangle', 0.08, 900); },
+  // v0.4: ported from 2D v1.0
+  creak() { for (let i = 0; i < 3; i++) beep(110 + i * 23, 0.14, 'sawtooth', 0.13, 70 + i * 30, { delay: i * 0.09, lp: 900, q: 8, attack: 0.03 }); },
+  snap() { noise(0.07, 0.6, 3000, { type: 'highpass' }); beep(1800, 0.05, 'square', 0.08, 300); beep(120, 0.15, 'sine', 0.35, 50); },
+  tie() { this.creak(); setTimeout(() => sfx.snap(), 290); },
+  twang() { beep(220, 0.55, 'sawtooth', 0.14, 55, { lp: 1500, q: 6 }); this.snap(); },
+  reel() { noise(0.2, 0.18, 1800, { type: 'bandpass', sweepTo: 500 }); beep(500, 0.15, 'triangle', 0.05, 1100); },
+  crowd(kind = 'cheer', v = 1) {
+    if (!gate('crowd', 250)) return;
+    const dur = kind === 'cheer' ? 2.4 : 1.1, forms = kind === 'ooh' ? [380, 800] : [600, 1300, 2600];
+    forms.forEach((f, i) => noise(dur, (kind === 'cheer' ? 0.28 : 0.22) * v / (i + 1) * 1.5, f, { type: 'bandpass', q: 3, attack: kind === 'cheer' ? 0.15 : 0.25, sweepTo: kind === 'ooh' ? f * 0.7 : f * 1.15, rate: 0.7 + i * 0.2 }));
+    if (kind === 'cheer') for (let i = 0; i < 4; i++) noise(0.18, 0.12 * v, 2400 + Math.random() * 1500, { type: 'bandpass', q: 6, delay: 0.2 + Math.random() * 1.2 });
+  },
 };
 const lastT = {};
 for (const k of Object.keys(sfx)) { const fn = sfx[k]; sfx[k] = (...a) => { sfxLog[k] = (sfxLog[k] || 0) + 1; if (!AC) return; try { fn.apply(sfx, a); } catch (e) {} }; }
@@ -206,10 +222,10 @@ const RN = 8; // rope render/collision segments
 const riders = [];
 const _h0 = [false, false];
 function addRider(name, col, x, z, h, ai) {
-  const r = { name, col, x, z, vx: 0, vz: 0, h, steer: 0, boost: false, ai, mounted: true, offT: 0, ko: 0,
+  const r = { name, col, x, z, vx: 0, vz: 0, h, steer: 0, boost: false, ai, mounted: true, offT: 0, ko: 0, pts: 0, px: x, pz: z,
     cables: [newCable(), newCable()], aiHold: false, rocket: makeRocket(col), jockey: makeJockey(col),
     tum: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, rz: 0, wx: 0, wz: 0 }, bank: 0, lean: 0, tanPrev: null, tanDir: 1,
-    brain: { wx: rand(-50, 50), wz: rand(-50, 50), cool: rand(2, 4), hold: 0, boostT: 0 } };
+    brain: { wx: rand(-50, 50), wz: rand(-50, 50), cool: rand(2, 4), hold: 0, boostT: 0, grab: [false, false], dragT: 0 } };
   r.cableMeshes = []; r.tipMeshes = [];
   for (const col of [0x55ddff, 0xff66dd]) {
     const cmat = new THREE.MeshBasicMaterial({ color: ai ? 0xffeeaa : col }), cgeo = new THREE.CylinderGeometry(0.09, 0.09, 1, 4), cm = [];
@@ -254,7 +270,11 @@ const btnEnd = e => { const live = new Set([...e.touches].map(t => t.identifier)
   for (const b of btnIds) { for (const t of e.changedTouches) b.ids.delete(t.identifier); for (const i of [...b.ids]) if (!live.has(i)) b.ids.delete(i); if (!b.ids.size) b.set(false); } };
 document.addEventListener('touchend', btnEnd, true); document.addEventListener('touchcancel', btnEnd, true);
 bindBtn('bBoost', 'boostT'); bindBtn('bL', 'cabL'); bindBtn('bR', 'cabR');
-cvs.addEventListener('mousedown', e => { firstInput(); if (e.button === 0) inp.mouseL = true; if (e.button === 2) inp.mouseR = true; });
+let tieQ = false;
+$('bT').addEventListener('touchstart', e => { e.preventDefault(); firstInput(); tieQ = true; $('bT').classList.add('on'); setTimeout(() => $('bT').classList.remove('on'), 120); }, { passive: false });
+$('bT').addEventListener('mousedown', e => { firstInput(); tieQ = true; });
+addEventListener('keydown', e => { if (e.code === 'KeyT' && !e.repeat) tieQ = true; });
+cvs.addEventListener('mousedown', e => { firstInput(); if (e.button === 0) inp.mouseL = true; if (e.button === 2) inp.mouseR = true; if (e.button === 1) { tieQ = true; e.preventDefault(); } });
 addEventListener('mouseup', e => { if (e.button === 0) inp.mouseL = false; if (e.button === 2) inp.mouseR = false; });
 cvs.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('gesturestart', e => e.preventDefault());
@@ -275,7 +295,7 @@ const dist2 = (a, b) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
 const near = r => !r.ai || dist2(r, player) < 1600;
 function cableDir(r, i) { const s = i ? 1 : -1, [fx, fz] = fwdOf(r.h), [rx, rz] = rightOf(r.h), a = T.CABLE_FWD; return [rx * s * Math.cos(a) + fx * Math.sin(a), rz * s * Math.cos(a) + fz * Math.sin(a)]; }
 function mountOf(r, i) { const s = i ? 1 : -1, [rx, rz] = rightOf(r.h); return [r.x + rx * s * 0.5, r.z + rz * s * 0.5]; }
-function newCable() { const pts = []; for (let k = 0; k <= RN; k++) pts.push({ x: 0, y: 0, z: 0, px: 0, py: 0, pz: 0 }); return { st: 'none', tgt: null, len: 0, ext: 0, t: 0, tx: 0, tz: 0, vx: 0, vz: 0, taut: false, pts }; }
+function newCable() { const pts = []; for (let k = 0; k <= RN; k++) pts.push({ x: 0, y: 0, z: 0, px: 0, py: 0, pz: 0 }); return { st: 'none', tgt: null, len: 0, ext: 0, t: 0, tx: 0, tz: 0, vx: 0, vz: 0, taut: false, vic: null, pts }; }
 function fireCable(r, i) {
   const c = r.cables[i]; if (c.st !== 'none' || !r.mounted) return false;
   const [mx, mz] = mountOf(r, i), [dx, dz] = cableDir(r, i);
@@ -286,33 +306,54 @@ function fireCable(r, i) {
 function releaseCable(r, i, quiet) {
   const c = r.cables[i];
   if (c.st === 'latched') { if (!quiet && near(r)) sfx.release(); if (r.mounted && !quiet) { r.slingT = T.SLING_T; stats.releases.push({ name: r.name, speed: Math.hypot(r.vx, r.vz) }); } }
-  c.st = 'none'; c.tgt = null;
+  if (c.st === 'held' && c.vic) { c.vic.offT = Math.max(c.vic.offT, 1.0); }
+  c.st = 'none'; c.tgt = null; c.vic = null;
+}
+// v0.4 tap-to-retract: reel an unlatched, live cable back in RETRACT_T s
+function retractCable(r, i) {
+  const c = r.cables[i]; if (c.st !== 'out') return false;
+  const [mx, mz] = mountOf(r, i); c.st = 'retract'; c.t = 0; c.rspd = Math.max(Math.hypot(c.tx - mx, c.tz - mz), 1) / T.RETRACT_T;
+  stats.retracts++; if (near(r)) sfx.reel(); return true;
 }
 function releaseAll(r, q) { releaseCable(r, 0, q); releaseCable(r, 1, q); }
 function segDist(px, pz, ax, az, bx, bz) { const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1; const t = clamp(((px - ax) * dx + (pz - az) * dz) / L2, 0, 1); return [Math.hypot(px - ax - dx * t, pz - az - dz * t), t]; }
-function cableTip(r, i) { const c = r.cables[i]; if (c.st === 'latched') return [c.tgt.x, c.tgt.z]; return [c.tx, c.tz]; }
+function cableTip(r, i) { const c = r.cables[i]; if (c.st === 'latched') return [c.tgt.x, c.tgt.z]; if (c.st === 'held') return [c.vic.tum.x, c.vic.tum.z]; return [c.tx, c.tz]; }
 // distance from a point to the rope polyline (mount -> sag points -> tip); returns [d, fraction along]
 function ropeDist(r, i, px, pz) {
   const c = r.cables[i], P = c.pts; let best = 1e9, bf = 1;
   for (let k = 0; k < RN; k++) { const [d, t] = segDist(px, pz, P[k].x, P[k].z, P[k + 1].x, P[k + 1].z); if (d < best) { best = d; bf = (k + t) / RN; } }
   return [best, bf];
 }
-function knockOff(victim, by) {
+function knockOff(victim, by, how, fx, fz) {
+  if (!victim.mounted) return false;
   victim.mounted = false; victim.offT = T.REMOUNT; victim.ko++; releaseAll(victim, true);
-  const dx = by.x - victim.x, dz = by.z - victim.z, d = Math.hypot(dx, dz) || 1, t = victim.tum;
+  const ox = by ? by.x : (fx ?? victim.x - victim.vx), oz = by ? by.z : (fz ?? victim.z - victim.vz);
+  const dx = ox - victim.x, dz = oz - victim.z, d = Math.hypot(dx, dz) || 1, t = victim.tum;
   Object.assign(t, { x: victim.x, y: T.HOVER + 0.4, z: victim.z, vx: dx / d * 14 + victim.vx * 0.4, vy: 9, vz: dz / d * 14 + victim.vz * 0.4, rx: 0, rz: 0, wx: rand(-9, 9), wz: rand(-12, 12) });
-  if (by === player) { score++; $('score').textContent = 'KO ' + score; flash('KNOCKOFF!'); }
-  if (victim === player) flash(by.name + ' got you!');
-  by.vx -= dx / d * 4; by.vz -= dz / d * 4;
-  sfx.squish(); setTimeout(() => sfx.knock(), 60);
-  stats.knockoffs.push({ victim: victim.name, by: by.name, t: performance.now() });
+  const clo = how === 'clothes';
+  if (by && by !== victim) {
+    if (by === player) { score++; flash(clo ? 'CLOTHESLINE! ' + victim.name : 'KNOCKOFF!'); }
+    award(by, clo ? T.PTS_CLOTHES : T.PTS_KO, clo ? 'CLOTHESLINE' : 'KNOCKOFF', clo || by === player || victim === player);
+    if (victim === player) flash(clo ? 'CLOTHESLINED BY ' + by.name + '!' : by.name + ' got you!');
+    if (!clo) { by.vx -= dx / d * 4; by.vz -= dz / d * 4; }
+  } else if (victim === player) flash('CLOTHESLINED YOURSELF!');
+  sfx.squish(); setTimeout(() => sfx.knock(), 60); if (clo) { sfx.crowd('cheer', 0.9); stats.clotheslines.push({ victim: victim.name, by: by ? by.name : null }); }
+  stats.knockoffs.push({ victim: victim.name, by: by ? by.name : '-', how: how || 'cable', t: performance.now() });
+  return true;
 }
+function updScore() { $('score').textContent = 'KO ' + score + ' \u00b7 ' + player.pts + ' pts'; }
+const trickList = [];
+function award(r, pts, label, show) {
+  r.pts += pts; stats.awards.push({ name: r.name, pts, label }); if (r === player) updScore();
+  if (show !== false && (r === player || /CLOTHES|TIED|BIND/.test(label))) { trickList.push({ s: (r === player ? '' : r.name + ' ') + label + ' +' + pts, t: 2.2, c: r === player ? '#ffb040' : '#ddd' }); if (trickList.length > 3) trickList.shift(); drawTricks(); }
+}
+function drawTricks() { $('trick').innerHTML = trickList.map(k => `<div style="color:${k.c};opacity:${Math.min(1, k.t * 2).toFixed(2)}">${k.s}</div>`).join(''); }
 let msgT = 0; function flash(s) { $('msg').textContent = s; $('msg').style.opacity = 1; msgT = 1.4; }
 // verlet rope between mount and current end point (tip / post / victim) -- trails & sags
 function stepRope(r, i, dt) {
   const c = r.cables[i], P = c.pts, [mx, mz] = mountOf(r, i), [ex, ez] = cableTip(r, i);
-  const ey = c.st === 'latched' ? c.tgt.hookY : T.HOVER + (c.st === 'yank' ? 1.4 : 0.6), my = T.HOVER + 0.6;
-  const d = Math.hypot(ex - mx, ez - mz), seg = Math.max(d * (c.taut || c.st === 'latched' ? 1.0 : 1.05), 0.3) / RN;
+  const ey = c.st === 'latched' ? c.tgt.hookY : c.st === 'held' ? c.vic.tum.y + 0.6 : T.HOVER + (c.st === 'yank' ? 1.4 : 0.6), my = T.HOVER + 0.6;
+  const d = Math.hypot(ex - mx, ez - mz), seg = Math.max(d * (c.taut || c.st === 'latched' || c.st === 'held' ? 1.0 : 1.05), 0.3) / RN;
   const damp = Math.exp(-2.5 * dt);
   for (let k = 1; k < RN; k++) { const p = P[k], vx = (p.x - p.px) * damp, vy = (p.y - p.py) * damp, vz = (p.z - p.pz) * damp; p.px = p.x; p.py = p.y; p.pz = p.z; p.x += vx; p.y += vy - 9 * dt * dt; p.z += vz; }
   P[0].x = mx; P[0].y = my; P[0].z = mz; P[RN].x = ex; P[RN].y = ey; P[RN].z = ez;
@@ -339,13 +380,32 @@ function updateCable(r, i, dt, holding) {
     }
     const lim = A - 0.5; if (Math.abs(c.tx) > lim) { c.tx = Math.sign(c.tx) * lim; c.vx *= -0.3; } if (Math.abs(c.tz) > lim) { c.tz = Math.sign(c.tz) * lim; c.vz *= -0.3; }
     c.ext = d; stepRope(r, i, dt);
-    for (const o of riders) { if (o === r || !o.mounted) continue;
-      if (Math.min(ropeDist(r, i, o.x, o.z)[0], Math.hypot(o.x - c.tx, o.z - c.tz) - 0.2) < T.RIDER_R + 0.25) { c.st = 'yank'; c.t = 0; c.tx = o.x; c.tz = o.z; knockOff(o, r); return; } }
+    for (const o of riders) { if (o === r) continue;
+      if (!o.mounted && (!holding || o.offT < 0.4 || heldBy(o) || tieOf(o) || !r.mounted)) continue; // v0.4: a held cable can also grab a body already on the ground
+      const ox = o.mounted ? o.x : o.tum.x, oz = o.mounted ? o.z : o.tum.z;
+      if (Math.min(ropeDist(r, i, ox, oz)[0], Math.hypot(ox - c.tx, oz - c.tz) - 0.2) < T.RIDER_R + 0.25) {
+        if (holding && !heldBy(o) && !tieOf(o)) { knockOff(o, r); hookBody(r, i, o); return; } // v0.4: held cable -> knock off AND drag the body
+        c.st = 'yank'; c.t = 0; c.tx = ox; c.tz = oz; knockOff(o, r); return; } }
+    // v0.4: an out cable touching a tied rider cuts them loose
+    for (const t of tethers) for (const v of tieRiders(t)) if (Math.hypot(v.tum.x - c.tx, v.tum.z - c.tz) < 1.4) { freeTether(t, 'cut'); retractCable(r, i); return; }
     if (!holding) return; // posts only latch while that button is held
     let best = null, bt = 2;
     for (const a of anchors) { const [dd, t] = ropeDist(r, i, a.x, a.z); if (dd < a.r + 0.3 && Math.hypot(a.x - r.x, a.z - r.z) > 2.2 && t < bt) { bt = t; best = a; } }
     if (best) latchTo(r, c, best);
   } else if (c.st === 'yank') { stepRope(r, i, dt); if (c.t > 0.25) releaseCable(r, i, true); }
+  else if (c.st === 'retract') { // v0.4 tap-to-retract
+    const [mx, mz] = mountOf(r, i), dx = mx - c.tx, dz = mz - c.tz, d = Math.hypot(dx, dz), st = c.rspd * dt;
+    if (d <= st || c.t > T.RETRACT_T + 0.1 || !r.mounted) { releaseCable(r, i, true); return; }
+    c.tx += dx / d * st; c.tz += dz / d * st; c.vx = r.vx; c.vz = r.vz; c.ext = d - st; stepRope(r, i, dt);
+  } else if (c.st === 'held') { // v0.4: dragging a knocked-off rider's body behind you
+    const v = c.vic;
+    if (!holding || !r.mounted || c.t > T.HOLD_MAX || v.mounted) { releaseCable(r, i); return; }
+    v.offT = Math.max(v.offT, 1.0);
+    const [mx, mz] = mountOf(r, i), tm = v.tum; let dx = tm.x - mx, dz = tm.z - mz, d = Math.hypot(dx, dz);
+    c.len = Math.max(T.TIE_L, c.len - 4 * dt);
+    if (d > c.len) { const nx = dx / d, nz = dz / d; tm.x = mx + nx * c.len; tm.z = mz + nz * c.len; const vr = (tm.vx - r.vx) * nx + (tm.vz - r.vz) * nz; if (vr > 0) { tm.vx -= nx * vr; tm.vz -= nz * vr; } }
+    stepRope(r, i, dt);
+  }
   else if (c.st === 'latched') {
     if (!holding) { releaseCable(r, i); return; }
     // steering away from the post pays rope out (wider arc); steering toward it reels in faster
@@ -363,6 +423,87 @@ function latchTo(r, c, a) {
   r.vx = tx * sp; r.vz = tz * sp;
   Object.assign(c, { st: 'latched', tgt: a, len: Math.max(T.MIN_LEN, d), t: 0, latchSpeed: sp, latchLen: d });
   stats.latches++; if (!r.ai) stats.playerLatches++; if (near(r)) sfx.clank();
+  if (r.cables.some(k => k.st === 'held')) doTie(r); // v0.4: holding a rider + latch a post with the other cable = tie them off
+}
+// ---------------- v0.4 tie-offs ----------------
+// tethers: {a, b, kind, L, t, owner, arm} ; ends are {kind:'post', a} or {kind:'foot', r}
+// kinds: 'tied' (rider body - post, TIE-UP / TIED OFF +5), 'bound' (body - body, BIND +8), 'clothes' (post - post, a clothesline)
+const tethers = [];
+function heldBy(o) { for (const r of riders) for (const c of r.cables) if (c.st === 'held' && c.vic === o) return r; return null; }
+function tieOf(o) { return tethers.find(t => (t.a.kind === 'foot' && t.a.r === o) || (t.b.kind === 'foot' && t.b.r === o)) || null; }
+function tieRiders(t) { return [t.a, t.b].filter(e => e.kind === 'foot').map(e => e.r); }
+function endPos(e) { return e.kind === 'post' ? [e.a.x, e.a.z, e.a.hookY] : [e.r.tum.x, e.r.tum.z, e.r.tum.y + 0.5]; }
+function hookBody(r, i, o) {
+  const c = r.cables[i], [mx, mz] = mountOf(r, i);
+  c.st = 'held'; c.vic = o; c.t = 0; c.len = clamp(Math.hypot(o.tum.x - mx, o.tum.z - mz), T.TIE_L, 14);
+  o.offT = Math.max(o.offT, 1.0); stats.hooks++;
+  award(r, T.PTS_HOOK, 'HOOK', r === player || o === player);
+  if (r === player) flash('HOOKED ' + o.name + '!'); else if (o === player) flash(r.name + ' HOOKED YOU!');
+}
+function cableEnd(c) { return c.st === 'held' ? { kind: 'foot', r: c.vic } : c.st === 'latched' ? { kind: 'post', a: c.tgt } : null; }
+function nearestPost(x, z, reach) { let best = null, bd = reach; for (const a of anchors) { const d = Math.hypot(a.x - x, a.z - z); if (d < bd) { bd = d; best = a; } } return best; }
+function tiePlan(r) { // what would TIE do right now? -> [endA, endB, cableIdxs] or null
+  if (!r.mounted) return null;
+  const e = r.cables.map(cableEnd);
+  if (e[0] && e[1] && !(e[0].kind === 'post' && e[1].kind === 'post' && e[0].a === e[1].a)) return [e[0], e[1], [0, 1]];
+  for (let i = 0; i < 2; i++) if (e[i] && e[i].kind === 'foot') { const v = e[i].r, p = nearestPost(v.tum.x, v.tum.z, T.TIE_REACH); if (p) return [e[i], { kind: 'post', a: p }, [i]]; }
+  return null;
+}
+function canTie(r) { return !!tiePlan(r); }
+function doTie(r) {
+  const plan = tiePlan(r); if (!plan) { if (r === player) flash('NOTHING TO TIE'); return false; }
+  const [a, b, idx] = plan, ks = [a.kind, b.kind].sort().join('-'), kind = { 'foot-post': 'tied', 'foot-foot': 'bound', 'post-post': 'clothes' }[ks];
+  for (const i of idx) { const c = r.cables[i]; c.st = 'none'; c.tgt = null; c.vic = null; }
+  const [ax, az] = endPos(a), [bx, bz] = endPos(b), d = Math.hypot(ax - bx, az - bz);
+  const t = { a, b, kind, owner: r, L: kind === 'clothes' ? d : Math.max(d, 1), minL: kind === 'tied' ? T.TIE_L : kind === 'bound' ? T.BIND_L : d, t: kind === 'clothes' ? T.CLOTHES_LIFE : T.TIE_TIME, arm: 0.35, ownerArm: 1.0, immune: new Map() };
+  tethers.push(t); while (tethers.length > 6) freeTether(tethers[0], 'old');
+  for (const v of tieRiders(t)) { v.offT = Math.max(v.offT, 1); v.tied = t; }
+  stats.ties.push({ by: r.name, kind, ai: !!r.ai, victims: tieRiders(t).map(v => v.name) });
+  if (near(r) || tieRiders(t).includes(player)) sfx.tie();
+  const vs = tieRiders(t).map(v => v.name);
+  if (kind === 'tied') { award(r, T.PTS_TIE, 'TIED OFF', true); if (r === player) flash('TIED UP ' + vs[0] + '!'); else if (vs[0] === 'YOU') flash(r.name + ' TIED YOU UP!'); }
+  else if (kind === 'bound') { award(r, T.PTS_BIND, 'BIND', true); if (r === player) flash('BOUND ' + vs[0] + ' TO ' + vs[1] + '!'); else if (vs.includes('YOU')) flash(r.name + ' BOUND YOU!'); }
+  else if (r === player) flash('CLOTHESLINE SET!');
+  if (r === player || vs.includes('YOU')) sfx.crowd('cheer', 0.7);
+  return true;
+}
+function freeTether(t, why) {
+  const i = tethers.indexOf(t); if (i < 0) return; tethers.splice(i, 1);
+  for (const v of tieRiders(t)) { v.tied = null; v.offT = Math.min(v.offT, 0.8); v.tum.vy = 6; if (v === player) flash(why === 'time' ? 'WRIGGLED FREE!' : 'CUT LOOSE!'); }
+  stats.frees.push({ why, kind: t.kind, age: (t.kind === 'clothes' ? T.CLOTHES_LIFE : T.TIE_TIME) - t.t });
+  const [ax, az] = endPos(t.a); if (dist2({ x: ax, z: az }, player) < 2500) sfx.snap();
+}
+function segCross(ax, az, bx, bz, cx, cz, dx, dz) { const o = (px, pz, qx, qz, rx, rz) => Math.sign((qx - px) * (rz - pz) - (qz - pz) * (rx - px)); return o(ax, az, bx, bz, cx, cz) * o(ax, az, bx, bz, dx, dz) < 0 && o(cx, cz, dx, dz, ax, az) * o(cx, cz, dx, dz, bx, bz) < 0; }
+function lineHits(o, ax, az, bx, bz) { return segDist(o.x, o.z, ax, az, bx, bz)[0] < T.RIDER_R || segCross(o.px, o.pz, o.x, o.z, ax, az, bx, bz); }
+function updateTethers(dt) {
+  for (const t of [...tethers]) {
+    t.t -= dt; t.arm -= dt; t.ownerArm -= dt;
+    if (t.t <= 0) { freeTether(t, 'time'); continue; }
+    if (t.L > t.minL) t.L = Math.max(t.minL, t.L - 6 * dt); // cinch
+    const vs = tieRiders(t);
+    for (const v of vs) { v.offT = Math.max(v.offT, 1); const m = v.tum; m.wx = Math.sin(simTime * 13 + v.x) * 6; m.wz = Math.cos(simTime * 11) * 5; } // struggling
+    // rope constraint (posts don't move; two bodies split the correction)
+    const [ax, az] = endPos(t.a), [bx, bz] = endPos(t.b), dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz);
+    if (vs.length && d > t.L) { const nx = dx / d, nz = dz / d, ex = d - t.L, wa = t.a.kind === 'foot' ? (t.b.kind === 'foot' ? 0.5 : 1) : 0, wb = t.b.kind === 'foot' ? (t.a.kind === 'foot' ? 0.5 : 1) : 0;
+      if (wa) { const m = t.a.r.tum; m.x += nx * ex * wa; m.z += nz * ex * wa; m.vx *= 0.8; m.vz *= 0.8; }
+      if (wb) { const m = t.b.r.tum; m.x -= nx * ex * wb; m.z -= nz * ex * wb; m.vx *= 0.8; m.vz *= 0.8; } }
+    // hit by a passing rider = freed
+    let freed = false;
+    for (const v of vs) for (const o of riders) if (o.mounted && o !== v && Math.hypot(o.x - v.tum.x, o.z - v.tum.z) < 1.8) freed = true;
+    if (freed) { freeTether(t, 'hit'); continue; }
+    if (t.arm > 0) continue;
+    // clothesline: a mounted rider driving through the taut line
+    const [ax2, az2] = endPos(t.a), [bx2, bz2] = endPos(t.b);
+    for (const o of riders) {
+      if (!o.mounted || (o === t.owner && t.ownerArm > 0) || (t.immune.get(o) || 0) > simTime) continue;
+      if (lineHits(o, ax2, az2, bx2, bz2)) { t.immune.set(o, simTime + 1); knockOff(o, o === t.owner ? null : t.owner, 'clothes', (ax2 + bx2) / 2, (az2 + bz2) / 2); if (t.kind === 'clothes') { freeTether(t, 'clothes'); sfx.twang(); } break; }
+    }
+  }
+  // a cable latched to a post is a taut line too: it clotheslines other mounted riders crossing it
+  for (const r of riders) { if (!r.mounted) continue;
+    for (const c of r.cables) { if (c.st !== 'latched' || c.t < 0.2) continue; c.imm = c.imm || new Map();
+      for (const o of riders) { if (o === r || !o.mounted || (c.imm.get(o) || 0) > simTime) continue;
+        if (lineHits(o, c.tgt.x, c.tgt.z, r.x, r.z) && segDist(o.x, o.z, c.tgt.x, c.tgt.z, r.x, r.z)[1] < 0.93) { c.imm.set(o, simTime + 1); knockOff(o, r, 'clothes'); } } } }
 }
 function applyTether(r, dt) {
   for (const c of r.cables) { if (c.st !== 'latched') continue;
@@ -380,13 +521,14 @@ function applyTether(r, dt) {
 
 // ---------------- physics ----------------
 function stepRider(r, dt) {
+  r.px = r.x; r.pz = r.z;
   if (!r.mounted) {
     const t = r.tum; t.vy -= 25 * dt; t.x += t.vx * dt; t.y += t.vy * dt; t.z += t.vz * dt; t.rx += t.wx * dt; t.rz += t.wz * dt;
     if (t.y < 0.3) { t.y = 0.3; if (t.vy < -3) { t.vy *= -0.35; if (gate('thud' + r.name, 200) && dist2(r, player) < 2500) sfx.crunch(0.4); } else t.vy = 0; t.vx *= 0.9; t.vz *= 0.9; t.wx *= 0.9; t.wz *= 0.9; }
     t.x = clamp(t.x, -A + 1, A - 1); t.z = clamp(t.z, -A + 1, A - 1);
     // empty rocket coasts to a stop
     r.vx *= Math.exp(-1.5 * dt); r.vz *= Math.exp(-1.5 * dt); r.x += r.vx * dt; r.z += r.vz * dt; collide(r);
-    r.offT -= dt; if (r.offT <= 0) { r.mounted = true; r.x = r.x; if (dist2(r, player) < 2500) sfx.remount(); }
+    if (!heldBy(r) && !r.tied) r.offT -= dt; if (r.offT <= 0) { r.mounted = true; r.x = r.x; if (dist2(r, player) < 2500) sfx.remount(); }
     return;
   }
   const lcab = r.cables[0].st === 'latched' ? r.cables[0] : r.cables[1].st === 'latched' ? r.cables[1] : null, latched = !!lcab;
@@ -453,19 +595,25 @@ function aiThink(r, dt) {
   b.boostT -= dt; if (b.boostT <= 0) { r.boost = Math.random() < 0.3; b.boostT = rand(1, 3); }
   // cables: same free-fire mechanic -- fire out a side when a post/rider sits near that side's line
   b.cool -= dt; b.hold -= dt; r.aiHold = b.hold > 0;
+  // v0.4: dragging someone -> tie them off (to a post in reach, or bind two) at a modest rate
+  const hc = r.cables.findIndex(c => c.st === 'held');
+  if (hc >= 0) { b.dragT -= dt; const plan = tiePlan(r);
+    if (plan && Math.random() < dt * T.AI_TIE * (window.__rj3dAITie || 1)) doTie(r);
+    else if (b.dragT <= 0) { b.grab[hc] = false; } } else b.dragT = 0;
   if (r.cables.some(c => c.st === 'latched')) r.steer *= 0.3;
   if (b.cool > 0) return;
   for (let i = 0; i < 2; i++) { if (r.cables[i].st !== 'none') continue;
     const [cdx, cdz] = cableDir(r, i), lx = cdx * T.CABLE_SPEED + r.vx, lz = cdz * T.CABLE_SPEED + r.vz, ll = Math.hypot(lx, lz) || 1, ux = lx / ll, uz = lz / ll; // predicted tip flight direction
     for (const o of [...anchors, ...riders]) { if (o === r || (o.mounted === false)) continue;
-      const isR = !!o.cables; if (isR && window.__rj3dNoAIHook) continue;
+      const isR = !!o.cables; if (isR && (window.__rj3dNoAIHook || o.tied)) continue;
       const dx = o.x - r.x, dz = o.z - r.z, along = dx * ux + dz * uz, perp = Math.abs(dx * uz - dz * ux);
       if (along < 3 || along > (isR ? 22 : 18) || perp > along * 0.3 + 2) continue;
       if (Math.random() > (isR ? 0.15 : 0.6)) continue;
-      fireCable(r, i); if (!isR) b.hold = rand(1.6, 3.2); b.cool = rand(3, 6); return; }
+      fireCable(r, i); if (!isR) b.hold = rand(1.6, 3.2); else if (Math.random() < T.AI_GRAB) { b.grab[i] = true; b.dragT = rand(2.5, 4.5); } b.cool = rand(3, 6); return; }
   }
   b.cool = rand(0.3, 1);
 }
+function aiCableDone(r) { for (let i = 0; i < 2; i++) if (r.cables[i].st === 'none') r.brain.grab[i] = false; }
 
 // ---------------- camera (v0.3.1) ----------------
 // Position and look-at each follow a critically damped spring toward a target that is itself continuous:
@@ -534,7 +682,10 @@ function sync(r, dt, time) {
   r.rocket.flame.visible = r.mounted; r.rocket.flame.scale.set(1, r.boost ? 1.6 + Math.random() * 0.4 : 0.7 + Math.random() * 0.2, 1);
   const j = r.jockey;
   if (r.mounted) { j.position.set(r.x, T.HOVER + 0.15, r.z); j.rotation.set(0, r.h, r.bank, 'YXZ'); j.visible = true; }
-  else { const t = r.tum; j.position.set(t.x, t.y, t.z); j.rotation.set(t.rx, r.h, t.rz); j.visible = r.offT > 0.5 || Math.floor(time * 10) % 2 === 0; }
+  else { const t = r.tum; j.position.set(t.x, t.y, t.z);
+    if (r.tied) j.rotation.set(Math.sin(time * 14 + r.x) * 0.35, r.h + Math.sin(time * 9) * 0.5, Math.cos(time * 12) * 0.3); // struggling
+    else j.rotation.set(t.rx, r.h, t.rz);
+    j.visible = r.offT > 0.5 || Math.floor(time * 10) % 2 === 0; }
   const sx = r.mounted ? r.x : r.tum.x, sz = r.mounted ? r.z : r.tum.z;
   for (let i = 0; i < 2; i++) {
     const c = r.cables[i], cm = r.cableMeshes[i], tip = r.tipMeshes[i];
@@ -546,9 +697,28 @@ function sync(r, dt, time) {
     tip.visible = true; tip.position.copy(_b);
   }
 }
+// tie-off ropes: pooled 8-segment ropes with a little sag
+const tieMat = new THREE.MeshBasicMaterial({ color: 0xffa040 }), tieGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 4), tiePool = [];
+for (let n = 0; n < 6; n++) { const ms = []; for (let k = 0; k < RN; k++) { const m = new THREE.Mesh(tieGeo, tieMat); m.visible = false; m.userData.kind = 'cable'; scene.add(m); ms.push(m); } tiePool.push(ms); }
+function syncTethers() {
+  for (let n = 0; n < tiePool.length; n++) { const ms = tiePool[n], t = tethers[n];
+    if (!t) { for (const m of ms) m.visible = false; continue; }
+    const [ax, az, ay] = endPos(t.a), [bx, bz, by] = endPos(t.b), d = Math.hypot(ax - bx, az - bz), sag = Math.max(0, t.L - d) * 0.4 + 0.15;
+    const pt = k => { const f = k / RN; return [ax + (bx - ax) * f, ay + (by - ay) * f - sag * 4 * f * (1 - f), az + (bz - az) * f]; };
+    for (let k = 0; k < RN; k++) { const m = ms[k], p = pt(k), q = pt(k + 1); _a.set(...p); _b.set(...q); const L = _a.distanceTo(_b); m.visible = L > 0.02; if (!m.visible) continue;
+      m.position.copy(_a).add(_b).multiplyScalar(0.5); m.scale.set(1, L, 1); m.quaternion.setFromUnitVectors(up, _b.sub(_a).normalize()); } }
+}
 // ---------------- main loop ----------------
-const stats = { releases: [], fired: 0, frames: 0, fps: 0, latches: 0, playerLatches: 0, knockoffs: [], maxSwingAngle: 0 };
+const stats = { releases: [], fired: 0, frames: 0, fps: 0, latches: 0, playerLatches: 0, knockoffs: [], maxSwingAngle: 0, retracts: 0, hooks: 0, ties: [], frees: [], awards: [], clotheslines: [] };
 let last = performance.now(), fpsAcc = 0, fpsN = 0, simTime = 0, swingStartAng = null, swingAccum = 0, lastAng = 0;
+function stepWorld(dt, hold) {
+  const N = Math.ceil(dt / (1 / 120)), h = dt / N;
+  for (const r of riders) if (r.ai) { aiCableDone(r); aiThink(r, dt); }
+  for (let s = 0; s < N; s++) {
+    for (const r of riders) { for (let i = 0; i < 2; i++) updateCable(r, i, h, r.ai ? (r.aiHold || r.brain.grab[i]) : hold[i]); stepRider(r, h); }
+    riderBumps(); updateTethers(h); simTime += h;
+  }
+}
 function frame(now) {
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now - last) / 1000); last = now;
@@ -559,22 +729,20 @@ function frame(now) {
   player.steer = clamp(kSteer + inp.stickX * 1.15, -1, 1);
   player.boost = !!(keys.KeyW || keys.ShiftLeft || keys.ShiftRight || keys.ArrowUp || inp.boostT);
   const hold = [!!(keys.KeyQ || inp.cabL || inp.mouseL), !!(keys.KeyE || inp.cabR || inp.mouseR)];
-  for (let i = 0; i < 2; i++) if (hold[i] && !player._h[i]) fireCable(player, i);
+  // v0.4: press = fire; press again while that cable is out and unlatched = quick retract. Held/latched cables let go on release.
+  for (let i = 0; i < 2; i++) if (hold[i] && !player._h[i]) { if (player.cables[i].st === 'out') retractCable(player, i); else fireCable(player, i); }
   player._h = hold;
-  // sim (fixed substeps)
-  const N = Math.ceil(dt / (1 / 120)), h = dt / N;
-  for (const r of riders) if (r.ai) aiThink(r, dt);
-  for (let s = 0; s < N; s++) {
-    for (const r of riders) { for (let i = 0; i < 2; i++) updateCable(r, i, h, r.ai ? r.aiHold : hold[i]); stepRider(r, h); }
-    riderBumps();
-  }
+  if (tieQ) { tieQ = false; doTie(player); }
+  stepWorld(dt, hold);
   const c = player.cables.find(c => c.st === 'latched') || { st: 'none' };
-  simTime += dt;
   // swing angle tracking (for tests)
   if (c.st === 'latched') { const ang = Math.atan2(player.x - c.tgt.x, player.z - c.tgt.z); if (swingStartAng === null) { swingStartAng = ang; swingAccum = 0; lastAng = ang; } else { let d = ang - lastAng; d = Math.atan2(Math.sin(d), Math.cos(d)); swingAccum += d; lastAng = ang; stats.maxSwingAngle = Math.max(stats.maxSwingAngle, Math.abs(swingAccum)); } }
   else swingStartAng = null;
   updateEngine(player.mounted ? Math.hypot(player.vx, player.vz) : 0, player.boost && player.mounted);
   for (const r of riders) sync(r, dt, simTime);
+  syncTethers();
+  if (trickList.length) { for (const k of trickList) k.t -= dt; while (trickList.length && trickList[0].t <= 0) trickList.shift(); drawTricks(); }
+  $('bT').classList.toggle('off', !canTie(player));
   updateCamera(dt);
   if (camRec) recordFrame(dt);
   if (msgT > 0) { msgT -= dt; if (msgT <= 0) $('msg').style.opacity = 0; }
@@ -612,7 +780,7 @@ requestAnimationFrame(frame);
 // ---------------- test hooks ----------------
 const gl = renderer.getContext();
 window.__rj3d = {
-  version: '3D test v0.3.1', ready: true,
+  version: '3D test v0.4', ready: true,
   renderer: () => ({ webgl: !!gl, isWebGL2: renderer.capabilities.isWebGL2, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   tuning: () => ({ tipDrag: T.TIP_DRAG, tipMass: T.TIP_MASS, payOut: T.PAY_OUT, reelIn: T.REEL_IN, turn: T.TURN, latchSteer: T.LATCH_STEER, cableMax: T.CABLE_MAX, cableSpeed: T.CABLE_SPEED, cableLife: T.CABLE_LIFE, cableFwdDeg: T.CABLE_FWD * 180 / Math.PI }),
   cable: i => { const c = player.cables[i], [tx, tz] = cableTip(player, i); const [mx, mz] = mountOf(player, i); return { mx, mz, vx: c.vx, vz: c.vz, taut: c.taut, len: c.len, latchSpeed: c.latchSpeed, latchLen: c.latchLen, ax: c.tgt?.x, az: c.tgt?.z, pvx: player.vx, pvz: player.vz, sag: c.pts.map(p => [p.x, p.y, p.z]), st: c.st, ext: c.ext, t: c.t, kind: c.tgt?.kind || null, tx, tz, px: player.x, pz: player.z, h: player.h }; },
@@ -623,9 +791,23 @@ window.__rj3d = {
   state: () => ({ player: { x: player.x, z: player.z, h: player.h, vx: player.vx, vz: player.vz, mounted: player.mounted, cables: player.cables.map(c => c.st), cable: (player.cables.find(c => c.st === 'latched') || player.cables.find(c => c.st !== 'none') || { st: 'none' }).st, cableKind: (player.cables.find(c => c.tgt) || {}).tgt?.kind || null },
     ai: riders.filter(r => r.ai).map(r => ({ name: r.name, x: r.x, z: r.z, mounted: r.mounted, ko: r.ko, cables: r.cables.map(c => c.st) })),
     score, fps: stats.fps, frames: stats.frames, fired: stats.fired, latches: stats.latches, playerLatches: stats.playerLatches, maxSwingAngle: stats.maxSwingAngle, knockoffs: stats.knockoffs.length, koList: stats.knockoffs.map(k => k.by + '>' + k.victim), releases: stats.releases, lowQ, audio: AC ? AC.state : 'none', sfx: { ...sfxLog }, anyInput }),
-  setPlayer(x, z, h, v = 0) { releaseAll(player, true); Object.assign(player, { x, z, h, vx: Math.sin(h) * v, vz: Math.cos(h) * v, mounted: true, lean: 0 }); camSnap = true; swingRamp = swingBlend = 0; camAnchor = null; stats.maxSwingAngle = 0; },
+  setPlayer(x, z, h, v = 0) { releaseAll(player, true); if (player.tied) freeTether(player.tied, 'reset'); player.offT = 0; Object.assign(player, { x, z, h, vx: Math.sin(h) * v, vz: Math.cos(h) * v, mounted: true, lean: 0 }); camSnap = true; swingRamp = swingBlend = 0; camAnchor = null; stats.maxSwingAngle = 0; },
   placeAI(i, x, z, h) { const r = riders.filter(r => r.ai)[i]; releaseAll(r, true); Object.assign(r, { x, z, h, vx: 0, vz: 0, mounted: true }); r.brain.cool = 99; r.brain.lock = false; },
   driveAI(i, x, z, h, v) { const r = riders.filter(r => r.ai)[i]; releaseAll(r, true); Object.assign(r, { x, z, h, vx: Math.sin(h) * v, vz: Math.cos(h) * v, mounted: true }); r.brain.cool = 1e9; r.brain.lock = true; },
+  tie: () => { tieQ = true; },
+  ties: () => ({ tethers: tethers.map(t => ({ kind: t.kind, t: t.t, L: t.L, owner: t.owner.name, victims: tieRiders(t).map(v => v.name), a: endPos(t.a), b: endPos(t.b) })), log: stats.ties, frees: stats.frees, hooks: stats.hooks, retracts: stats.retracts, awards: stats.awards, clotheslines: stats.clotheslines, pts: riders.map(r => [r.name, r.pts]),
+    bodies: riders.map(r => ({ name: r.name, mounted: r.mounted, tied: !!r.tied, held: heldBy(r)?.name || null, x: r.tum.x, z: r.tum.z, offT: r.offT })), canTie: canTie(player), tieBtn: $('bT').getBoundingClientRect().toJSON() }),
+  clearTies() { while (tethers.length) freeTether(tethers[0], 'reset'); for (const r of riders) releaseAll(r, true); },
+  knock(i) { const r = riders.filter(r => r.ai)[i]; knockOff(r, r, 'test'); r.offT = 2; r.tum.x = r.x; r.tum.z = r.z; },
+  bodyAt(i, x, z) { const r = riders.filter(r => r.ai)[i]; if (r.mounted) knockOff(r, r, 'test'); Object.assign(r.tum, { x, z, y: 0.3, vx: 0, vz: 0, vy: 0 }); r.offT = 3; r.vx = r.vz = 0; },
+  aiCfg(o) { Object.assign(T, o); },
+  sim(sec, aiTie) { // headless fast sim: everybody free, fixed 1/60 steps, no rendering
+    window.__rj3dNoAIHook = false; window.__rj3dAITie = aiTie || 1; for (const r of riders) if (r.ai) { r.brain.lock = false; r.brain.cool = rand(0.2, 1); }
+    const t0 = stats.ties.length, k0 = stats.knockoffs.length, h0 = stats.hooks;
+    for (let n = 0; n < sec * 60; n++) { player.steer = Math.sin(n / 90) * 0.6; stepWorld(1 / 60, [false, false]); }
+    window.__rj3dAITie = 1;
+    return { ties: stats.ties.slice(t0), kos: stats.knockoffs.length - k0, hooks: stats.hooks - h0, clotheslines: stats.clotheslines.length, frees: stats.frees.length };
+  },
   freezeAI(on) { window.__rj3dNoAIHook = on; for (const r of riders) if (r.ai) { r.brain.cool = on ? 1e9 : 2; r.brain.lock = false; releaseAll(r, true); } },
 };
 </script>
