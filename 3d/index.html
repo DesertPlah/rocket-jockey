@@ -4,7 +4,7 @@
 <link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.2</title>
+<title>Rocket Jockey 3D test v0.3</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -33,7 +33,7 @@ body:not(.desk) #cross,body.touched #cross{display:none!important}
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.2</div>
+<div id="ver" class="hud">3D test v0.3</div>
 <div id="score" class="hud">KO 0</div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div>
@@ -53,7 +53,7 @@ if (!TOUCH) document.body.classList.add('desk');
 // ---------------- tuning ----------------
 const T = {
   BASE: 20, BOOST: 36, ACCEL: 1.6, TURN: 2.0, LATCH_STEER: 1.0, LAT_GRIP: 9, GRIP: 3.0, HOVER: 1.1,
-  CABLE_MAX: 26, CABLE_SPEED: 45, CABLE_LIFE: 2.75, CABLE_FWD: 15 * Math.PI / 180, REEL: 1.5, MIN_LEN: 4, ARENA: 75, POST_R: 0.9, RIDER_R: 1.2,
+  CABLE_MAX: 26, CABLE_SPEED: 45, CABLE_LIFE: 2.75, CABLE_FWD: 15 * Math.PI / 180, REEL: 1.5, MIN_LEN: 4, TIP_DRAG: 0.8, TIP_MASS: 0.03, PAY_OUT: 9, REEL_IN: 7, ROPE_MAX: 34, ROPE_K: 18, SLING_T: 0.45, ARENA: 75, POST_R: 0.9, RIDER_R: 1.2,
   CAM_D: 9, CAM_H: 4.2, CAM_D_SWING: 13.5, CAM_H_SWING: 6.5, REMOUNT: 3,
 };
 
@@ -197,6 +197,7 @@ function makeJockey(col) {
   box(0.9, 0.2, 0.2, col, 0, 1.2, 0.4, g);
   scene.add(g); return g;
 }
+const RN = 8; // rope render/collision segments
 const riders = [];
 const _h0 = [false, false];
 function addRider(name, col, x, z, h, ai) {
@@ -206,7 +207,8 @@ function addRider(name, col, x, z, h, ai) {
     brain: { wx: rand(-50, 50), wz: rand(-50, 50), cool: rand(2, 4), hold: 0, boostT: 0 } };
   r.cableMeshes = []; r.tipMeshes = [];
   for (const col of [0x55ddff, 0xff66dd]) {
-    const cm = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1, 4), new THREE.MeshBasicMaterial({ color: ai ? 0xffeeaa : col })); cm.visible = false; scene.add(cm); r.cableMeshes.push(cm);
+    const cmat = new THREE.MeshBasicMaterial({ color: ai ? 0xffeeaa : col }), cgeo = new THREE.CylinderGeometry(0.09, 0.09, 1, 4), cm = [];
+    for (let k = 0; k < 8; k++) { const m = new THREE.Mesh(cgeo, cmat); m.visible = false; scene.add(m); cm.push(m); } r.cableMeshes.push(cm);
     const tip = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshBasicMaterial({ color: ai ? 0xffcc44 : col })); tip.visible = false; scene.add(tip); r.tipMeshes.push(tip);
   }
   riders.push(r); return r;
@@ -255,23 +257,41 @@ document.addEventListener('dblclick', e => e.preventDefault());
 $('bLQ').addEventListener('click', () => { lowQ = !lowQ; localStorage.setItem('rj3d_lq', lowQ ? '1' : '0'); applyQuality(); });
 $('bFS').addEventListener('click', () => { firstInput(); const d = document.documentElement; if (!document.fullscreenElement) { (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d)?.then?.(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {}); } else document.exitFullscreen?.(); });
 
-// ---------------- cables (v0.2: free-fire sideways, no auto-aim) ----------------
-// Each rider has two independent cables: [0]=left, [1]=right. Pressing fires the cable straight out
-// from that side, angled CABLE_FWD forward, rocket-relative (it sweeps with the rocket as it turns).
-// It extends at CABLE_SPEED up to CABLE_MAX and stays live for CABLE_LIFE s even if the button is released.
-// While live, any mounted rider touching the line/tip is knocked off; a post/pylon touching it latches
-// only if that button is held at that moment. A latch holds only while the button stays held.
+// ---------------- cables (v0.3: weighted free-flying tips) ----------------
+// Each rider has two independent cables: [0]=left, [1]=right. Firing launches a light tip as a physics point
+// out that side (CABLE_FWD forward) at CABLE_SPEED + the rocket's velocity. After launch the tip flies on its
+// own momentum with light drag (TIP_DRAG) and is NOT tied to the rocket's rotation. The line runs from the
+// side mount to the tip; past CABLE_MAX it goes taut (rope constraint on the tip; the tip is light, TIP_MASS,
+// so it barely tugs the rocket). The line is rendered as a sagging verlet rope that trails when you turn.
+// Live for CABLE_LIFE s. Rider touching line/tip = KO; post touching it while the button is held = latch.
 const fwdOf = h => [Math.sin(h), Math.cos(h)];
 const rightOf = h => [-Math.cos(h), Math.sin(h)];
 const dist2 = (a, b) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
 const near = r => !r.ai || dist2(r, player) < 1600;
 function cableDir(r, i) { const s = i ? 1 : -1, [fx, fz] = fwdOf(r.h), [rx, rz] = rightOf(r.h), a = T.CABLE_FWD; return [rx * s * Math.cos(a) + fx * Math.sin(a), rz * s * Math.cos(a) + fz * Math.sin(a)]; }
-function newCable() { return { st: 'none', tgt: null, len: 0, ext: 0, t: 0, tx: 0, tz: 0 }; }
-function fireCable(r, i) { const c = r.cables[i]; if (c.st !== 'none' || !r.mounted) return false; Object.assign(c, { st: 'out', ext: 0, t: 0, tgt: null }); stats.fired++; if (near(r)) sfx.fire(); return true; }
-function releaseCable(r, i, quiet) { const c = r.cables[i]; if (c.st === 'latched' && !quiet && near(r)) sfx.release(); c.st = 'none'; c.tgt = null; }
+function mountOf(r, i) { const s = i ? 1 : -1, [rx, rz] = rightOf(r.h); return [r.x + rx * s * 0.5, r.z + rz * s * 0.5]; }
+function newCable() { const pts = []; for (let k = 0; k <= RN; k++) pts.push({ x: 0, y: 0, z: 0, px: 0, py: 0, pz: 0 }); return { st: 'none', tgt: null, len: 0, ext: 0, t: 0, tx: 0, tz: 0, vx: 0, vz: 0, taut: false, pts }; }
+function fireCable(r, i) {
+  const c = r.cables[i]; if (c.st !== 'none' || !r.mounted) return false;
+  const [mx, mz] = mountOf(r, i), [dx, dz] = cableDir(r, i);
+  Object.assign(c, { st: 'out', ext: 0, t: 0, tgt: null, tx: mx, tz: mz, vx: dx * T.CABLE_SPEED + r.vx, vz: dz * T.CABLE_SPEED + r.vz, taut: false });
+  for (const p of c.pts) { p.x = p.px = mx; p.y = p.py = T.HOVER + 0.6; p.z = p.pz = mz; }
+  stats.fired++; if (near(r)) sfx.fire(); return true;
+}
+function releaseCable(r, i, quiet) {
+  const c = r.cables[i];
+  if (c.st === 'latched') { if (!quiet && near(r)) sfx.release(); if (r.mounted && !quiet) { r.slingT = T.SLING_T; stats.releases.push({ name: r.name, speed: Math.hypot(r.vx, r.vz) }); } }
+  c.st = 'none'; c.tgt = null;
+}
 function releaseAll(r, q) { releaseCable(r, 0, q); releaseCable(r, 1, q); }
 function segDist(px, pz, ax, az, bx, bz) { const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1; const t = clamp(((px - ax) * dx + (pz - az) * dz) / L2, 0, 1); return [Math.hypot(px - ax - dx * t, pz - az - dz * t), t]; }
-function cableTip(r, i) { const c = r.cables[i]; if (c.st === 'latched') return [c.tgt.x, c.tgt.z]; if (c.st === 'yank') return [c.tx, c.tz]; const [dx, dz] = cableDir(r, i); return [r.x + dx * c.ext, r.z + dz * c.ext]; }
+function cableTip(r, i) { const c = r.cables[i]; if (c.st === 'latched') return [c.tgt.x, c.tgt.z]; return [c.tx, c.tz]; }
+// distance from a point to the rope polyline (mount -> sag points -> tip); returns [d, fraction along]
+function ropeDist(r, i, px, pz) {
+  const c = r.cables[i], P = c.pts; let best = 1e9, bf = 1;
+  for (let k = 0; k < RN; k++) { const [d, t] = segDist(px, pz, P[k].x, P[k].z, P[k + 1].x, P[k + 1].z); if (d < best) { best = d; bf = (k + t) / RN; } }
+  return [best, bf];
+}
 function knockOff(victim, by) {
   victim.mounted = false; victim.offT = T.REMOUNT; victim.ko++; releaseAll(victim, true);
   const dx = by.x - victim.x, dz = by.z - victim.z, d = Math.hypot(dx, dz) || 1, t = victim.tum;
@@ -283,25 +303,74 @@ function knockOff(victim, by) {
   stats.knockoffs.push({ victim: victim.name, by: by.name, t: performance.now() });
 }
 let msgT = 0; function flash(s) { $('msg').textContent = s; $('msg').style.opacity = 1; msgT = 1.4; }
+// verlet rope between mount and current end point (tip / post / victim) -- trails & sags
+function stepRope(r, i, dt) {
+  const c = r.cables[i], P = c.pts, [mx, mz] = mountOf(r, i), [ex, ez] = cableTip(r, i);
+  const ey = c.st === 'latched' ? c.tgt.hookY : T.HOVER + (c.st === 'yank' ? 1.4 : 0.6), my = T.HOVER + 0.6;
+  const d = Math.hypot(ex - mx, ez - mz), seg = Math.max(d * (c.taut || c.st === 'latched' ? 1.0 : 1.05), 0.3) / RN;
+  const damp = Math.exp(-2.5 * dt);
+  for (let k = 1; k < RN; k++) { const p = P[k], vx = (p.x - p.px) * damp, vy = (p.y - p.py) * damp, vz = (p.z - p.pz) * damp; p.px = p.x; p.py = p.y; p.pz = p.z; p.x += vx; p.y += vy - 9 * dt * dt; p.z += vz; }
+  P[0].x = mx; P[0].y = my; P[0].z = mz; P[RN].x = ex; P[RN].y = ey; P[RN].z = ez;
+  for (let it = 0; it < 6; it++) for (let k = 0; k < RN; k++) {
+    const a = P[k], b = P[k + 1], dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, L = Math.hypot(dx, dy, dz) || 1e-6, diff = (L - seg) / L;
+    const wa = k === 0 ? 0 : (k + 1 === RN ? 1 : 0.5), wb = k + 1 === RN ? 0 : (k === 0 ? 1 : 0.5);
+    a.x += dx * diff * wa; a.y += dy * diff * wa; a.z += dz * diff * wa; b.x -= dx * diff * wb; b.y -= dy * diff * wb; b.z -= dz * diff * wb;
+  }
+  for (let k = 1; k < RN; k++) if (P[k].y < 0.15) P[k].y = 0.15;
+}
 function updateCable(r, i, dt, holding) {
   const c = r.cables[i]; c.t += dt;
   if (c.st === 'out') {
     if (!r.mounted || c.t > T.CABLE_LIFE) { releaseCable(r, i, true); return; }
-    c.ext = Math.min(T.CABLE_MAX, c.ext + T.CABLE_SPEED * dt);
-    const [tx, tz] = cableTip(r, i);
+    // free-flying weighted tip
+    const dr = Math.exp(-T.TIP_DRAG * dt); c.vx *= dr; c.vz *= dr; c.tx += c.vx * dt; c.tz += c.vz * dt;
+    const [mx, mz] = mountOf(r, i); let dx = c.tx - mx, dz = c.tz - mz, d = Math.hypot(dx, dz);
+    c.taut = d >= T.CABLE_MAX - 0.01;
+    if (d > T.CABLE_MAX) { // rope goes taut: drag the tip, tiny tug on the rocket
+      const nx = dx / d, nz = dz / d; c.tx = mx + nx * T.CABLE_MAX; c.tz = mz + nz * T.CABLE_MAX;
+      const rel = (c.vx - r.vx) * nx + (c.vz - r.vz) * nz;
+      if (rel > 0) { c.vx -= nx * rel; c.vz -= nz * rel; r.vx += nx * rel * T.TIP_MASS; r.vz += nz * rel * T.TIP_MASS; }
+      d = T.CABLE_MAX;
+    }
+    const lim = A - 0.5; if (Math.abs(c.tx) > lim) { c.tx = Math.sign(c.tx) * lim; c.vx *= -0.3; } if (Math.abs(c.tz) > lim) { c.tz = Math.sign(c.tz) * lim; c.vz *= -0.3; }
+    c.ext = d; stepRope(r, i, dt);
     for (const o of riders) { if (o === r || !o.mounted) continue;
-      if (segDist(o.x, o.z, r.x, r.z, tx, tz)[0] < T.RIDER_R + 0.25) { c.st = 'yank'; c.t = 0; c.tx = o.x; c.tz = o.z; knockOff(o, r); return; } }
+      if (Math.min(ropeDist(r, i, o.x, o.z)[0], Math.hypot(o.x - c.tx, o.z - c.tz) - 0.2) < T.RIDER_R + 0.25) { c.st = 'yank'; c.t = 0; c.tx = o.x; c.tz = o.z; knockOff(o, r); return; } }
     if (!holding) return; // posts only latch while that button is held
     let best = null, bt = 2;
-    for (const a of anchors) { const [d, t] = segDist(a.x, a.z, r.x, r.z, tx, tz); if (d < a.r + 0.3 && Math.hypot(a.x - r.x, a.z - r.z) > 2.2 && t < bt) { bt = t; best = a; } }
-    if (best) { c.st = 'latched'; c.tgt = best; c.len = Math.max(T.MIN_LEN, Math.hypot(best.x - r.x, best.z - r.z)); c.t = 0; stats.latches++; if (!r.ai) stats.playerLatches++; if (near(r)) sfx.clank(); }
-  } else if (c.st === 'yank') { if (c.t > 0.25) releaseCable(r, i, true); }
-  else if (c.st === 'latched') { if (!holding) { releaseCable(r, i); return; } c.len = Math.max(T.MIN_LEN, c.len - T.REEL * dt); }
+    for (const a of anchors) { const [dd, t] = ropeDist(r, i, a.x, a.z); if (dd < a.r + 0.3 && Math.hypot(a.x - r.x, a.z - r.z) > 2.2 && t < bt) { bt = t; best = a; } }
+    if (best) latchTo(r, c, best);
+  } else if (c.st === 'yank') { stepRope(r, i, dt); if (c.t > 0.25) releaseCable(r, i, true); }
+  else if (c.st === 'latched') {
+    if (!holding) { releaseCable(r, i); return; }
+    // steering away from the post pays rope out (wider arc); steering toward it reels in faster
+    const dx = r.x - c.tgt.x, dz = r.z - c.tgt.z, [rx, rz] = rightOf(r.h), side = (dx * rx + dz * rz) > 0 ? 1 : -1; // side>0: rocket is right of post => post on its left
+    const out = r.steer * side; // steer right(+1) with post on left => outward
+    let rate = -T.REEL; if (out > 0.1) rate = T.PAY_OUT * out; else if (out < -0.1) rate = -T.REEL - T.REEL_IN * -out;
+    c.len = clamp(c.len + rate * dt, T.MIN_LEN, T.ROPE_MAX);
+    stepRope(r, i, dt);
+  }
 }
-function applyTether(r) {
+function latchTo(r, c, a) {
+  const dx = r.x - a.x, dz = r.z - a.z, d = Math.hypot(dx, dz) || 1, nx = dx / d, nz = dz / d, sp = Math.hypot(r.vx, r.vz);
+  // convert current velocity to pure tangential at the same speed (no loss, no snap)
+  let tx = -nz, tz = nx; if (r.vx * tx + r.vz * tz < 0) { tx = -tx; tz = -tz; }
+  r.vx = tx * sp; r.vz = tz * sp;
+  Object.assign(c, { st: 'latched', tgt: a, len: Math.max(T.MIN_LEN, d), t: 0, latchSpeed: sp, latchLen: d });
+  stats.latches++; if (!r.ai) stats.playerLatches++; if (near(r)) sfx.clank();
+}
+function applyTether(r, dt) {
   for (const c of r.cables) { if (c.st !== 'latched') continue;
     const a = c.tgt, dx = r.x - a.x, dz = r.z - a.z, d = Math.hypot(dx, dz);
-    if (d > c.len) { const nx = dx / d, nz = dz / d; r.x = a.x + nx * c.len; r.z = a.z + nz * c.len; const vr = r.vx * nx + r.vz * nz; if (vr > 0) { r.vx -= nx * vr; r.vz -= nz * vr; } } }
+    if (d > c.len) { // soft rope: only acts when taut, slightly elastic
+      const nx = dx / d, nz = dz / d, sp = Math.hypot(r.vx, r.vz), ex = d - c.len;
+      const vr = r.vx * nx + r.vz * nz;
+      if (vr > 0) { r.vx -= nx * vr * 0.97; r.vz -= nz * vr * 0.97; } // cancel outward motion (3% stretch give)
+      r.vx -= nx * T.ROPE_K * ex * dt; r.vz -= nz * T.ROPE_K * ex * dt; // spring pulls back stretch
+      const corr = ex * (1 - Math.exp(-12 * dt)); r.x -= nx * corr; r.z -= nz * corr; // soft positional settle
+      const sp2 = Math.hypot(r.vx, r.vz); if (sp2 > 0.01 && sp2 < sp) { r.vx *= sp / sp2; r.vz *= sp / sp2; } // redirect, don't bleed speed
+      if (ex > 3) { r.x = a.x + nx * (c.len + 3); r.z = a.z + nz * (c.len + 3); }
+    } }
 }
 
 // ---------------- physics ----------------
@@ -317,18 +386,21 @@ function stepRider(r, dt) {
   }
   const latched = r.cables[0].st === 'latched' || r.cables[1].st === 'latched';
   r.h += -r.steer * T.TURN * dt * (latched ? T.LATCH_STEER : 1);
+  if (r.slingT > 0) r.slingT -= dt;
   const [fx, fz] = fwdOf(r.h), [rx, rz] = rightOf(r.h);
   let vf = r.vx * fx + r.vz * fz, vl = r.vx * rx + r.vz * rz;
   const target = r.boost ? T.BOOST : T.BASE;
   vf += (target - vf) * (1 - Math.exp(-T.ACCEL * dt * (r.boost ? 1.6 : 1)));
-  if (!latched) vl *= Math.exp(-T.LAT_GRIP * dt); else vl *= Math.exp(-0.4 * dt);
+  if (latched) vl *= Math.exp(-0.15 * dt);
+  else if (r.slingT > 0) { vl *= Math.exp(-1.2 * dt); const sp = Math.hypot(r.vx, r.vz); if (sp > 2) { const vh = Math.atan2(r.vx, r.vz); let dh = vh - r.h; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); r.h += dh * (1 - Math.exp(-6 * dt)); } } // slingshot exit: keep the swing's velocity, nose swings round to it
+  else vl *= Math.exp(-T.LAT_GRIP * dt);
   r.vx = fx * vf + rx * vl; r.vz = fz * vf + rz * vl;
   if (latched) { // nose follows the swing (GRIP) like 2D
     const sp = Math.hypot(r.vx, r.vz); if (sp > 2) { const vh = Math.atan2(r.vx, r.vz); let dh = vh - r.h; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); r.h += dh * (1 - Math.exp(-T.GRIP * dt)); }
     const sp2 = Math.hypot(r.vx, r.vz), cap = T.BOOST * 1.35; if (sp2 > cap) { r.vx *= cap / sp2; r.vz *= cap / sp2; }
   }
   r.x += r.vx * dt; r.z += r.vz * dt;
-  applyTether(r); collide(r);
+  applyTether(r, dt); collide(r);
 }
 function collide(r) {
   const lim = A - 1.2;
@@ -362,11 +434,11 @@ function aiThink(r, dt) {
   if (r.cables.some(c => c.st === 'latched')) r.steer *= 0.3;
   if (b.cool > 0) return;
   for (let i = 0; i < 2; i++) { if (r.cables[i].st !== 'none') continue;
-    const s = i ? 1 : -1, [rx, rz] = rightOf(r.h), [fx, fz] = fwdOf(r.h);
+    const [cdx, cdz] = cableDir(r, i), lx = cdx * T.CABLE_SPEED + r.vx, lz = cdz * T.CABLE_SPEED + r.vz, ll = Math.hypot(lx, lz) || 1, ux = lx / ll, uz = lz / ll; // predicted tip flight direction
     for (const o of [...anchors, ...riders]) { if (o === r || (o.mounted === false)) continue;
       const isR = !!o.cables; if (isR && window.__rj3dNoAIHook) continue;
-      const dx = o.x - r.x, dz = o.z - r.z, d = Math.hypot(dx, dz), lat = (dx * rx + dz * rz) * s, fw = dx * fx + dz * fz;
-      if (lat < 3 || d > (isR ? 20 : 16) || fw < -2 || fw > lat * 0.8 + 3) continue;
+      const dx = o.x - r.x, dz = o.z - r.z, along = dx * ux + dz * uz, perp = Math.abs(dx * uz - dz * ux);
+      if (along < 3 || along > (isR ? 22 : 18) || perp > along * 0.3 + 2) continue;
       if (Math.random() > (isR ? 0.15 : 0.6)) continue;
       fireCable(r, i); if (!isR) b.hold = rand(1.6, 3.2); b.cool = rand(3, 6); return; }
   }
@@ -415,16 +487,16 @@ function sync(r, dt, time) {
   const sx = r.mounted ? r.x : r.tum.x, sz = r.mounted ? r.z : r.tum.z;
   for (let i = 0; i < 2; i++) {
     const c = r.cables[i], cm = r.cableMeshes[i], tip = r.tipMeshes[i];
-    if (c.st === 'none') { cm.visible = tip.visible = false; continue; }
-    const s = i ? 1 : -1; _a.set(sx + rx * s * 0.5, T.HOVER + 0.6, sz + rz * s * 0.5);
-    const [tx, tz] = cableTip(r, i); _b.set(tx, c.st === 'latched' ? c.tgt.hookY : T.HOVER + (c.st === 'yank' ? 1.4 : 0.6), tz);
-    const L = _a.distanceTo(_b); cm.visible = L > 0.1; cm.position.copy(_a).add(_b).multiplyScalar(0.5); cm.scale.set(1, Math.max(L, 0.01), 1);
-    if (L > 0.01) cm.quaternion.setFromUnitVectors(up, _b.clone().sub(_a).normalize());
+    if (c.st === 'none') { for (const m of cm) m.visible = false; tip.visible = false; continue; }
+    const P = c.pts; let lit = 0;
+    for (let k = 0; k < RN; k++) { const m = cm[k]; _a.set(P[k].x, P[k].y, P[k].z); _b.set(P[k + 1].x, P[k + 1].y, P[k + 1].z); const L = _a.distanceTo(_b); m.visible = L > 0.02; if (!m.visible) continue; lit++;
+      m.position.copy(_a).add(_b).multiplyScalar(0.5); m.scale.set(1, L, 1); m.quaternion.setFromUnitVectors(up, _b.sub(_a).normalize()); }
+    _b.set(P[RN].x, P[RN].y, P[RN].z);
     tip.visible = true; tip.position.copy(_b);
   }
 }
 // ---------------- main loop ----------------
-const stats = { fired: 0, frames: 0, fps: 0, latches: 0, playerLatches: 0, knockoffs: [], maxSwingAngle: 0 };
+const stats = { releases: [], fired: 0, frames: 0, fps: 0, latches: 0, playerLatches: 0, knockoffs: [], maxSwingAngle: 0 };
 let last = performance.now(), fpsAcc = 0, fpsN = 0, simTime = 0, swingStartAng = null, swingAccum = 0, lastAng = 0;
 function frame(now) {
   requestAnimationFrame(frame);
@@ -462,14 +534,14 @@ requestAnimationFrame(frame);
 // ---------------- test hooks ----------------
 const gl = renderer.getContext();
 window.__rj3d = {
-  version: '3D test v0.2', ready: true,
+  version: '3D test v0.3', ready: true,
   renderer: () => ({ webgl: !!gl, isWebGL2: renderer.capabilities.isWebGL2, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
-  tuning: () => ({ turn: T.TURN, latchSteer: T.LATCH_STEER, cableMax: T.CABLE_MAX, cableSpeed: T.CABLE_SPEED, cableLife: T.CABLE_LIFE, cableFwdDeg: T.CABLE_FWD * 180 / Math.PI }),
-  cable: i => { const c = player.cables[i], [tx, tz] = cableTip(player, i); return { st: c.st, ext: c.ext, t: c.t, kind: c.tgt?.kind || null, tx, tz, px: player.x, pz: player.z, h: player.h }; },
+  tuning: () => ({ tipDrag: T.TIP_DRAG, tipMass: T.TIP_MASS, payOut: T.PAY_OUT, reelIn: T.REEL_IN, turn: T.TURN, latchSteer: T.LATCH_STEER, cableMax: T.CABLE_MAX, cableSpeed: T.CABLE_SPEED, cableLife: T.CABLE_LIFE, cableFwdDeg: T.CABLE_FWD * 180 / Math.PI }),
+  cable: i => { const c = player.cables[i], [tx, tz] = cableTip(player, i); const [mx, mz] = mountOf(player, i); return { mx, mz, vx: c.vx, vz: c.vz, taut: c.taut, len: c.len, latchSpeed: c.latchSpeed, latchLen: c.latchLen, ax: c.tgt?.x, az: c.tgt?.z, pvx: player.vx, pvz: player.vz, sag: c.pts.map(p => [p.x, p.y, p.z]), st: c.st, ext: c.ext, t: c.t, kind: c.tgt?.kind || null, tx, tz, px: player.x, pz: player.z, h: player.h }; },
   postFade: () => anchors.map(a => ({ x: a.x, z: a.z, fade: a.fade })),
   state: () => ({ player: { x: player.x, z: player.z, h: player.h, vx: player.vx, vz: player.vz, mounted: player.mounted, cables: player.cables.map(c => c.st), cable: (player.cables.find(c => c.st === 'latched') || player.cables.find(c => c.st !== 'none') || { st: 'none' }).st, cableKind: (player.cables.find(c => c.tgt) || {}).tgt?.kind || null },
     ai: riders.filter(r => r.ai).map(r => ({ name: r.name, x: r.x, z: r.z, mounted: r.mounted, ko: r.ko, cables: r.cables.map(c => c.st) })),
-    score, fps: stats.fps, frames: stats.frames, fired: stats.fired, latches: stats.latches, playerLatches: stats.playerLatches, maxSwingAngle: stats.maxSwingAngle, knockoffs: stats.knockoffs.length, lowQ, audio: AC ? AC.state : 'none', sfx: { ...sfxLog }, anyInput }),
+    score, fps: stats.fps, frames: stats.frames, fired: stats.fired, latches: stats.latches, playerLatches: stats.playerLatches, maxSwingAngle: stats.maxSwingAngle, knockoffs: stats.knockoffs.length, koList: stats.knockoffs.map(k => k.by + '>' + k.victim), releases: stats.releases, lowQ, audio: AC ? AC.state : 'none', sfx: { ...sfxLog }, anyInput }),
   setPlayer(x, z, h, v = 0) { releaseAll(player, true); Object.assign(player, { x, z, h, vx: Math.sin(h) * v, vz: Math.cos(h) * v, mounted: true }); camYaw = h; stats.maxSwingAngle = 0; },
   placeAI(i, x, z, h) { const r = riders.filter(r => r.ai)[i]; releaseAll(r, true); Object.assign(r, { x, z, h, vx: 0, vz: 0, mounted: true }); r.brain.cool = 99; r.brain.lock = false; },
   driveAI(i, x, z, h, v) { const r = riders.filter(r => r.ai)[i]; releaseAll(r, true); Object.assign(r, { x, z, h, vx: Math.sin(h) * v, vz: Math.cos(h) * v, mounted: true }); r.brain.cool = 1e9; r.brain.lock = true; },
