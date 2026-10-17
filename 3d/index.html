@@ -4,7 +4,7 @@
 <link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.4</title>
+<title>Rocket Jockey 3D test v0.4.1</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -37,7 +37,7 @@ body:not(.desk) #cross,body.touched #cross{display:none!important}
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.4</div>
+<div id="ver" class="hud">3D test v0.4.1</div>
 <div id="score" class="hud">KO 0</div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
@@ -56,7 +56,7 @@ if (!TOUCH) document.body.classList.add('desk');
 
 // ---------------- tuning ----------------
 const T = {
-  BASE: 20, BOOST: 36, ACCEL: 1.6, TURN: 2.0, LATCH_STEER: 1.0, LAT_GRIP: 9, GRIP: 3.0, HOVER: 1.1,
+  BASE: 20, BOOST: 36, SWING_MIN: 6, SWING_EASE: 0.12, ACCEL: 1.6, TURN: 2.0, LATCH_STEER: 1.0, LAT_GRIP: 9, GRIP: 3.0, HOVER: 1.1,
   CABLE_MAX: 26, CABLE_SPEED: 45, CABLE_LIFE: 2.75, CABLE_FWD: 15 * Math.PI / 180, REEL: 1.5, MIN_LEN: 4, TIP_DRAG: 0.8, TIP_MASS: 0.03, PAY_OUT: 9, REEL_IN: 7, ROPE_MAX: 34, ROPE_K: 18, SLING_T: 0.45, ARENA: 75, POST_R: 0.9, RIDER_R: 1.2,
   CAM_D: 9, CAM_H: 4.2, CAM_D_SWING: 13.5, CAM_H_SWING: 6.5, REMOUNT: 3, AI_TIE: 0.9, AI_GRAB: 0.6, RETRACT_T: 0.22, HOLD_MAX: 6, TIE_TIME: 4.5, TIE_REACH: 18, TIE_L: 6, BIND_L: 4, CLOTHES_LIFE: 20, PTS_KO: 10, PTS_CLOTHES: 20, PTS_TIE: 5, PTS_BIND: 8, PTS_HOOK: 2,
   LEAN: 13 * Math.PI / 180, LEAN_RET: 5, HEAD_K: 22, CAM_W: 6, LOOK_W: 9, SWING_RAMP: 0.7, CAM_POST_MIN: 4,
@@ -421,7 +421,8 @@ function latchTo(r, c, a) {
   // convert current velocity to pure tangential at the same speed (no loss, no snap)
   let tx = -nz, tz = nx; r.tanDir = 1; if (r.vx * tx + r.vz * tz < 0) { tx = -tx; tz = -tz; r.tanDir = -1; }
   r.vx = tx * sp; r.vz = tz * sp;
-  Object.assign(c, { st: 'latched', tgt: a, len: Math.max(T.MIN_LEN, d), t: 0, latchSpeed: sp, latchLen: d });
+  const hold = Math.max(T.SWING_MIN, Math.min(sp, T.BASE)); // v0.4.1: swing speed is held at entry speed (capped at cruise)
+  Object.assign(c, { st: 'latched', tgt: a, len: Math.max(T.MIN_LEN, d), t: 0, latchSpeed: sp, latchLen: d, hold, allow: hold });
   stats.latches++; if (!r.ai) stats.playerLatches++; if (near(r)) sfx.clank();
   if (r.cables.some(k => k.st === 'held')) doTie(r); // v0.4: holding a rider + latch a post with the other cable = tie them off
 }
@@ -547,7 +548,9 @@ function stepRider(r, dt) {
   r.vx = fx * vf + rx * vl; r.vz = fz * vf + rz * vl;
   if (latched) { const sp2 = Math.hypot(r.vx, r.vz), cap = T.BOOST * 1.35; if (sp2 > cap) { r.vx *= cap / sp2; r.vz *= cap / sp2; } }
   r.x += r.vx * dt; r.z += r.vz * dt;
-  applyTether(r, dt); collide(r);
+  applyTether(r, dt);
+  if (latched) swingGovernor(r, lcab, dt);
+  collide(r);
   if (latched) trackTangent(r, lcab, dt);
 }
 // v0.3.1: while latched the nose points along the swing circle's tangent (90 deg to the cable) in the direction of
@@ -564,6 +567,16 @@ function trackTangent(r, c, dt) {
   if (r.tanPrev !== null) r.h += wrapA(th - r.tanPrev);
   r.tanPrev = th;
   r.h += wrapA(th + r.lean - r.h) * (1 - Math.exp(-T.HEAD_K * dt));
+}
+// v0.4.1: no speed creep on swings. Not boosting: speed is pinned to the entry speed (thrust and reel-in can't add
+// any). Boosting: speed may rise as before; when boost stops it eases back to the entry speed (~0.5 s).
+function swingGovernor(r, c, dt) {
+  const sp = Math.hypot(r.vx, r.vz); if (sp < 0.01) return;
+  if (c.hold === undefined) { c.hold = Math.max(T.SWING_MIN, Math.min(sp, T.BASE)); c.allow = c.hold; }
+  if (r.boost) { c.allow = Math.max(c.hold, sp); return; }
+  c.allow = c.hold + (c.allow - c.hold) * Math.exp(-dt / T.SWING_EASE); // post-boost: ease back to entry speed
+  const want = c.allow; // hold exactly: never above the (easing) allowance, never sag below entry speed
+  r.vx *= want / sp; r.vz *= want / sp;
 }
 function wrapA(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
 function collide(r) {
@@ -780,10 +793,10 @@ requestAnimationFrame(frame);
 // ---------------- test hooks ----------------
 const gl = renderer.getContext();
 window.__rj3d = {
-  version: '3D test v0.4', ready: true,
+  version: '3D test v0.4.1', ready: true,
   renderer: () => ({ webgl: !!gl, isWebGL2: renderer.capabilities.isWebGL2, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   tuning: () => ({ tipDrag: T.TIP_DRAG, tipMass: T.TIP_MASS, payOut: T.PAY_OUT, reelIn: T.REEL_IN, turn: T.TURN, latchSteer: T.LATCH_STEER, cableMax: T.CABLE_MAX, cableSpeed: T.CABLE_SPEED, cableLife: T.CABLE_LIFE, cableFwdDeg: T.CABLE_FWD * 180 / Math.PI }),
-  cable: i => { const c = player.cables[i], [tx, tz] = cableTip(player, i); const [mx, mz] = mountOf(player, i); return { mx, mz, vx: c.vx, vz: c.vz, taut: c.taut, len: c.len, latchSpeed: c.latchSpeed, latchLen: c.latchLen, ax: c.tgt?.x, az: c.tgt?.z, pvx: player.vx, pvz: player.vz, sag: c.pts.map(p => [p.x, p.y, p.z]), st: c.st, ext: c.ext, t: c.t, kind: c.tgt?.kind || null, tx, tz, px: player.x, pz: player.z, h: player.h }; },
+  cable: i => { const c = player.cables[i], [tx, tz] = cableTip(player, i); const [mx, mz] = mountOf(player, i); return { mx, mz, vx: c.vx, vz: c.vz, taut: c.taut, len: c.len, latchSpeed: c.latchSpeed, latchLen: c.latchLen, hold: c.hold, allow: c.allow, boost: player.boost, ax: c.tgt?.x, az: c.tgt?.z, pvx: player.vx, pvz: player.vz, sag: c.pts.map(p => [p.x, p.y, p.z]), st: c.st, ext: c.ext, t: c.t, kind: c.tgt?.kind || null, tx, tz, px: player.x, pz: player.z, h: player.h }; },
   rec(on) { if (on) camRec = []; const out = camRec; if (!on) camRec = null; return on ? true : out; },
   recPeek: () => camRec ? camRec.slice(-1)[0] : null,
   leanMax: () => T.LEAN * 180 / Math.PI,
