@@ -4,7 +4,7 @@
 <link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.6</title>
+<title>Rocket Jockey 3D test v0.6.1</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -44,7 +44,7 @@ body.onfoot #bL,body.onfoot #bR,body.onfoot #bT{opacity:.22}
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.6</div>
+<div id="ver" class="hud">3D test v0.6.1</div>
 <div id="score" class="hud">KO 0</div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
@@ -82,9 +82,17 @@ const T = {
   LEASH_TIME: 6, LEASH_MIN: 7.2, BIND_TIME: 6, BIND_MIN: 6.3, BIND_SNAP: 14.4, BIND_ANCHOR: 0.4, BIND_TURN: 3, RIP_T: 1.0, // 2D leash / binding; boost-to-rip strain
 };
 // v0.5: AI difficulty (only the 2D v0.9.5 rocket-theft knobs, converted per-think odds -> per second, px -> units)
-const DIFFS = { EASY: { stealRate: 0.018, range: 41, you: 0, tie: 0.25, yank: 0.42, hookTie: 0.72, react: 0.9, aim: 1.3 }, NORMAL: { stealRate: 0.15, range: 59, you: 23, tie: 0.4, yank: 0.45, hookTie: 0.82, react: 0.55, aim: 0.95 }, HARD: { stealRate: 0.46, range: 73, you: 36, tie: 0.55, yank: 0.48, hookTie: 0.9, react: 0.3, aim: 0.7 } };
+const DIFFS = { EASY: { stealRate: 0.018, range: 41, you: 0, tie: 0.25, yank: 0.42, hookTie: 0.72, react: 0.9, aim: 1.3 }, NORMAL: { stealRate: 0.08, range: 59, you: 23, tie: 0.4, yank: 0.45, hookTie: 0.82, react: 0.55, aim: 0.95 }, HARD: { stealRate: 0.2, range: 73, you: 36, tie: 0.55, yank: 0.48, hookTie: 0.9, react: 0.3, aim: 0.7 } };
+// v0.6.1 hunting AI knobs (2D v0.9.2 presets, adapted). think = re-plan interval (s) = how stale its read of you is; pull = how much
+// nearer you look than you are (units) when it picks a target; err / lead = how well it reads and leads your motion;
+// slop = how marginal a predicted shot it will take (units; bigger = more misses); midOk = takes a rider-zone hit when it wanted a hook; fireCool = s between shots; grab = holds a rider-zone
+// shot (drag the body to a post); swing = odds of snagging a post to turn round; bodyTie / tieScale = tie-off appetite; retract =
+// reels a missed shot back in; boost = boosts to close; lazy = odds a re-plan just cruises about (Easy's off-moments).
+Object.assign(DIFFS.EASY, { think: [0.8, 1.3], retarget: [2.5, 5], pull: -8, crowd: 14, revenge: 8, sticky: 8, err: 2.5, lead: 0.3, slop: 1.6, midOk: 0.3, fireCool: [7, 11], grab: 0.12, swing: 0.15, bodyTie: 0.4, tieScale: 0.3, retract: 0, boost: 0.25, pass: 11, lazy: 0.65, dragT: [2, 3.5], stalk: 0, grabFoot: 0, dodge: 0, hookPref: 0.1 });
+Object.assign(DIFFS.NORMAL, { think: [0.45, 0.75], retarget: [3, 5.5], pull: 2, crowd: 14, revenge: 14, sticky: 10, err: 1.0, lead: 0.7, slop: 0.8, midOk: 0.35, fireCool: [3.8, 6], grab: 0.35, swing: 0.3, bodyTie: 0.9, tieScale: 0.85, retract: 0.5, boost: 0.6, pass: 10, lazy: 0.25, dragT: [2.5, 4], stalk: 0.1, grabFoot: 0.15, dodge: 0.15, hookPref: 0.15 });
+Object.assign(DIFFS.HARD, { think: [0.14, 0.28], retarget: [3, 6], pull: 7, crowd: 14, revenge: 18, sticky: 12, err: 0.2, lead: 1.0, slop: 0, midOk: 0.35, fireCool: [0.6, 1.2], grab: 0.08, swing: 0.45, bodyTie: 2.0, tieScale: 0.55, retract: 1, boost: 0.9, pass: 8, lazy: 0, dragT: [2, 3.2], stalk: 0.75, grabFoot: 0.1, dodge: 0.7, hookPref: 0.35 });
 // v0.6: 2D AI personas (RED = BRAWLER: yanks more, binds less; GOLD = RIVAL: uses the difficulty's own zone / tie odds)
-const PERSONA = { RED: { yank: 0.62, tie: 0.6, bind: 0.3 }, GOLD: { yank: null, tie: null, bind: 0.45 } };
+const PERSONA = { RED: { yank: 0.62, tie: 0.6, bind: 0.3, pull: 1.3, cool: 0.85, grab: 1.2, seek: 0.6, tieX: 0.8, steal: 0.15 }, GOLD: { yank: null, tie: null, bind: 0.45, pull: 1.0, cool: 1.0, grab: 1.0, seek: 1.0, tieX: 1.0, steal: 1.0 } }; // v0.6.1: + hunting multipliers (2D pull / cool / seek)
 let diff = DIFFS[localStorage.getItem('rj3d_diff')] ? localStorage.getItem('rj3d_diff') : 'NORMAL';
 
 // ---------------- audio (ported from 2D v1.0) ----------------
@@ -259,7 +267,7 @@ function addRider(name, col, x, z, h, ai) {
     tum: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, rz: 0, wx: 0, wz: 0, ppx: 0, ppz: 0 }, bank: 0, lean: 0, tanPrev: null, tanDir: 1,
     // v0.5 on foot: footT (s since knocked off), tumble/stun/hitCool timers, inv (blink after remount), hop (remount animation), homing (recalled rocket)
     footT: 0, tumble: 0, stun: 0, hitCool: 0, inv: 0, hop: null, homing: false, spin: 0, fh: h, walk: 0, mv: { x: 0, z: 0 }, theftTow: false, theftTie: false,
-    brain: { wx: rand(-50, 50), wz: rand(-50, 50), cool: rand(2, 4), hold: 0, boostT: 0, grab: [false, false], dragT: 0, steal: null } };
+    brain: { wx: rand(-50, 50), wz: rand(-50, 50), cool: rand(2, 4), hold: 0, boostT: 0, grab: [false, false], dragT: 0, steal: null, think: 0, retarget: 0, tgt: null, mode: 'HUNT' } };
   r.cableMeshes = []; r.tipMeshes = [];
   for (const col of [0x55ddff, 0xff66dd]) {
     const cmat = new THREE.MeshBasicMaterial({ color: ai ? 0xffeeaa : col }), cgeo = new THREE.CylinderGeometry(0.09, 0.09, 1, 4), cm = [];
@@ -361,6 +369,7 @@ function ropeDist(r, i, px, pz) {
   for (let k = 0; k < RN; k++) { const [d, t] = segDist(px, pz, P[k].x, P[k].z, P[k + 1].x, P[k + 1].z); if (d < best) { best = d; bf = (k + t) / RN; } }
   return [best, bf];
 }
+let koAim = null, koPurpose = null; // v0.6.1 sim stats: what the knocking cable was fired at
 function knockOff(victim, by, how, fx, fz, dv) {
   if (!victim.mounted || victim.hop) return false;
   if (victim.inv > 0 && how !== 'test') return false; // v0.5: blinking after a remount (2D REMOUNT_INV)
@@ -368,6 +377,7 @@ function knockOff(victim, by, how, fx, fz, dv) {
   // v0.5 (2D v1.0 rules): tumble, land on foot, run back to the rocket
   Object.assign(victim, { footT: 0, tumble: T.TUMBLE, stun: 0, hitCool: 0.5, inv: 0, homing: false, theftTow: false, theftTie: false, spin: rand(-2.5, 2.5), fh: victim.h, walk: 0 });
   victim.mv.x = victim.mv.z = 0; victim.brain.steal = null; victim.brain.hk = null; victim.brain.esc = 0;
+  if (victim.ai && by && by !== victim) victim.brain.rev = { o: by, t: simTime }; // v0.6.1: remembered for payback
   const crash = how === 'crash', src = crash ? null : by; // v0.6 crash: thrown back off the wall / post; credit goes to whoever entangled you
   const ox = src ? src.x : (fx ?? victim.x - victim.vx), oz = src ? src.z : (fz ?? victim.z - victim.vz);
   const dx = ox - victim.x, dz = oz - victim.z, d = Math.hypot(dx, dz) || 1, t = victim.tum;
@@ -388,7 +398,7 @@ function knockOff(victim, by, how, fx, fz, dv) {
     if (!clo) { by.vx -= dx / d * 4; by.vz -= dz / d * 4; }
   } else if (victim === player && how !== 'test') flash('CLOTHESLINED YOURSELF!');
   sfx.squish(); setTimeout(() => sfx.knock(), 60); if (clo) { sfx.crowd('cheer', 0.9); stats.clotheslines.push({ victim: victim.name, by: by ? by.name : null }); }
-  stats.knockoffs.push({ victim: victim.name, by: by ? by.name : '-', how: how || 'cable', t: performance.now() });
+  stats.knockoffs.push({ victim: victim.name, by: by ? by.name : '-', how: how || 'cable', t: performance.now(), aim: koAim, purpose: koPurpose }); koAim = koPurpose = null;
   return true;
 }
 // v0.5 (2D v0.6.1 fix): the empty rocket must come to rest clear of its rider but reasonably near -- predict where
@@ -456,7 +466,7 @@ function updateCable(r, i, dt, holding) {
     for (const o of riders) { if (o === r) continue;
       if (o.mounted) {
         if (o.inv > 0 || o.hop) continue; // v0.5: blinking after a remount
-        if (touch(o.x, o.z, T.RIDER_R + 0.25)) {
+        if (touch(o.x, o.z, T.RIDER_R + 0.25)) { koAim = c.aiAt ? (c.aiAt.cables ? c.aiAt.name : 'post') : (r.ai ? '?' : null); koPurpose = c.aiPurpose || null;
           if (holding) { knockOff(o, r); hookBody(r, i, o); return; } // v0.4: held cable -> knock off AND drag the body
           c.st = 'yank'; c.t = 0; c.tx = o.x; c.tz = o.z; knockOff(o, r); return; }
         // v0.6 (2D v0.8 zones): the cable TIP striking the rocket body outside the rider zone -- NOSE / TAIL -- hooks the ridden rocket while
@@ -954,11 +964,13 @@ function aiFoot(r) {
 }
 // v0.5 rocket theft (2D v0.9.5 AI): sometimes go after an on-foot rider's empty rocket: hook it with a held cable, haul it
 // away from its owner, maybe tie it to a post; drop it once the theft has paid (or the tow times out)
+function aiStealWorth() { // v0.6.1: a theft is worth more the longer the owner's run back (best open on-foot rider)
+  let w = 0; for (const o of riders) if (!o.mounted && !o.hop) w = Math.max(w, clamp((Math.hypot(o.tum.x - o.x, o.tum.z - o.z) - 8) / 10, 0.3, 2)); return w || 1; }
 function aiSteal(r, dt) {
   const b = r.brain, D = DIFFS[diff];
   if (b.steal) { const v = b.steal.v, si = stealInfo(v); b.steal.t += dt;
     if (v.mounted || v.hop || v.homing || b.steal.t > 12 || (si && (si.thief !== r || si.tied))) { b.steal = null; for (let i = 0; i < 2; i++) if (r.cables[i].vk === 'rocket') b.grab[i] = false; } }
-  else if (!window.__rj3dNoAIHook && !r.cables.some(c => c.st === 'held' || c.st === 'latched') && Math.random() < dt * D.stealRate * (window.__rj3dStealX || 1)) {
+  else if (!window.__rj3dNoAIHook && !r.cables.some(c => c.st === 'held' || c.st === 'latched') && Math.random() < dt * D.stealRate * ((PERSONA[r.name] || PERSONA.GOLD).steal ?? 1) * aiStealWorth() * (window.__rj3dStealX || 1)) { // v0.6.1: RED (brawler) rarely bothers (2D persona steal 0.15)
     let best = null, bs = 1e9;
     for (const o of riders) { if (o === r || o.mounted || o.hop || o.homing || stealInfo(o) || o.footT > T.RECALL - 3) continue;
       const d = Math.hypot(o.x - r.x, o.z - r.z); if (d > D.range || Math.hypot(o.tum.x - o.x, o.tum.z - o.z) < 6.4) continue; // owner about to hop on: not worth it
@@ -986,7 +998,7 @@ function aiSteal(r, dt) {
   return true;
 }
 // v0.6 (2D v0.8 AI): zone choice when shooting at a ridden rocket -- RED (BRAWLER) yanks more, GOLD uses the difficulty's odds
-function aiPersona(r) { const D = DIFFS[diff], p = PERSONA[r.name] || PERSONA.GOLD; return { yank: p.yank ?? D.yank, tie: p.tie ?? D.hookTie, bind: p.bind, react: D.react }; }
+function aiPersona(r) { const D = DIFFS[diff], p = PERSONA[r.name] || PERSONA.GOLD; return { yank: p.yank ?? D.yank, tie: (p.tie ?? D.hookTie) * D.tieScale, bind: p.bind, react: D.react, pull: p.pull, cool: p.cool, grab: p.grab, seek: p.seek, tieX: p.tieX }; }
 function aiPickZone(r, t, dist) {
   const toT = Math.atan2(t.x - r.x, t.z - r.z), approach = Math.abs(wrapA(toT - t.h)); // 0 = from behind (tail), PI = head-on (nose)
   const broad = Math.min(Math.abs(wrapA(toT - t.h - Math.PI / 2)), Math.abs(wrapA(toT - t.h + Math.PI / 2))) < 0.7, yk = window.__rj3dYank ?? aiPersona(r).yank;
@@ -1033,52 +1045,208 @@ function aiLive(r, dt) {
   const j = 1 - li, cj = r.cables[j];
   if (h.tie && h.t > 0.35 && canTie(r) && (cj.st !== 'out' || Math.random() < dt * 2) && Math.random() < dt * 4) { doTie(r); b.hk = null; b.grab[0] = b.grab[1] = false; b.cool = rand(1, 2); return true; }
   const p = nearestPost(o.x, o.z, 45);
-  if (h.tie && p) steerTo(r, p.x, p.z); else steerTo(r, r.x + (r.x - o.x) * 2 + (o.vx || 0), r.z + (r.z - o.z) * 2 + (o.vz || 0)); // haul them to a post, or yank them off course
+  if (h.yp === undefined) { const q = nearestPost(o.x, o.z, 16); h.yp = !h.tie && q && ((q.x - o.x) * (r.x - o.x) + (q.z - o.z) * (r.z - o.z)) > 0.5 * Math.hypot(q.x - o.x, q.z - o.z) * Math.hypot(r.x - o.x, r.z - o.z) && Math.random() < ps.yank * 1.3 ? q : null; } // only when the post is already on the hooker's side (never drive back through them) // v0.6.1: sometimes yank them into a post (CRASH)
+  if (h.tie && p) steerTo(r, p.x, p.z);
+  else if (h.yp) { const q = h.yp, ux = q.x - o.x, uz = q.z - o.z, ul = Math.hypot(ux, uz) || 1; steerTo(r, q.x + ux / ul * 14, q.z + uz / ul * 14); } // get on the far side of the post: the rope hauls them into it
+  else steerTo(r, r.x + (r.x - o.x) * 2 + (o.vx || 0), r.z + (r.z - o.z) * 2 + (o.vz || 0)); // haul them to a post, or yank them off course
   r.boost = h.t < 1.2;
-  if (h.bind && cj.st === 'none' && b.cool <= 0 && !window.__rj3dNoAIHook) for (const q of riders) { if (q === r || q === o || !q.mounted || q.inv > 0 || q.hop) continue;
+  if (h.bind && !h.tie && cj.st === 'none' && b.cool <= 0 && !window.__rj3dNoAIHook) for (const q of riders) { if (q === r || q === o || !q.mounted || q.inv > 0 || q.hop) continue;
     const zone = aiIntercept(r, j, q, 'nose') < aiIntercept(r, j, q, 'tail') ? 'nose' : 'tail';
     if (aiIntercept(r, j, q, zone) < DIFFS[diff].aim) { fireCable(r, j); b.grab[j] = true; b.cool = rand(1, 2); stats.aiZones.push({ by: r.name, at: q.name, zone, bind: true }); break; } }
   if (cj.st === 'latched' && cj.tgt.kind === 'live' && canTie(r)) { doTie(r); b.hk = null; b.grab[0] = b.grab[1] = false; b.cool = rand(1, 2); }
   return true;
 }
-function aiThink(r, dt) {
-  const b = r.brain; if (!r.mounted) { aiFoot(r); return; }
-  if (b.lock) { r.steer = 0; r.boost = !!b.forceBoost; r.aiHold = false; return; }
-  if (aiLive(r, dt)) return; else b.cool += dt; // (aiLive ticks the fire cooldown; undo it on the normal path, which ticks it itself)
-  b.scool = (b.scool || 0) - dt;
-  if (aiSteal(r, dt)) { b.hold -= dt; r.aiHold = false; return; }
-  if (Math.hypot(b.wx - r.x, b.wz - r.z) < 8 || Math.random() < dt * 0.1) { b.wx = rand(-60, 60); b.wz = rand(-60, 60); if (Math.random() < 0.35 && player.mounted) { b.wx = player.x; b.wz = player.z; } }
-  // steer toward waypoint, avoid walls
-  let tx = b.wx, tz = b.wz; if (Math.abs(r.x) > A - 12 || Math.abs(r.z) > A - 12) { tx = 0; tz = 0; }
-  let dh = Math.atan2(tx - r.x, tz - r.z) - r.h; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-  r.steer = clamp(-dh * 2, -1, 1);
-  b.boostT -= dt; if (b.boostT <= 0) { r.boost = Math.random() < 0.3; b.boostT = rand(1, 3); }
-  // cables: same free-fire mechanic -- fire out a side when a post/rider sits near that side's line
-  b.cool -= dt; b.hold -= dt; r.aiHold = b.hold > 0;
-  // v0.4: dragging someone -> tie them off (to a post in reach, or bind two) at a modest rate
-  const hc = r.cables.findIndex(c => c.st === 'held' && c.vk !== 'rocket');
-  if (hc >= 0) { b.dragT -= dt; const plan = tiePlan(r);
-    if (plan && Math.random() < dt * T.AI_TIE * (window.__rj3dAITie || 1)) doTie(r);
-    else if (b.dragT <= 0) { b.grab[hc] = false; } } else b.dragT = 0;
-  if (r.cables.some(isSwingCab)) r.steer *= 0.3;
-  if (b.cool > 0) return;
-  let hunt = false;
-  for (let i = 0; i < 2; i++) { if (r.cables[i].st !== 'none') continue;
-    const [cdx, cdz] = cableDir(r, i), lx = cdx * T.CABLE_SPEED + r.vx, lz = cdz * T.CABLE_SPEED + r.vz, ll = Math.hypot(lx, lz) || 1, ux = lx / ll, uz = lz / ll; // predicted tip flight direction
-    for (const o of [...anchors, ...riders]) { if (o === r || (o.mounted === false)) continue;
-      const isR = !!o.cables; if (isR && (window.__rj3dNoAIHook || o.tied)) continue;
-      if (isR && !o.inv && !o.hop && !(o.brain && o.brain.steal)) { // v0.6 (a rider busy stealing a rocket is left to the v0.5 mid-shot logic): pick a zone per target (2D aiPickZone, re-rolled every 1.5 s); NOSE / TAIL = time the shot so the tip meets that zone, hold to hook
-        const dd = Math.hypot(o.x - r.x, o.z - r.z);
-        if (dd < T.CABLE_MAX) {
-          if (!b.zp || b.zp.o !== o || b.zp.until < simTime) b.zp = { o, zone: aiPickZone(r, o, dd), until: simTime + 1.5 };
-          if (b.zp.zone !== 'mid') { hunt = true; if (aiIntercept(r, i, o, b.zp.zone) > DIFFS[diff].aim) continue;
-            fireCable(r, i); b.grab[i] = true; stats.aiZones.push({ by: r.name, at: o.name, zone: b.zp.zone }); b.zp = null; b.cool = rand(2.5, 5); return; } } }
-      const dx = o.x - r.x, dz = o.z - r.z, along = dx * ux + dz * uz, perp = Math.abs(dx * uz - dz * ux);
-      if (along < 3 || along > (isR ? 22 : 18) || perp > along * 0.3 + 2) continue;
-      if (Math.random() > (isR ? 0.15 : 0.6)) continue;
-      fireCable(r, i); if (isR) stats.aiZones.push({ by: r.name, at: o.name, zone: 'mid' }); if (!isR) b.hold = rand(1.6, 3.2); else if (Math.random() < T.AI_GRAB) { b.grab[i] = true; b.dragT = rand(2.5, 4.5); } b.cool = rand(3, 6); return; }
+// ---------------- v0.6.1 hunting AI (ported from the 2D v0.9.1+ state machine, adapted to 3D's fixed side-firing cables) ----------------
+// A think tick (AI_THINK per difficulty) re-plans: pick a target (scored: distance, player pull, crowding, revenge), snapshot what the
+// AI "sees" of it (position + velocity; between ticks it extrapolates that snapshot, so slow thinkers react late and lead badly), pick a
+// zone, and pick a mode. Every physics frame it steers by the plan and checks its fire windows. It drives exactly like you (same
+// rocket, same speed / boost, same cables that fly out of the side at 15 deg forward, same reach): to hit you it has to put you on its
+// cable line and time the shot, so "aim" = choosing where to drive and when to pull the trigger.
+//  HUNT       far: run at the predicted spot (boost when lined up)
+//  INTERCEPT  closing: lead the target's motion, offset to pass it at cable range with it on the chosen side
+//  ATTACK     in range: fire when the predicted tip path meets the chosen zone (rider = knockoff, nose / tail = held hook)
+//  SWING      target behind / tight corner: snag a post on that side, whip round it, let go facing the target (the line sweeps riders)
+//  TOW        hooked a rocket: drag it to the nearest post and TIE (leash), or yank it off course / into a post; dragging a body: tie it off
+//  EVADE      hooked / leashed / bound: steer away, boost after the reaction delay (rips a leash), fire back at the hooker
+//  STEAL      empty rocket nearby (v0.5 theft)       RECOVER  on foot: run back to the rocket       WANDER  Easy's off-moments / no target
+const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;
+function aiPos(o) { return o.mounted ? [o.x, o.z] : [o.tum.x, o.tum.z]; }
+function aiTargetCost(r, o, D, ps) {
+  let c = Math.hypot(o.x - r.x, o.z - r.z);
+  if (o === player) c -= D.pull * ps.pull;
+  for (const q of riders) if (q !== r && q.ai && q.mounted && q.brain.tgt === o) c += D.crowd; // spread out: no pure dogpile
+  const rv = r.brain.rev; if (rv && rv.o === o && simTime - rv.t < 8) c -= D.revenge; // payback on whoever just knocked you off
+  if (o.inv > 0) c += 12; if (liveTieOf(o)) c += 6;
+  return c;
+}
+function aiPickTarget(r, D, ps) {
+  let best = null, bc = 1e9;
+  for (const o of riders) { if (o === r || !o.mounted || o.hop) continue; const c = aiTargetCost(r, o, D, ps) + rand(-10, 10); if (c < bc) { bc = c; best = o; } }
+  const cur = r.brain.tgt;
+  if (cur && cur !== best && cur.mounted && !cur.hop && aiTargetCost(r, cur, D, ps) < bc + D.sticky) return cur; // hysteresis
+  return best;
+}
+function aiSee(r, o, D) { // perception snapshot (noisy on Easy); 'ghost' extrapolates it to now with the difficulty's lead
+  r.brain.seen = { o, x: o.x + gauss() * D.err, z: o.z + gauss() * D.err, vx: o.vx, vz: o.vz, h: o.h, t: simTime };
+}
+function aiGhost(r, D) {
+  const s = r.brain.seen; if (!s) return null; const age = simTime - s.t;
+  return { x: s.x + s.vx * age, z: s.z + s.vz * age, vx: s.vx * D.lead, vz: s.vz * D.lead, h: s.h };
+}
+function aiSteer(r, tx, tz) { // steer to a point; walls: only bail to the middle when the rocket is actually heading into one; dodge posts in the way
+  const lim = A - 4, la = 0.5, fx = r.x + r.vx * la, fz = r.z + r.vz * la; // (wall-huggers can still be hunted: aim up to 7 off the wall, bail only when about to hit it)
+  tx = clamp(tx, -A + 7, A - 7); tz = clamp(tz, -A + 7, A - 7);
+  if (Math.abs(fx) > lim && fx * r.vx > 0) tx = r.x - Math.sign(r.x) * 25 + r.vx * 0.2; // run along the wall, turning in
+  if (Math.abs(fz) > lim && fz * r.vz > 0) tz = r.z - Math.sign(r.z) * 25 + r.vz * 0.2;
+  let dh = wrapA(Math.atan2(tx - r.x, tz - r.z) - r.h);
+  const [hx, hz] = fwdOf(r.h), lat = r.cables.find(c => c.st === 'latched' && c.tgt.kind === 'post');
+  for (const a of anchors) { if (lat && lat.tgt === a) continue; const px = a.x - r.x, pz = a.z - r.z, along = px * hx + pz * hz; if (along < 0 || along > 9) continue;
+    const side = px * -hz + pz * hx; if (Math.abs(side) < a.r + 2.2) { dh += (side > 0 ? -1 : 1) * 0.9; break; } }
+  const b = r.brain; // stalled nose-first on a post (the dodge above can flip-flop): commit to one full turn away for a moment
+  if (b && Math.hypot(r.vx, r.vz) < 5 && !(b.unst && simTime < b.unst.until)) for (const a of anchors) { const px = a.x - r.x, pz = a.z - r.z;
+    if (Math.hypot(px, pz) < a.r + 3 && px * hx + pz * hz > 0) { b.unst = { until: simTime + 0.8, s: (px * -hz + pz * hx) > 0 ? 1 : -1 }; break; } }
+  if (b && b.unst && simTime < b.unst.until) { r.steer = b.unst.s; return dh; }
+  r.steer = clamp(-dh * 2.2, -1, 1); return dh;
+}
+function aiMount(r, zone, why) { r.brain.mode = zone; r.brain.why = why; }
+function aiFire(r, i, at, zone, grab, purpose) {
+  if (!fireCable(r, i)) return false; const b = r.brain, D = DIFFS[diff], ps = aiPersona(r);
+  b.grab[i] = !!grab; r.cables[i].aiPurpose = purpose; r.cables[i].aiAt = at;
+  if (at && at.cables) stats.aiZones.push({ by: r.name, at: at.name, zone }); // (rider shots only, as v0.6)
+  stats.aiShots.push({ by: r.name, at: at ? (at.cables ? at.name : 'post') : '-', zone, purpose, t: +simTime.toFixed(2), diff });
+  b.cool = rand(D.fireCool[0], D.fireCool[1]) * ps.cool; return true;
+}
+function aiShotSim(r, i, g, slop) { // v0.6.1: fly cable i forward from now (same launch, drag and reach as the real cable; the rocket and the
+  // target ghost keep their current velocities) and report what it would hit first: 'mid' (rope / tip on the rider), 'nose' / 'tail' (tip on the hull)
+  const [cdx, cdz] = cableDir(r, i), [mx, mz] = mountOf(r, i), h = 0.03, dr = Math.exp(-T.TIP_DRAG * h), [fx, fz] = fwdOf(g.h);
+  let tx = mx, tz = mz, vx = cdx * T.CABLE_SPEED + r.vx, vz = cdz * T.CABLE_SPEED + r.vz;
+  for (let t = h; t < 1.05; t += h) {
+    vx *= dr; vz *= dr; tx += vx * h; tz += vz * h;
+    const ax = mx + r.vx * t, az = mz + r.vz * t; let dx = tx - ax, dz = tz - az, d = Math.hypot(dx, dz);
+    if (d > T.CABLE_MAX) { tx = ax + dx / d * T.CABLE_MAX; tz = az + dz / d * T.CABLE_MAX; }
+    const ox = g.x + g.vx * t, oz = g.z + g.vz * t;
+    if (segDist(ox, oz, ax, az, tx, tz)[0] < T.RIDER_R + 0.25 + slop) return { hit: 'mid', t };
+    for (const [zone, u] of [['nose', T.NOSE_PT], ['tail', T.TAIL_PT]]) if (Math.hypot(ox + fx * u - tx, oz + fz * u - tz) < T.ZONE_W + 0.2 + slop * 0.5) return { hit: zone, t };
   }
-  b.cool = hunt ? 0 : rand(0.3, 1); // v0.6: lining up a nose / tail shot -> look again soon
+  return { hit: null };
+}
+function aiFireChecks(r, o, g, D, ps) { // ATTACK: would either free cable, fired right now, meet the target where the AI wants?
+  const b = r.brain, zone = b.zone || 'mid';
+  for (let i = 0; i < 2; i++) { if (r.cables[i].st !== 'none') continue;
+    const s = aiShotSim(r, i, g, D.slop); if (!s.hit) continue;
+    if (s.hit === 'mid' && (zone === 'mid' || b.midOk)) { aiFire(r, i, o, 'mid', Math.random() < D.grab * ps.grab, 'ko'); return true; }
+    if (s.hit !== 'mid' && zone !== 'mid') { aiFire(r, i, o, s.hit, true, 'hook'); return true; }
+  }
+  return false;
+}
+function aiPostOnSide(r, i, maxAlong) { // a post on cable i's flight line, in reach
+  let best = null, bt = 1e9;
+  for (const a of anchors) { const tf = aiLined(r, i, a.x, a.z, maxAlong, true); if (tf >= 0 && Math.hypot(a.x - r.x, a.z - r.z) > 4.5 && tf < bt) { bt = tf; best = a; } }
+  return best;
+}
+function aiDragPost(v) { // haul a body to a post away from its own rocket (dropping it by its rocket just lets it hop back on)
+  let best = null, bs = 1e9; for (const a of anchors) { if (a.kind && a.kind !== 'post') continue; const db = Math.hypot(a.x - v.tum.x, a.z - v.tum.z), dr = Math.hypot(a.x - v.x, a.z - v.z);
+    if (db > 60) continue; const sc = db + (dr < 16 ? 40 : 0) - Math.min(dr, 30) * 0.3; if (sc < bs) { bs = sc; best = a; } } return best || nearestPost(v.tum.x, v.tum.z, 60); }
+function aiThink(r, dt) {
+  const b = r.brain; if (!r.mounted) { b.mode = 'RECOVER'; aiFoot(r); return; }
+  if (b.lock) { r.steer = 0; r.boost = !!b.forceBoost; r.aiHold = false; return; }
+  if (aiLive(r, dt)) { b.mode = liveHookOn(r) || liveTieOf(r) ? 'EVADE' : 'TOW'; return; } else b.cool += dt; // (aiLive ticks the fire cooldown; undo it on the normal path, which ticks it itself)
+  b.scool = (b.scool || 0) - dt;
+  if (aiSteal(r, dt)) { b.mode = 'STEAL'; b.hold -= dt; r.aiHold = false; return; }
+  if (window.__rj3dNoAIHook) { aiWander(r, dt); return; } // frozen (tests): the v0.6 passive wander, no shots
+  const D = DIFFS[diff], ps = aiPersona(r);
+  b.cool -= dt; b.think -= dt; b.retarget -= dt; r.aiHold = false;
+  // ---- dragging a knocked-off body: haul it to a post and tie it off ----
+  const hc = r.cables.findIndex(c => c.st === 'held' && c.vk !== 'rocket');
+  if (hc >= 0) { if (!b.dragOn) { b.dragOn = true; b.dragT = rand(D.dragT[0], D.dragT[1]); } b.dragT -= dt; b.mode = 'TOW'; const v = r.cables[hc].vic, p = aiDragPost(v);
+    if (tiePlan(r) && Math.random() < dt * T.AI_TIE * D.bodyTie * ps.tieX * (window.__rj3dAITie || 1)) { doTie(r); b.grab[hc] = false; }
+    else if (b.dragT <= 0) b.grab[hc] = false;
+    if (p) aiSteer(r, p.x + (p.x - r.x) * 0.3, p.z + (p.z - r.z) * 0.3); r.boost = false; return; }
+  b.dragOn = false;
+  // ---- a post cable latched: SWING (whip round toward the target, the line sweeps riders) ----
+  const pc = r.cables.findIndex(c => c.st === 'latched' && c.tgt.kind === 'post');
+  // ---- think tick: target, perception, zone, mode ----
+  if (b.think <= 0) {
+    b.think = rand(D.think[0], D.think[1]);
+    if (b.stalk && (player.mounted || b.retarget <= 0)) { b.stalk = false; if (player.mounted && !player.hop) { b.tgt = player; b.retarget = rand(D.retarget[0], D.retarget[1]); } }
+    if (!b.stalk && (b.retarget <= 0 || !b.tgt || !b.tgt.mounted || b.tgt.hop)) {
+      b.retarget = rand(D.retarget[0], D.retarget[1]);
+      b.lazy = Math.random() < D.lazy; // Easy has off-moments: cruise about instead of hunting
+      b.tgt = b.lazy ? null : aiPickTarget(r, D, ps); b.zp = null;
+      // STALK (Normal / Hard): you're on foot -> hang about near your rocket, grab you if you run across a cable line, jump you when you remount
+      if (!b.lazy && !player.mounted && !player.hop && !riders.some(q => q !== r && q.ai && q.brain.stalk) && Math.random() < D.stalk * ps.pull) { b.stalk = true; b.tgt = null; b.retarget = rand(4, 7); }
+      if (!b.stalk && (b.lazy || !b.tgt)) { b.wx = rand(-55, 55); b.wz = rand(-55, 55); }
+    }
+    const o = b.tgt;
+    if (o && (!o.mounted || o.hop)) b.tgt = null;
+    if (b.tgt) { aiSee(r, b.tgt, D); const dd = Math.hypot(b.tgt.x - r.x, b.tgt.z - r.z);
+      if (!b.zp || b.zp.o !== b.tgt || b.zp.until < simTime) { let z = aiPickZone(r, b.tgt, dd);
+        if (z === 'mid' && Math.random() < D.hookPref) { const ap = Math.abs(wrapA(Math.atan2(b.tgt.x - r.x, b.tgt.z - r.z) - b.tgt.h)); z = ap < 1.3 ? 'tail' : ap > 1.85 ? 'nose' : (Math.random() < 0.5 ? 'nose' : 'tail'); } // set up a tow / leash / crash
+        b.zp = { o: b.tgt, zone: z, until: simTime + 1.5, midOk: Math.random() < D.midOk }; }
+      b.zone = b.zp.zone; b.midOk = b.zp.midOk; b.side = null;
+      b.mode = pc >= 0 ? 'SWING' : dd > 45 ? 'HUNT' : dd > 24 ? 'INTERCEPT' : 'ATTACK';
+      // target behind and close: snag a post on that side to turn tight
+      const g = aiGhost(r, D), rel = wrapA(Math.atan2(g.x - r.x, g.z - r.z) - r.h);
+      if (pc < 0 && b.cool <= 0 && dd < 42 && Math.abs(rel) > 1.5 && Math.random() < D.swing * ps.seek) b.swingWant = { i: rel > 0 ? 0 : 1, until: simTime + 1.2 };
+    } else b.mode = b.stalk ? 'STALK' : 'WANDER';
+    b.boostPlan = Math.random() < D.boost;
+    // dodge (Normal / Hard): an enemy cable flying at you -> swerve off its line and boost (you can do the same)
+    if (D.dodge > 0 && !(b.dodgeT > simTime)) for (const q of riders) { if (q === r || !q.mounted) continue;
+      for (const c of q.cables) { if (c.st !== 'out') continue; const dx = r.x - c.tx, dz = r.z - c.tz, dd = Math.hypot(dx, dz), rv = ((c.vx - r.vx) * dx + (c.vz - r.vz) * dz) / (dd || 1);
+        if (dd < 14 && rv > 15 && Math.random() < D.dodge) { const cs = Math.hypot(c.vx, c.vz) || 1, side = (dx * -c.vz + dz * c.vx) > 0 ? 1 : -1; b.dodgeT = simTime + 0.45; b.dodgeTo = [r.x - c.vz / cs * side * 20 + r.vx * 0.5, r.z + c.vx / cs * side * 20 + r.vz * 0.5]; stats.aiDodges = (stats.aiDodges || 0) + 1; break; } } }
+  }
+  const o = b.tgt && b.tgt.mounted && !b.tgt.hop ? b.tgt : null, g = o ? aiGhost(r, D) : null;
+  r.boost = false;
+  if (b.dodgeT > simTime && pc < 0) { aiSteer(r, b.dodgeTo[0], b.dodgeTo[1]); r.boost = true; b.mode = 'EVADE'; return; }
+  if (pc >= 0) { // SWING management
+    const c = r.cables[pc]; b.mode = 'SWING'; b.swingT = (b.swingT || 0) + dt;
+    let done = b.swingT > (c.aiPurpose === 'turn' ? 2.6 : 3.2);
+    if (o && g) { const rel = wrapA(Math.atan2(g.x - r.x, g.z - r.z) - r.h), dP = Math.hypot(o.x - c.tgt.x, o.z - c.tgt.z);
+      const sweeping = dP < c.len + 3 && dP > 2; // the target is inside the swing circle: keep sweeping the line through them
+      if (Math.abs(rel) < 0.3 && !sweeping && b.swingT > 0.3) done = true;
+      r.steer = sweeping ? 0 : clamp(-rel * 0.8, -1, 1) * 0.3; // (steering while latched leans / pays out: keep it gentle)
+      if (b.cool <= 0 && r.cables[1 - pc].st === 'none') aiFireChecks(r, o, g, D, ps); }
+    else { r.steer = 0; if (b.swingT > 1.2) done = true; }
+    if (done) { b.grab[pc] = false; b.swingT = 0; }
+    return;
+  }
+  b.swingT = 0;
+  if (!o && b.stalk && !player.mounted) { // STALK: circle ~14 units off your rocket
+    const ox = r.x - player.x, oz = r.z - player.z, a = Math.atan2(ox, oz) + 0.7; aiSteer(r, player.x + Math.sin(a) * 14, player.z + Math.cos(a) * 14);
+    const m = player.tum; if (b.cool <= 0 && player.footT >= 0.4 && !player.hop && !heldBy(player) && !player.tied && m.y < 2.5 && D.grabFoot > 0)
+      for (let i = 0; i < 2; i++) { if (r.cables[i].st !== 'none') continue; const sh = aiShotSim(r, i, { x: m.x, z: m.z, vx: m.vx, vz: m.vz, h: 0 }, D.slop);
+        if (sh.hit === 'mid' && Math.random() < D.grabFoot) { aiFire(r, i, player, 'body', true, 'grab'); break; } }
+    return;
+  }
+  if (!o) { // WANDER (also Easy's lazy spells): cruise between waypoints, snag the odd post
+    if (Math.hypot(b.wx - r.x, b.wz - r.z) < 8) { b.wx = rand(-55, 55); b.wz = rand(-55, 55); }
+    aiSteer(r, b.wx, b.wz);
+    if (b.cool <= 0 && Math.random() < dt * 0.25) for (let i = 0; i < 2; i++) { const p = r.cables[i].st === 'none' ? aiPostOnSide(r, i, 18) : null; if (p) { aiFire(r, i, p, 'post', true, 'turn'); break; } }
+    return;
+  }
+  const dx = g.x - r.x, dz = g.z - r.z, d = Math.hypot(dx, dz) || 1, rel = wrapA(Math.atan2(dx, dz) - r.h);
+  // SWING wanted: fire a held cable at a post on the turning side as soon as one is on the line
+  if (b.swingWant) { if (simTime > b.swingWant.until || Math.abs(rel) < 1.0) b.swingWant = null;
+    else { const i = b.swingWant.i, p = r.cables[i].st === 'none' && b.cool <= 0 ? aiPostOnSide(r, i, 20) : null; if (p) { aiFire(r, i, p, 'post', true, 'turn'); b.swingWant = null; b.mode = 'SWING'; return; } } }
+  // INTERCEPT / ATTACK steering: aim past the target's predicted spot, offset sideways so it slides onto the chosen cable's line
+  const closing = Math.max(8, Math.hypot(r.vx, r.vz) + 4), tl = Math.min(1.6, d / closing) * (d > 45 ? 1 : 0.8);
+  const px = g.x + g.vx * tl, pz = g.z + g.vz * tl, lx = px - r.x, lz = pz - r.z, ld = Math.hypot(lx, lz) || 1;
+  if (!b.side || Math.abs(rel) > 2.2) b.side = rel > 0 ? -1 : 1; // which side the target is on now (left = -1 -> cable 0)
+  const pass = d > 45 ? 0 : D.pass * clamp((d - 4) / 20, 0.25, 1), [rx, rz] = rightOf(Math.atan2(lx, lz));
+  const ax = px - rx * b.side * pass, az = pz - rz * b.side * pass; // the target ends up on side b.side
+  const dh = aiSteer(r, ax, az);
+  r.boost = (b.boostPlan && d > (D.boost > 0.8 ? 18 : 30) && Math.abs(dh) < 0.35) || (D.boost > 0.8 && d < 26 && Math.abs(rel) < 1.2 && Math.abs(dh) < 0.5 && Math.random() < 0.5);
+  if (b.cool <= 0 && d < T.CABLE_MAX + 6 && !(o.inv > 0) && !o.hop) aiFireChecks(r, o, g, D, ps);
+  // a missed shot: reel it back in (tap-to-retract, same as you) so the cable is ready again
+  for (let i = 0; i < 2; i++) { const c = r.cables[i]; if (c.st === 'out' && c.aiPurpose !== 'turn' && c.t > 0.55 && D.retract > 0 && !c.aiRetr) { c.aiRetr = true; if (Math.random() < D.retract && Math.hypot(c.tx - o.x, c.tz - o.z) > 7) retractCable(r, i); } }
+}
+function aiWander(r, dt) { // the v0.6 passive cruise (used while the AI is frozen in tests)
+  const b = r.brain; b.mode = 'WANDER';
+  if (Math.hypot(b.wx - r.x, b.wz - r.z) < 8 || Math.random() < dt * 0.1) { b.wx = rand(-60, 60); b.wz = rand(-60, 60); }
+  let tx = b.wx, tz = b.wz; if (Math.abs(r.x) > A - 12 || Math.abs(r.z) > A - 12) { tx = 0; tz = 0; }
+  r.steer = clamp(-wrapA(Math.atan2(tx - r.x, tz - r.z) - r.h) * 2, -1, 1);
+  b.boostT -= dt; if (b.boostT <= 0) { r.boost = Math.random() < 0.3; b.boostT = rand(1, 3); }
+  b.cool -= dt; b.hold -= dt; r.aiHold = false;
 }
 function aiCableDone(r) { for (let i = 0; i < 2; i++) if (r.cables[i].st === 'none') r.brain.grab[i] = false; }
 
@@ -1188,11 +1356,11 @@ function syncTethers() {
 // ---------------- main loop ----------------
 const stats = { releases: [], fired: 0, frames: 0, fps: 0, latches: 0, playerLatches: 0, knockoffs: [], maxSwingAngle: 0, retracts: 0, hooks: 0, ties: [], frees: [], awards: [], clotheslines: [],
   kicks: [], remounts: [], recalls: [], respawns: [], runovers: [], knockdowns: [], thefts: [], stealHooks: [], stealTries: [], stealBreaks: 0,
-  liveHooks: [], liveSwings: [], liveEnds: [], crashes: [], rips: [], aiZones: [], aiHookPlans: [] }; // v0.6
+  liveHooks: [], liveSwings: [], liveEnds: [], crashes: [], rips: [], aiZones: [], aiHookPlans: [], aiShots: [], aiFocus: {}, aiModes: {} }; // v0.6 (+ v0.6.1 AI shot log / focus / mode time)
 let last = performance.now(), fpsAcc = 0, fpsN = 0, simTime = 0, swingStartAng = null, swingAccum = 0, lastAng = 0;
 function stepWorld(dt, hold) {
   const N = Math.ceil(dt / (1 / 120)), h = dt / N;
-  for (const r of riders) if (r.ai) { aiCableDone(r); aiThink(r, dt); }
+  for (const r of riders) if (r.ai) { aiCableDone(r); aiThink(r, dt); const k = r.name + '>' + (r.mounted && r.brain.tgt ? r.brain.tgt.name : '-'); stats.aiFocus[k] = (stats.aiFocus[k] || 0) + dt; if (player.mounted && !player.hop && r.mounted) { const k2 = 'avail:' + k; stats.aiFocus[k2] = (stats.aiFocus[k2] || 0) + dt; if (riders.every(q => q.mounted && !q.hop)) { const k3 = 'both:' + k; stats.aiFocus[k3] = (stats.aiFocus[k3] || 0) + dt; } } const m = r.name + ':' + (r.brain.mode || '?'); stats.aiModes[m] = (stats.aiModes[m] || 0) + dt; }
   for (let s = 0; s < N; s++) {
     for (const r of riders) { for (let i = 0; i < 2; i++) updateCable(r, i, h, r.ai ? (r.aiHold || r.brain.grab[i]) : hold[i]); stepRider(r, h); }
     riderBumps(); runOvers(); updateTethers(h); simTime += h;
@@ -1317,7 +1485,7 @@ function unFoot(r) { // test helper: back on the rocket, clean state
   if (r === player) hideRunHint();
 }
 window.__rj3d = {
-  version: '3D test v0.6', ready: true,
+  version: '3D test v0.6.1', ready: true,
   renderer: () => ({ webgl: !!gl, isWebGL2: renderer.capabilities.isWebGL2, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   tuning: () => ({ tipDrag: T.TIP_DRAG, tipMass: T.TIP_MASS, payOut: T.PAY_OUT, reelIn: T.REEL_IN, turn: T.TURN, latchSteer: T.LATCH_STEER, cableMax: T.CABLE_MAX, cableSpeed: T.CABLE_SPEED, cableLife: T.CABLE_LIFE, cableFwdDeg: T.CABLE_FWD * 180 / Math.PI }),
   cable: i => { const c = player.cables[i], [tx, tz] = cableTip(player, i); const [mx, mz] = mountOf(player, i); return { mx, mz, vx: c.vx, vz: c.vz, taut: c.taut, len: c.len, latchSpeed: c.latchSpeed, latchLen: c.latchLen, hold: c.hold, allow: c.allow, boost: player.boost, ax: c.tgt?.x, az: c.tgt?.z, pvx: player.vx, pvz: player.vz, sag: c.pts.map(p => [p.x, p.y, p.z]), st: c.st, ext: c.ext, t: c.t, kind: c.tgt?.kind || null, tx, tz, px: player.x, pz: player.z, h: player.h }; },
@@ -1339,9 +1507,9 @@ window.__rj3d = {
   marker: () => ({ ...markSt, display: $('rkMark').style.display, hint: +$('runHint').style.opacity || 0, hintText: $('runHint').textContent, onfootClass: document.body.classList.contains('onfoot') }),
   knockPlayer(by) { const o = by == null ? null : riders.filter(r => r.ai)[by]; return knockOff(player, o, o ? 'cable' : 'test'); },
   knockAI(i, by) { const r = riders.filter(r => r.ai)[i]; return knockOff(r, by == null ? null : by === -1 ? player : riders.filter(r => r.ai)[by], 'test'); },
-  setFoot(i, x, z, rx, rz, footT = 2, yaw) { const r = i == null ? player : riders.filter(r => r.ai)[i]; if (r.mounted) knockOff(r, null, 'test');
+  setFoot(i, x, z, rx, rz, footT = 2, yaw) { const r = i == null ? player : riders.filter(r => r.ai)[i]; if (r.mounted) knockOff(r, null, 'test'); r.theftTow = r.theftTie = false;
     Object.assign(r.tum, { x, z, y: 0.3, vx: 0, vy: 0, vz: 0, rx: 0, rz: 0, wx: 0, wz: 0, ppx: x, ppz: z }); Object.assign(r, { x: rx, z: rz, vx: 0, vz: 0, footT, tumble: 0, stun: 0, hitCool: 0, spin: 0, homing: false }); if (r === player) { camSnap = true; footRamp = 1; footYaw = yaw ?? Math.atan2(rx - x, rz - z); r.fh = footYaw; } },
-  step(sec, mvx = 0, mvz = 0) { for (let n = 0; n < sec * 60; n++) { if (!player.mounted) { player.mv.x = mvx; player.mv.z = mvz; } stepWorld(1 / 60, [false, false]); } },
+  step(sec, mvx = 0, mvz = 0, steer) { for (let n = 0; n < sec * 60; n++) { if (!player.mounted) { player.mv.x = mvx; player.mv.z = mvz; } else if (steer != null) player.steer = steer; stepWorld(1 / 60, [false, false]); } }, // v0.6.1: optional player steer
   setDiff(d) { diff = d; applyDiff(); },
   resetRunHint() { localStorage.removeItem('rj3d_runhint'); runHintShown = false; },
   stealX(x) { window.__rj3dStealX = x; },
@@ -1354,6 +1522,7 @@ window.__rj3d = {
   bodyAt(i, x, z) { const r = riders.filter(r => r.ai)[i]; if (!r.mounted) { unFoot(r); r.mounted = true; } knockOff(r, r, 'test'); Object.assign(r.tum, { x, z, y: 0.3, vx: 0, vz: 0, vy: 0, ppx: x, ppz: z }); r.footT = 0; r.vx = r.vz = 0;
     const d = Math.hypot(r.x - x, r.z - z); if (d < 12) { const cd = Math.hypot(x, z) || 1; r.x = x - x / cd * 14; r.z = z - z / cd * 14; } }, // fresh knockoff; keep its rocket a run away
   aiCfg(o) { Object.assign(T, o); },
+  diffCfg(d, o) { if (o) Object.assign(DIFFS[d], o); return { ...DIFFS[d] }; }, // v0.6.1 tuning hook
   sim(sec, aiTie) { // headless fast sim: everybody free, fixed 1/60 steps, no rendering
     window.__rj3dNoAIHook = false; window.__rj3dAITie = aiTie || 1; for (const r of riders) if (r.ai) { r.brain.lock = false; r.brain.cool = rand(0.2, 1); }
     const t0 = stats.ties.length, k0 = stats.knockoffs.length, h0 = stats.hooks;
@@ -1361,10 +1530,66 @@ window.__rj3d = {
     window.__rj3dAITie = 1;
     return { ties: stats.ties.slice(t0), kos: stats.knockoffs.length - k0, hooks: stats.hooks - h0, clotheslines: stats.clotheslines.length, frees: stats.frees.length };
   },
+
+  // v0.6.1: headless sim with a scripted player. mode 'avg' = an average player (wanders between waypoints, boosts now and then,
+  // takes the odd shot when an AI drifts onto a cable line, holds some, rips leashes, runs back to the rocket);
+  // 'park' = the player sits still (speed 0, no shots) and only runs back to the rocket when knocked off.
+  simBot(sec, mode = 'avg', d) {
+    if (d) this.setDiff(d); this.clearTies(); window.__rj3dNoAIHook = false;
+    this.setPlayer(0, -30, 0, mode === 'park' ? 0 : 20); if (mode === 'park') player.testSpeed = 0;
+    riders.filter(r => r.ai).forEach((r, k) => { unFoot(r); Object.assign(r, { x: k ? 30 : -30, z: k ? 25 : 20, h: k ? 3.6 : 2.6, vx: 0, vz: 0, mounted: true, pts: 0 }); Object.assign(r.brain, { lock: false, cool: rand(0.5, 1.5), think: 0, retarget: 0, tgt: null, rev: null }); });
+    const L = k => stats[k].length, n0 = { s: L('aiShots'), h: L('liveHooks'), k: L('knockoffs'), t: L('ties'), c: L('clotheslines'), th: L('thefts'), cr: L('crashes') };
+    const f0 = { ...stats.aiFocus }, m0 = { ...stats.aiModes };
+    const pb = { wx: 0, wz: 0, wt: 0, cd: 2, hold: [0, 0], boostT: 0 }, AIs = riders.filter(r => r.ai), names = AIs.map(r => r.name);
+    for (let n = 0; n < sec * 60; n++) { const dt = 1 / 60;
+      const hold = [false, false];
+      if (!player.mounted) { player.steer = 0; player.boost = false; if (!player.hop) { const dx = player.x - player.tum.x, dz = player.z - player.tum.z, dd = Math.hypot(dx, dz) || 1; player.mv.x = dx / dd; player.mv.z = dz / dd; } }
+      else if (mode === 'park') { player.steer = 0; player.boost = false; }
+      else {
+        pb.wt -= dt; if (pb.wt <= 0 || Math.hypot(pb.wx - player.x, pb.wz - player.z) < 8) { pb.wx = rand(-55, 55); pb.wz = rand(-55, 55); pb.wt = rand(3, 6); }
+        let tx = pb.wx, tz = pb.wz; if (Math.abs(player.x) > A - 12 || Math.abs(player.z) > A - 12) { tx = 0; tz = 0; }
+        player.steer = clamp(-wrapA(Math.atan2(tx - player.x, tz - player.z) - player.h) * 2, -1, 1);
+        pb.boostT -= dt; if (pb.boostT <= 0) { pb.boost = Math.random() < 0.2; pb.boostT = rand(1, 3); }
+        const lt = liveTieOf(player); player.boost = pb.boost || !!(lt && lt.kind === 'leash' && lt.life - lt.t > 0.8);
+        pb.cd -= dt;
+        if (pb.cd <= 0) for (const o of AIs) { if (!o.mounted || o.inv > 0) continue; let shot = -1;
+          for (let i = 0; i < 2; i++) if (player.cables[i].st === 'none' && aiLined(player, i, o.x, o.z, 22, false) >= 0) shot = i;
+          if (shot >= 0 && Math.random() < 0.35) { fireCable(player, shot); pb.hold[shot] = Math.random() < 0.5 ? rand(0.4, 1.6) : 0; pb.cd = rand(1.5, 3.5); break; }
+          else if (shot >= 0) pb.cd = 0.4; }
+        if (pb.cd <= 0 && Math.random() < dt * 0.12) { const i = Math.random() < 0.5 ? 0 : 1; if (player.cables[i].st === 'none') { fireCable(player, i); pb.hold[i] = 0; pb.cd = rand(1.5, 3); } }
+        for (let i = 0; i < 2; i++) { if (pb.hold[i] > 0) { pb.hold[i] -= dt; hold[i] = true; } }
+      }
+      stepWorld(dt, hold); if (player.mounted && !player.hop) pb.up = (pb.up || 0) + dt;
+      for (const r of AIs) { for (const c of r.cables) if (c.st === 'out') pb.ext = Math.max(pb.ext || 0, c.ext); if (r.mounted) pb.vmax = Math.max(pb.vmax || 0, Math.hypot(r.vx, r.vz)); }
+      if (player.mounted) pb.pvmax = Math.max(pb.pvmax || 0, Math.hypot(player.vx, player.vz));
+    }
+    const sl = k => stats[k].slice(n0[k]);
+    const shots = stats.aiShots.slice(n0.s), hooks = stats.liveHooks.slice(n0.h), kos = stats.knockoffs.slice(n0.k), ties = stats.ties.slice(n0.t), cls = stats.clotheslines.slice(n0.c);
+    const isAI = x => names.includes(x), min = sec / 60;
+    const foc = {}; for (const k in stats.aiFocus) foc[k] = stats.aiFocus[k] - (f0[k] || 0);
+    const md = {}; for (const k in stats.aiModes) { const v = stats.aiModes[k] - (m0[k] || 0); if (v > 0.01) md[k] = +v.toFixed(1); }
+    const fsum = f => Object.entries(foc).filter(([k]) => f(k)).reduce((a, [, v]) => a + v, 0), tYou = fsum(k => k.startsWith('avail:') && k.endsWith('>YOU')), tAll = fsum(k => k.startsWith('avail:'));
+    const out = { diff, mode, sec,
+      shotsYou: shots.filter(x => x.at === 'YOU').length, shotsAI: shots.filter(x => isAI(x.at)).length, shotsPost: shots.filter(x => x.at === 'post').length,
+      hooksYou: hooks.filter(h => isAI(h.by) && h.victim === 'YOU').length, hooksAI: hooks.filter(h => isAI(h.by) && isAI(h.victim)).length,
+      kosYou: kos.filter(k => k.victim === 'YOU' && isAI(k.by)).length, kosAIvAI: kos.filter(k => isAI(k.victim) && isAI(k.by)).length, kosByYou: kos.filter(k => k.by === 'YOU').length,
+      kosAI: kos.filter(k => isAI(k.by)).length,
+      kosYouHow: kos.filter(k => k.victim === 'YOU' && isAI(k.by)).reduce((a, k) => (a[k.how] = (a[k.how] || 0) + 1, a), {}),
+      kosAIAim: kos.filter(k => isAI(k.victim) && isAI(k.by)).reduce((a, k) => { const key = k.how + ':' + k.aim + ':' + k.purpose + (player.mounted ? '' : ''); a[key] = (a[key] || 0) + 1; return a; }, {}),
+      kosYouAim: kos.filter(k => k.victim === 'YOU' && isAI(k.by)).reduce((a, k) => { const key = k.how + ':' + k.aim + ':' + k.purpose; a[key] = (a[key] || 0) + 1; return a; }, {}),
+      tiesYou: ties.filter(t => t.ai && (t.victims.includes('YOU') || t.lives.includes('YOU'))).length, tiesAI: ties.filter(t => t.ai).length,
+      tieKinds: ties.filter(t => t.ai).reduce((a, t) => (a[t.kind] = (a[t.kind] || 0) + 1, a), {}),
+      clothesAI: cls.filter(c => c.by && isAI(c.by)).length, clothesYou: cls.filter(c => c.victim === 'YOU' && c.by && isAI(c.by)).length,
+      theftsYou: stats.thefts.slice(n0.th).filter(t => t.owner === 'YOU' && isAI(t.thief)).length, crashesYou: stats.crashes.slice(n0.cr).filter(c => c.victim === 'YOU').length,
+      focusYou: tAll ? +(tYou / tAll).toFixed(2) : 0, focusChoice: +(fsum(k => k.startsWith('both:') && k.endsWith('>YOU')) / (fsum(k => k.startsWith('both:') && !k.endsWith('>-')) || 1)).toFixed(2), upFrac: +((pb.up || 0) / sec).toFixed(2), aiMaxExt: +(pb.ext || 0).toFixed(2), aiMaxSpeed: +(pb.vmax || 0).toFixed(1), youMaxSpeed: +(pb.pvmax || 0).toFixed(1), dodges: stats.aiDodges || 0, modes: md };
+    out.koYouPerMin = +(out.kosYou / min).toFixed(2); out.hookYouPerMin = +(out.hooksYou / min).toFixed(2); out.aiKoPerMin = +(out.kosAI / min).toFixed(2);
+    player.testSpeed = undefined; return out;
+  },
   // v0.6 hooks
   cruiseAI(i, x, z, h, v, boost = false) { const r = riders.filter(r => r.ai)[i]; unFoot(r); Object.assign(r, { x, z, h, vx: Math.sin(h) * v, vz: Math.cos(h) * v, mounted: true, testSpeed: boost ? undefined : v, boost }); r.brain.cool = 1e9; r.brain.lock = true; r.brain.forceBoost = boost; },
   aiAt(i, x, z, h, v) { const r = riders.filter(r => r.ai)[i]; unFoot(r); Object.assign(r, { x, z, h, vx: Math.sin(h) * v, vz: Math.cos(h) * v, mounted: true }); r.brain.cool = 0; r.brain.lock = false; r.brain.forceBoost = false; r.brain.wx = x + Math.sin(h) * 60; r.brain.wz = z + Math.cos(h) * 60; },
   playerHook(i, ai, zone) { const o = riders.filter(r => r.ai)[ai]; releaseCable(player, i, true); latchLive(player, i, o, zone); },
+  aiMode: () => riders.filter(r => r.ai).map(r => ({ name: r.name, mode: r.brain.mode, tgt: r.brain.tgt ? r.brain.tgt.name : null, zone: r.brain.zone || null })),
   aiPeek(i) { const r = riders.filter(r => r.ai)[i]; return { zp: r.brain.zp ? { o: r.brain.zp.o.name, zone: r.brain.zp.zone } : null, cool: r.brain.cool, ic: [0, 1].map(k => ({ nose: aiIntercept(r, k, player, 'nose'), tail: aiIntercept(r, k, player, 'tail') })), cables: r.cables.map(c => c.st), x: r.x, z: r.z, h: r.h }; },
   aiHookPlayer(i, zone) { const r = riders.filter(r => r.ai)[i]; const k = r.cables[0].st === 'none' ? 0 : 1; releaseCable(r, k, true); r.brain.grab[k] = true; latchLive(r, k, player, zone); },
   speedAI(i, v, h) { const r = riders.filter(r => r.ai)[i]; r.testSpeed = v; if (h != null) r.h = h; },
