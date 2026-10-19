@@ -4,7 +4,7 @@
 <link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.8</title>
+<title>Rocket Jockey 3D test v0.8.1</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -47,17 +47,39 @@ body.onfoot #bT{opacity:1;background:rgba(200,120,255,.45)}
 #rkMark .arr{font-size:30px;line-height:44px;width:44px;height:44px;display:inline-block;border-radius:50%;background:rgba(0,0,0,.35);border:2px solid rgba(125,255,138,.7)}
 #hookHint{top:63%;left:50%;transform:translateX(-50%);font-size:15px;font-weight:bold;color:#ffb040;opacity:0;transition:opacity .2s;text-align:center}
 #runHint{top:56%;left:50%;transform:translateX(-50%);font-size:18px;font-weight:bold;color:#7dff8a;opacity:0;transition:opacity .3s;letter-spacing:1px}
+/* v0.8.1 touch layouts: CLASSIC (v0.8) / HYBRID (stick + 3 buttons) / GESTURE (stick + invisible right zones) */
+body.lay-hybrid #bT,body.lay-hybrid #bUp,body.lay-hybrid #bDn,body.lay-gesture .btn{display:none!important}
+body.lay-hybrid #bR{right:16px;bottom:16px;width:92px;height:92px}
+body.lay-hybrid #bL{right:126px;bottom:16px;width:92px;height:92px}
+body.lay-hybrid #bBoost{right:72px;bottom:126px;width:90px;height:90px}
+body.lay-hybrid.onfoot #bL,body.lay-hybrid.onfoot #bR{opacity:1;background:rgba(200,120,255,.45)}
+.gz{position:fixed;top:66px;bottom:8px;z-index:4;pointer-events:none;border:2px dashed rgba(255,255,255,.45);border-radius:14px;display:none;align-items:center;justify-content:center;text-align:center;color:#fff;font-weight:bold;font-size:15px;text-shadow:0 0 3px #000,1px 1px 0 #000;transition:opacity .6s;background:rgba(255,255,255,.04)}
+#gzL{left:calc(50% + 6px);right:calc(25% + 3px)}#gzR{left:calc(75% + 3px);right:6px}
+#gzUp{position:fixed;left:50%;right:0;top:74px;z-index:4;pointer-events:none;text-align:center;font-size:13px;font-weight:bold;color:#ffcf7a;display:none;transition:opacity .6s;text-shadow:0 0 3px #000}
+body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp{display:flex}
+#ovl{position:fixed;inset:0;z-index:15;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;color:#fff;text-align:center}
+#ovl.show{display:flex}
+#ovl .card{max-width:560px;width:88%;max-height:92%;overflow:auto;background:rgba(20,26,40,.94);border:2px solid #fff6;border-radius:14px;padding:12px 18px}
+#ovl h2{margin:2px 0 8px;font-size:20px;color:#ffd84a}
+#ovl .lays{display:flex;gap:8px;justify-content:center;margin:6px 0 10px}
+#ovl .lays button,#ovl .go{font-size:15px;font-weight:bold;padding:10px 12px;border-radius:10px;border:2px solid #fff8;background:rgba(255,255,255,.1);color:#fff;min-width:110px}
+#ovl .lays button.sel{background:#2f7d3a;border-color:#7dff8a}
+#ovl .go{background:#c46a12;border-color:#ffc070;min-width:160px;margin-top:6px}
+#ovl ul{text-align:left;margin:4px 0;padding-left:18px;font-size:14px;line-height:1.35}
+#ovl .sub{font-size:12px;opacity:.75;margin:4px 0}
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.8</div>
+<div id="ver" class="hud">3D test v0.8.1</div>
 <div id="score" class="hud">KO 0</div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
-<div id="topbtns"><button id="bDiff">AI: NORMAL</button><button id="bLQ">LQ: on</button><button id="bFS">⛶</button></div>
+<div id="topbtns"><button id="bPause">⏸</button><button id="bCtl">🎮 HYBRID</button><button id="bDiff">AI: NORMAL</button><button id="bLQ">LQ: on</button><button id="bFS">⛶</button></div>
 <div id="cross"></div><div id="rkMark"><div class="arr">&#9650;</div><div>ROCKET</div></div><div id="runHint" class="hud">RUN TO ROCKET</div><div id="hookHint" class="hud"></div>
 <div id="stickBase"></div><div id="stickKnob"></div><div id="stickHint" class="hud">drag left side to steer</div>
 <div id="bL" class="btn">◀ CABLE</div><div id="bR" class="btn">CABLE ▶</div><div id="bBoost" class="btn">BOOST</div><div id="bT" class="btn off">TIE</div><div id="bUp" class="btn abtn">▲ UP</div><div id="bDn" class="btn abtn">▼ DN</div><div id="altG"><div id="altK"></div></div>
+<div id="gzL" class="gz">◀ CABLE<br>tap / hold</div><div id="gzR" class="gz">CABLE ▶<br>tap / hold</div><div id="gzUp">flick ▲ = BOOST (keep holding)</div>
+<div id="ovl"><div class="card"></div></div>
 <div id="rot">Rotate to landscape ↻</div>
 <script type="module">
 import * as THREE from 'three';
@@ -375,7 +397,7 @@ addRider('GOLD', 0xe0b020, 25, 15, Math.PI * 0.7, true);
 let score = 0;
 
 // ---------------- input ----------------
-const inp = { upT: false, dnT: false, stickX: 0, stickY: 0, keyL: false, keyR: false, boostT: false, boostK: false, cabL: false, cabR: false, mouseL: false, mouseR: false };
+const inp = { gL: false, gR: false, gBoost: false, upT: false, dnT: false, stickX: 0, stickY: 0, keyL: false, keyR: false, boostT: false, boostK: false, cabL: false, cabR: false, mouseL: false, mouseR: false };
 let anyInput = false;
 function firstInput() { anyInput = true; ensureAudio(); }
 const keys = {};
@@ -388,13 +410,47 @@ addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 let stickId = null, stickX0 = 0, stickY0 = 0;
 const cvs = renderer.domElement;
 addEventListener('touchstart', () => document.body.classList.add('touched'), { capture: true, passive: true });
+// v0.8.1 touch layouts. CLASSIC = v0.8 exactly. HYBRID / GESTURE: the same floating left stick (x = steer, y = altitude with a dead
+// zone; on foot it runs). HYBRID: three right-thumb buttons (CABLE x2 + BOOST; on foot BOOST = JUMP, either CABLE = DIVE).
+// GESTURE: the right half is two invisible zones (left / right cable: touch = fire, hold = keep the latch, touch again = reel in);
+// a fast upward flick = BOOST (keep the finger down to keep boosting); on foot tap = JUMP, swipe down = DIVE. Both: auto-tie.
+const LAYOUTS = ['CLASSIC', 'HYBRID', 'GESTURE'], QS = new URLSearchParams(location.search);
+let LAY = LAYOUTS.includes((QS.get('layout') || '').toUpperCase()) ? QS.get('layout').toUpperCase() : LAYOUTS.includes(localStorage.getItem('rj3d_layout')) ? localStorage.getItem('rj3d_layout') : 'HYBRID';
+const STICK_DZ = 0.32, STICK_FULL = 0.85; // altitude: vertical dead zone (of the 60 px stick radius), full climb rate at 85 % deflection
+const gT = new Map(); // GESTURE touches in the right zone: id -> { x0, y0, t0, side, fired, boost, used }
+const gHold = [0, 0]; let gBoostN = 0, gBurst = 0, gzT = 0;
+const GZ_FLICK = 42, GZ_FLICK_T = 260, GZ_SWIPE = 36;
+function gestStart(t) {
+  const side = t.clientX < innerWidth * 0.75 ? 0 : 1, g = { x0: t.clientX, y0: t.clientY, t0: performance.now(), side, fired: false, boost: false, used: false, foot: !player.mounted };
+  if (player.mounted) { g.fired = player.cables[side].st === 'none'; gHold[side]++; syncG(); }
+  gT.set(t.identifier, g);
+}
+function gestMove(t) {
+  const g = gT.get(t.identifier); if (!g || g.used || g.boost) return; const dy = t.clientY - g.y0, dt = performance.now() - g.t0;
+  if (g.foot) { if (dy > GZ_SWIPE && !player.mounted) { g.used = true; diveQ = true; gestLog.push('dive'); } return; }
+  if (-dy > GZ_FLICK && dt < GZ_FLICK_T && Math.abs(t.clientX - g.x0) < -dy) { // a flick up turns this touch into BOOST: its cable is called off
+    g.boost = true; gHold[g.side] = Math.max(0, gHold[g.side] - 1); gBoostN++; gBurst = 0.8; syncG();
+    if (g.fired && player.cables[g.side].st === 'out' && player.mounted) releaseCable(player, g.side, true);
+    gestLog.push('boost'); }
+}
+function gestEnd(t) {
+  const g = gT.get(t.identifier); if (!g) return; gT.delete(t.identifier);
+  if (g.boost) gBoostN = Math.max(0, gBoostN - 1); else if (!g.foot) gHold[g.side] = Math.max(0, gHold[g.side] - 1);
+  if (g.foot && !g.used && performance.now() - g.t0 < 450 && Math.hypot(t.clientX - g.x0, t.clientY - g.y0) < 30 && !player.mounted) { jumpQ = true; gestLog.push('jump'); }
+  syncG();
+}
+function syncG() { inp.gL = gHold[0] > 0; inp.gR = gHold[1] > 0; inp.gBoost = gBoostN > 0; }
+const gestLog = []; let paused = false, ovlMode = null;
 cvs.addEventListener('touchstart', e => { e.preventDefault(); firstInput();
-  for (const t of e.changedTouches) if (stickId === null && t.clientX < innerWidth * 0.5) { stickId = t.identifier; stickX0 = t.clientX; stickY0 = t.clientY; showStick(t.clientX, t.clientY); }
+  for (const t of e.changedTouches) {
+    if (stickId === null && t.clientX < innerWidth * 0.5) { stickId = t.identifier; stickX0 = t.clientX; stickY0 = t.clientY; showStick(t.clientX, t.clientY); }
+    else if (LAY === 'GESTURE' && t.clientX >= innerWidth * 0.5 && !paused) gestStart(t); }
 }, { passive: false });
 cvs.addEventListener('touchmove', e => { e.preventDefault();
-  for (const t of e.changedTouches) if (t.identifier === stickId) { const dx = clamp(t.clientX - stickX0, -60, 60); inp.stickX = dx / 60; inp.stickY = clamp(t.clientY - stickY0, -60, 60) / 60; $('stickKnob').style.left = (stickX0 + dx) + 'px'; $('stickKnob').style.top = (stickY0 + clamp(t.clientY - stickY0, -60, 60)) + 'px'; }
+  for (const t of e.changedTouches) { if (t.identifier === stickId) { const dx = clamp(t.clientX - stickX0, -60, 60); inp.stickX = dx / 60; inp.stickY = clamp(t.clientY - stickY0, -60, 60) / 60; $('stickKnob').style.left = (stickX0 + dx) + 'px'; $('stickKnob').style.top = (stickY0 + clamp(t.clientY - stickY0, -60, 60)) + 'px'; }
+    else if (gT.has(t.identifier)) gestMove(t); }
 }, { passive: false });
-const endT = e => { for (const t of e.changedTouches) if (t.identifier === stickId) { stickId = null; inp.stickX = 0; inp.stickY = 0; $('stickBase').style.display = $('stickKnob').style.display = 'none'; } };
+const endT = e => { for (const t of e.changedTouches) { if (t.identifier === stickId) { stickId = null; inp.stickX = 0; inp.stickY = 0; $('stickBase').style.display = $('stickKnob').style.display = 'none'; } else if (gT.has(t.identifier)) gestEnd(t); } };
 cvs.addEventListener('touchend', endT); cvs.addEventListener('touchcancel', endT);
 function showStick(x, y) { for (const id of ['stickBase', 'stickKnob']) { const s = $(id).style; s.display = 'block'; s.left = x + 'px'; s.top = y + 'px'; } }
 const btnIds = [];
@@ -408,6 +464,7 @@ const btnEnd = e => { const live = new Set([...e.touches].map(t => t.identifier)
   for (const b of btnIds) { for (const t of e.changedTouches) b.ids.delete(t.identifier); for (const i of [...b.ids]) if (!live.has(i)) b.ids.delete(i); if (!b.ids.size) b.set(false); } };
 document.addEventListener('touchend', btnEnd, true); document.addEventListener('touchcancel', btnEnd, true);
 bindBtn('bBoost', 'boostT'); $('bBoost').addEventListener('touchstart', () => { if (!player.mounted) jumpQ = true; }); $('bBoost').addEventListener('mousedown', () => { if (!player.mounted) jumpQ = true; }); bindBtn('bUp', 'upT'); bindBtn('bDn', 'dnT'); bindBtn('bL', 'cabL'); bindBtn('bR', 'cabR');
+for (const id of ['bL', 'bR']) { const f = () => { if (!player.mounted && LAY === 'HYBRID') diveQ = true; }; $(id).addEventListener('touchstart', f); $(id).addEventListener('mousedown', f); } // v0.8.1 HYBRID: on foot either CABLE button = DIVE
 let tieQ = false;
 $('bT').addEventListener('touchstart', e => { e.preventDefault(); firstInput(); tieQ = true; $('bT').classList.add('on'); setTimeout(() => $('bT').classList.remove('on'), 120); }, { passive: false });
 $('bT').addEventListener('mousedown', e => { firstInput(); tieQ = true; });
@@ -422,6 +479,37 @@ $('bDiff').addEventListener('click', () => { const n = Object.keys(DIFFS); diff 
 applyDiff();
 $('bLQ').addEventListener('click', () => { lowQ = !lowQ; localStorage.setItem('rj3d_lq', lowQ ? '1' : '0'); applyQuality(); });
 $('bFS').addEventListener('click', () => { firstInput(); const d = document.documentElement; if (!document.fullscreenElement) { (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d)?.then?.(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {}); } else document.exitFullscreen?.(); });
+
+// ---------------- v0.8.1 control layout selector (pause screen + top-bar toggle), one-time tutorial per layout ----------------
+const TUT = {
+  CLASSIC: ['CLASSIC (v0.8 buttons)', ['<b>Left half</b>: drag sideways to steer. <b>TIE</b> button on the left.', '<b>Right</b>: BOOST, ◀ CABLE / CABLE ▶ (hold to latch, tap again to reel in), ▲ UP / ▼ DN altitude.', '<b>On foot</b>: stick runs, BOOST = JUMP, TIE = DIVE.']],
+  HYBRID: ['HYBRID: stick + 3 buttons', ['<b>Left thumb</b>: a stick appears where you touch. ◀ ▶ steer, push ▲ to climb, ▼ to descend.', '<b>Right thumb</b>: ◀ CABLE / CABLE ▶ (hold = latch / grab, tap again = reel in) and BOOST above them.', '<b>Ties are automatic</b>: hold someone on one cable and hook a post or another rider with the other.', '<b>On foot</b>: stick runs, BOOST = JUMP, either CABLE button = DIVE.']],
+  GESTURE: ['GESTURE (experimental)', ['<b>Left thumb</b>: the same stick (◀ ▶ steer, ▲ ▼ altitude).', '<b>Right half</b> is two invisible zones: touch the left / right part = that cable. Hold to keep it, touch again to reel in.', '<b>Flick up ▲</b> anywhere on the right = BOOST (keep the finger down to keep boosting).', '<b>Ties are automatic</b> (as HYBRID). <b>On foot</b>: tap right = JUMP, swipe down = DIVE.']] };
+function applyLayout() {
+  for (const l of LAYOUTS) document.body.classList.toggle('lay-' + l.toLowerCase(), l === LAY);
+  $('bCtl').textContent = '🎮 ' + LAY;
+  if (LAY !== 'GESTURE') { gT.clear(); gHold[0] = gHold[1] = 0; gBoostN = 0; gBurst = 0; syncG(); }
+}
+function setLayout(l, save = true) { if (!LAYOUTS.includes(l)) return; LAY = l; if (save) localStorage.setItem('rj3d_layout', l); applyLayout(); if (ovlMode === 'pause') showPause(); }
+function tutSeen(l) { return localStorage.getItem('rj3d_tut_' + l) === '1'; }
+function showTut(l = LAY) {
+  const [h, items] = TUT[l]; ovlMode = 'tut'; paused = true; const o = $('ovl'); o.classList.add('show');
+  o.firstChild.innerHTML = '<h2>' + h + '</h2><ul>' + items.map(x => '<li>' + x + '</li>').join('') + '</ul><div class="sub">Change it any time: ⏸ or 🎮 (top right). Keyboard / mouse unchanged.</div><button class="go" id="tutGo">GOT IT, PLAY</button>';
+  $('tutGo').addEventListener('click', () => { localStorage.setItem('rj3d_tut_' + l, '1'); closeOvl(); });
+}
+function showPause() {
+  ovlMode = 'pause'; paused = true; const o = $('ovl'); o.classList.add('show');
+  o.firstChild.innerHTML = '<h2>PAUSED</h2><div class="sub">TOUCH CONTROLS</div><div class="lays">' + LAYOUTS.map(l => '<button data-l="' + l + '" class="' + (l === LAY ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>'
+    + '<ul>' + TUT[LAY][1].map(x => '<li>' + x + '</li>').join('') + '</ul><button class="go" id="pzGo">RESUME</button>';
+  for (const b of o.querySelectorAll('.lays button')) b.addEventListener('click', () => setLayout(b.dataset.l));
+  $('pzGo').addEventListener('click', () => closeOvl());
+}
+function closeOvl() { $('ovl').classList.remove('show'); ovlMode = null; paused = false; last = performance.now(); jumpQ = diveQ = tieQ = false;
+  if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) { showTut(); return; } gzFlash(); }
+function gzFlash() { gzT = 4.5; }
+$('bPause').addEventListener('click', () => { firstInput(); if (ovlMode === 'pause') closeOvl(); else showPause(); });
+$('bCtl').addEventListener('click', () => { firstInput(); setLayout(LAYOUTS[(LAYOUTS.indexOf(LAY) + 1) % 3]); if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY) && !ovlMode) showTut(); else gzFlash(); });
+applyLayout();
 
 // ---------------- cables (v0.3: weighted free-flying tips) ----------------
 // Each rider has two independent cables: [0]=left, [1]=right. Firing launches a light tip as a physics point
@@ -690,6 +778,7 @@ function latchLive(r, i, o, zone) {
   if (near(r) || o === player) sfx.hookClank();
   liveSwingCheck(r, c);
   if (r.cables.some(k => k !== c && k.st === 'latched' && k.tgt.kind === 'post')) doTie(r); // already on a post with the other cable = LEASH
+  else if (r === player) autoTieQ = true; // v0.8.1
 }
 function liveSwingCheck(r, c) { // taut + enough relative sideways speed -> swing round the moving rocket (velocity turned onto the relative tangent)
   if (c.swing) return; const o = c.tgt.r, dx = r.x - c.tgt.x, dz = r.z - c.tgt.z, d = Math.hypot(dx, dz) || 1;
@@ -758,6 +847,7 @@ function hookBody(r, i, o) {
   stats.hooks++;
   award(r, T.PTS_HOOK, 'HOOK', r === player || o === player);
   if (r === player) flash('HOOKED ' + o.name + '!'); else if (o === player) flash(r.name + ' HOOKED YOU!');
+  if (r === player) autoTieQ = true; // v0.8.1
 }
 // v0.5 rocket theft (2D v0.9.5): hook an on-foot rider's empty rocket with a held cable and tow it off (STEAL_DIST = ROCKET THEFT +8),
 // or tie it to a post (ROCKET TIED OFF +10, or +4 on top of a paid tow). The owner can still run to it and jump back on.
@@ -767,6 +857,7 @@ function hookRocket(r, i, o) {
   stats.stealHooks.push({ by: r.name, owner: o.name });
   if (o === player) { flash(r.name + ' IS STEALING YOUR ROCKET!'); sfx.steal(); }
   else if (r === player) { flash('DRAGGING ' + o.name + "'S ROCKET!"); sfx.clank(); }
+  if (r === player) autoTieQ = true; // v0.8.1
 }
 function payTheft(thief, o, tie) {
   if (tie ? o.theftTie : o.theftTow) return;
@@ -1637,17 +1728,27 @@ function syncTethers() {
       m.position.copy(_a).add(_b).multiplyScalar(0.5); m.scale.set(1, L, 1); m.quaternion.setFromUnitVectors(up, _b.sub(_a).normalize()); } }
 }
 // ---------------- main loop ----------------
-const stats = { releases: [], fired: 0, frames: 0, fps: 0, latches: 0, playerLatches: 0, knockoffs: [], maxSwingAngle: 0, retracts: 0, hooks: 0, ties: [], frees: [], awards: [], clotheslines: [],
+const stats = { autoTies: [], releases: [], fired: 0, frames: 0, fps: 0, latches: 0, playerLatches: 0, knockoffs: [], maxSwingAngle: 0, retracts: 0, hooks: 0, ties: [], frees: [], awards: [], clotheslines: [],
   kicks: [], remounts: [], recalls: [], respawns: [], runovers: [], knockdowns: [], thefts: [], stealHooks: [], stealTries: [], stealBreaks: 0,
   liveHooks: [], liveSwings: [], liveEnds: [], crashes: [], rips: [], aiZones: [], aiHookPlans: [], aiShots: [], aiFocus: {}, aiModes: {},
   jumps: [], landings: [], airs: [], stomps: [], aerials: [], aiRampPlans: [], aiRampJumps: [], aiRampEnds: [], rampStuck: [], rampStuckMax: 0, rampBumps: 0, camDips: 0, dives: [], footJumps: [], footDives: [], jacks: [], aiAlt: [], aiAltDodges: [], aiFootDodges: [] }; // v0.7 // v0.6 (+ v0.6.1 AI shot log / focus / mode time)
-let footBtn = false;
+let footBtn = false, lastMounted = true, clothesT = 0, autoTieQ = false;
+function stickClimb() { // v0.8.1 HYBRID / GESTURE: stick vertical = altitude rate (push up = climb), dead zone STICK_DZ, proportional to full at STICK_FULL
+  if (LAY === 'CLASSIC' || stickId === null) return 0; const y = -inp.stickY, a = Math.abs(y); return a < STICK_DZ ? 0 : Math.sign(y) * Math.min(1, (a - STICK_DZ) / (STICK_FULL - STICK_DZ)); }
+// v0.8.1 AUTO-TIE (HYBRID / GESTURE, player only; CLASSIC keeps the TIE button). Already in every layout since v0.4 / v0.6: holding a rider (or a
+// rocket) and latching a post with the other cable = TIE / ANCHOR; a hooked rocket + the other cable latching a post = LEASH. Added here: whenever a
+// held cable grabs a body / rocket, or bites a ridden rocket, while the OTHER cable already holds something tieable, the tie happens at once
+// (body + body = BIND, body / rocket / ridden rocket + ridden rocket = BINDING). Two different posts latched together for 0.4 s = CLOTHESLINE.
+function autoTie(r) { if (r !== player || LAY === 'CLASSIC' || !r.mounted) return false; const p = tiePlan(r); if (!p || p[2].length < 2 || (p[0].kind === 'post' && p[1].kind === 'post')) return false; stats.autoTies.push({ kind: [p[0].kind, p[1].kind].sort().join('-') }); return doTie(r); }
+function clothesCheck(dt) { const c = player.cables;
+  if (LAY !== 'CLASSIC' && player.mounted && c.every(k => k.st === 'latched' && k.tgt.kind === 'post') && c[0].tgt !== c[1].tgt) { clothesT += dt; if (clothesT >= 0.4) { clothesT = 0; stats.autoTies.push({ kind: 'post-post' }); doTie(player); } } else clothesT = 0; }
 let last = performance.now(), fpsAcc = 0, fpsN = 0, simTime = 0, swingStartAng = null, swingAccum = 0, lastAng = 0;
 function stepWorld(dt, hold) {
   const N = Math.ceil(dt / (1 / 120)), h = dt / N;
   for (const r of riders) if (r.ai) { aiCableDone(r); aiThink(r, dt); aiAltitude(r, dt); const k = r.name + '>' + (r.mounted && r.brain.tgt ? r.brain.tgt.name : '-'); stats.aiFocus[k] = (stats.aiFocus[k] || 0) + dt; if (player.mounted && !player.hop && r.mounted) { const k2 = 'avail:' + k; stats.aiFocus[k2] = (stats.aiFocus[k2] || 0) + dt; if (riders.every(q => q.mounted && !q.hop)) { const k3 = 'both:' + k; stats.aiFocus[k3] = (stats.aiFocus[k3] || 0) + dt; } } const m = r.name + ':' + (r.brain.mode || '?'); stats.aiModes[m] = (stats.aiModes[m] || 0) + dt; }
   for (let s = 0; s < N; s++) {
     for (const r of riders) { for (let i = 0; i < 2; i++) updateCable(r, i, h, r.ai ? (r.aiHold || r.brain.grab[i]) : hold[i]); stepRider(r, h); }
+    if (autoTieQ) { autoTieQ = false; autoTie(player); }
     riderBumps(); runOvers(); updateTethers(h); simTime += h;
   }
   for (const r of riders) { // v0.7: an AI riding next to a ramp at < 1 u/s (not held by a rope) counts as stuck
@@ -1660,6 +1761,7 @@ function frame(now) {
   let dt = Math.min(0.05, (now - last) / 1000); last = now;
   fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { stats.fps = fpsN / fpsAcc; $('fps').textContent = stats.fps.toFixed(0) + ' fps' + (lowQ ? ' LQ' : ''); fpsAcc = 0; fpsN = 0; }
   stats.frames++;
+  if (paused) { renderer.render(scene, camera); return; } // v0.8.1 pause / tutorial overlay
   // player input
   const kSteer = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
   if (player.mounted) {
@@ -1667,7 +1769,8 @@ function frame(now) {
     player.boost = !!(keys.KeyW || keys.ShiftLeft || keys.ShiftRight || keys.ArrowUp || inp.boostT);
     if (wheelT > 0) wheelT -= dt;
     const kc = (keys.KeyR || inp.upT || (wheelT > 0 && wheelD > 0) ? 1 : 0) - (keys.KeyF || inp.dnT || (wheelT > 0 && wheelD < 0) ? 1 : 0);
-    player.climb = player.climbHold ?? kc; jumpQ = diveQ = false; footBtn = !!inp.boostT;
+    player.climb = player.climbHold ?? (kc || stickClimb());
+    if (LAY === 'GESTURE') { if (gBurst > 0) gBurst -= dt; if (inp.gBoost || gBurst > 0) player.boost = true; } jumpQ = diveQ = false; footBtn = !!inp.boostT;
   } else {
     if (jumpQ) tryJump(player); if (diveQ) tryDive(player); jumpQ = diveQ = false; footBtn = !!inp.boostT; // v0.5 on foot: WASD / arrows / left stick run in that direction relative to the camera
     player.steer = 0; player.boost = false;
@@ -1677,12 +1780,15 @@ function frame(now) {
     const yaw = Math.atan2(camLook.x - camPos.x, camLook.z - camPos.z), [fx, fz] = fwdOf(yaw), [rx, rz] = rightOf(yaw);
     player.mv.x = fx * my + rx * mx; player.mv.z = fz * my + rz * mx;
   }
-  const hold = [!!(keys.KeyQ || inp.cabL || inp.mouseL), !!(keys.KeyE || inp.cabR || inp.mouseR)];
+  const hold = [!!(keys.KeyQ || inp.cabL || inp.mouseL || inp.gL), !!(keys.KeyE || inp.cabR || inp.mouseR || inp.gR)];
   // v0.4: press = fire; press again while that cable is out and unlatched = quick retract. Held/latched cables let go on release.
   for (let i = 0; i < 2; i++) if (hold[i] && !player._h[i]) { if (player.cables[i].st === 'out') retractCable(player, i); else fireCable(player, i); }
   player._h = hold;
   if (tieQ) { tieQ = false; if (player.mounted) doTie(player); else tryDive(player); } // v0.8: on foot the TIE slot is DIVE
   stepWorld(dt, hold);
+  clothesCheck(dt);
+  if (player.mounted !== lastMounted) { lastMounted = player.mounted; gzFlash(); } // GESTURE: zone outlines again each time you (re)mount or go on foot
+  if (gzT > 0) gzT -= dt; document.body.classList.toggle('gzon', gzT > 0); { const op = String(clamp(gzT / 0.6, 0, 1)); for (const id of ['gzL', 'gzR', 'gzUp']) if ($(id).style.opacity !== op) $(id).style.opacity = op; }
   const c = player.cables.find(c => c.st === 'latched') || { st: 'none' };
   // swing angle tracking (for tests)
   if (c.st === 'latched') { const ang = Math.atan2(player.x - c.tgt.x, player.z - c.tgt.z); if (swingStartAng === null) { swingStartAng = ang; swingAccum = 0; lastAng = ang; } else { let d = ang - lastAng; d = Math.atan2(Math.sin(d), Math.cos(d)); swingAccum += d; lastAng = ang; stats.maxSwingAngle = Math.max(stats.maxSwingAngle, Math.abs(swingAccum)); } }
@@ -1713,8 +1819,10 @@ function hideRunHint() { runHintT = 0; $('runHint').style.opacity = 0; }
 function updateFootUI(dt, time) {
   const r = player, onFoot = !r.mounted;
   document.body.classList.toggle('onfoot', onFoot);
-  $('stickHint').textContent = onFoot ? 'drag left side to run' : 'drag left side to steer';
-  { const bb = $('bBoost'), bt = $('bT'), lb = onFoot ? 'JUMP' : 'BOOST', lt = onFoot ? 'DIVE' : 'TIE'; if (bb.textContent !== lb) bb.textContent = lb; if (bt.textContent !== lt) bt.textContent = lt; if (onFoot) bt.classList.remove('off'); }
+  { const sh = onFoot ? 'drag left side to run' : LAY === 'CLASSIC' ? 'drag left side to steer' : 'left thumb: steer ◀ ▶ · climb ▲ ▼'; if ($('stickHint').textContent !== sh) $('stickHint').textContent = sh; }
+  { const bb = $('bBoost'), bt = $('bT'), lb = onFoot ? 'JUMP' : 'BOOST', lt = onFoot ? 'DIVE' : 'TIE'; if (bb.textContent !== lb) bb.textContent = lb; if (bt.textContent !== lt) bt.textContent = lt; if (onFoot) bt.classList.remove('off');
+    const lc = onFoot && LAY === 'HYBRID' ? ['DIVE', 'DIVE'] : ['◀ CABLE', 'CABLE ▶']; if ($('bL').textContent !== lc[0]) { $('bL').textContent = lc[0]; $('bR').textContent = lc[1]; }
+    const gl = onFoot ? ['tap = JUMP<br>swipe ↓ = DIVE', 'tap = JUMP<br>swipe ↓ = DIVE', ''] : ['◀ CABLE<br>tap / hold', 'CABLE ▶<br>tap / hold', 'flick ▲ = BOOST (keep holding)']; if ($('gzL').innerHTML !== gl[0].replace('↓', '↓')) { $('gzL').innerHTML = gl[0]; $('gzR').innerHTML = gl[1]; $('gzUp').textContent = gl[2]; } }
   $('altK').style.bottom = (r.mounted ? clamp((r.y - T.HOVER) / T.ALT_MAX, 0, 1) * 86 : 0) + 'px'; $('altG').style.display = r.mounted ? 'block' : 'none';
   if (runHintT > 0) { runHintT -= dt; if (runHintT <= 0) hideRunHint(); }
   beacon.visible = markSt.beacon = onFoot && !r.hop;
@@ -1738,7 +1846,7 @@ function updateHookUI() {
   if (lt && lt.kind === 'leash') s = 'LEASHED! HOLD BOOST TO RIP FREE ' + '[' + '#'.repeat(Math.round(clamp(lt.rip / T.RIP_T, 0, 1) * 8)) + '-'.repeat(8 - Math.round(clamp(lt.rip / T.RIP_T, 0, 1) * 8)) + ']' + '  ' + lt.t.toFixed(1) + 's';
   else if (lt) s = 'BOUND BY ' + lt.owner.name + '  ' + lt.t.toFixed(1) + 's';
   else if (hk) s = hk.name + ' HOOKED YOU: YANK THEM OFF OR RIDE IT OUT';
-  else if (mine) s = (mine.swing ? 'SWINGING ROUND ' : 'TOWING ') + mine.tgt.r.name + '  |  ' + (TOUCH ? 'TIE' : 'T') + ' NEAR A POST / 2ND CABLE ON A POST = LEASH  |  HOOK ANOTHER + TIE = BIND';
+  else if (mine) s = (mine.swing ? 'SWINGING ROUND ' : 'TOWING ') + mine.tgt.r.name + '  |  ' + (TOUCH && LAY !== 'CLASSIC' ? '2ND CABLE ON A POST = LEASH  |  HOOK ANOTHER = BIND (AUTO-TIE)' : (TOUCH ? 'TIE' : 'T') + ' NEAR A POST / 2ND CABLE ON A POST = LEASH  |  HOOK ANOTHER + TIE = BIND');
   if (s !== hookHintS) { hookHintS = s; const el = $('hookHint'); el.textContent = s; el.style.opacity = s ? 1 : 0; }
 }
 // ---------------- per-frame test recorder ----------------
@@ -1769,6 +1877,7 @@ function recordFrame(dt) {
 }
 applyQuality();
 requestAnimationFrame(frame);
+if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) showTut(); else gzFlash(); // v0.8.1
 
 // ---------------- test hooks ----------------
 const gl = renderer.getContext();
@@ -1781,7 +1890,7 @@ function unFoot(r) { // test helper: back on the rocket, clean state
   if (r === player) hideRunHint();
 }
 window.__rj3d = {
-  version: '3D test v0.8', ready: true,
+  version: '3D test v0.8.1', ready: true,
   renderer: () => ({ webgl: !!gl, isWebGL2: renderer.capabilities.isWebGL2, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   tuning: () => ({ tipDrag: T.TIP_DRAG, tipMass: T.TIP_MASS, payOut: T.PAY_OUT, reelIn: T.REEL_IN, turn: T.TURN, latchSteer: T.LATCH_STEER, cableMax: T.CABLE_MAX, cableSpeed: T.CABLE_SPEED, cableLife: T.CABLE_LIFE, cableFwdDeg: T.CABLE_FWD * 180 / Math.PI }),
   cable: i => { const c = player.cables[i], [tx, tz] = cableTip(player, i); const [mx, mz] = mountOf(player, i); return { mx, mz, vx: c.vx, vz: c.vz, taut: c.taut, len: c.len, latchSpeed: c.latchSpeed, latchLen: c.latchLen, hold: c.hold, allow: c.allow, boost: player.boost, ax: c.tgt?.x, az: c.tgt?.z, pvx: player.vx, pvz: player.vz, sag: c.pts.map(p => [p.x, p.y, p.z]), st: c.st, ext: c.ext, t: c.t, kind: c.tgt?.kind || null, tx, tz, px: player.x, pz: player.z, h: player.h }; },
@@ -1927,7 +2036,11 @@ window.__rj3d = {
   dive(i) { tryDive(i == null ? player : riders.filter(r => r.ai)[i]); },
   footState(i) { const r = i == null ? player : riders.filter(r => r.ai)[i]; return { prone: r.prone, diveCool: r.diveCool, jumpCool: r.jumpCool, jumpAir: r.jumpAir, y: r.tum.y, x: r.tum.x, z: r.tum.z, mounted: r.mounted, hop: !!r.hop, footT: r.footT, stun: r.stun, hull: r.rocket.owner.name, rx: r.x, rz: r.z, hopTgt: r.brain.hopTgt || null }; },
   v08: () => ({ altMax: T.ALT_MAX, hover: T.HOVER, vtol: T.CABLE_VTOL, posts: anchors.map(a => ({ x: a.x, z: a.z, h: a.h, tall: a.tall })), ramps: RAMPS.length, mounds: MOUNDS.length, jacks: stats.jacks, dives: stats.footDives, jumps: stats.footJumps, aiAlt: stats.aiAlt.length, aiAltDodges: stats.aiAltDodges.length, aiFootDodges: stats.aiFootDodges, knockdowns: stats.knockdowns.length, stomps: stats.stomps, hulls: riders.map(r => [r.name, r.rocket.owner.name]), climbs: riders.map(r => r.climb) }),
-  rects: () => ['bL', 'bR', 'bBoost', 'bT', 'bUp', 'bDn', 'topbtns', 'ver', 'score', 'fps', 'altG'].map(id => { const e = $(id), b = e.getBoundingClientRect(); return { id, x: b.x, y: b.y, w: b.width, h: b.height, vis: getComputedStyle(e).display !== 'none', text: e.textContent }; }),
+  rects: () => ['bL', 'bR', 'bBoost', 'bT', 'bUp', 'bDn', 'topbtns', 'ver', 'score', 'fps', 'altG', 'gzL', 'gzR'].map(id => { const e = $(id), b = e.getBoundingClientRect(); return { id, x: b.x, y: b.y, w: b.width, h: b.height, vis: getComputedStyle(e).display !== 'none', text: e.textContent }; }),
+  // v0.8.1 hooks
+  layout: () => ({ lay: LAY, saved: localStorage.getItem('rj3d_layout'), paused, ovl: ovlMode, ovlText: $('ovl').classList.contains('show') ? $('ovl').innerText : '', tut: Object.fromEntries(LAYOUTS.map(l => [l, tutSeen(l)])), touch: TOUCH, gz: document.body.classList.contains('gzon'), gzT,
+    stick: stickId !== null, sx: inp.stickX, sy: inp.stickY, climb: player.climb, steer: player.steer, boost: player.boost, hold: player._h.slice(), g: { L: inp.gL, R: inp.gR, boost: inp.gBoost, burst: gBurst, n: gT.size }, gestLog: gestLog.slice(), autoTies: stats.autoTies.slice() }),
+  setLayout: l => setLayout(l), closeOvl: () => closeOvl(), pause: () => showPause(), resetTut() { for (const l of LAYOUTS) localStorage.removeItem('rj3d_tut_' + l); },
   freezeAI(on) { window.__rj3dNoAIHook = on; for (const r of riders) if (r.ai) { r.brain.cool = on ? 1e9 : 2; r.brain.lock = false; releaseAll(r, true); } },
 };
 </script>
