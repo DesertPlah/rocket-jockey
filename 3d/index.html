@@ -4,7 +4,7 @@
 <link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.8.1</title>
+<title>Rocket Jockey 3D test v0.8.2</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -67,11 +67,33 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp{display:flex}
 #ovl .go{background:#c46a12;border-color:#ffc070;min-width:160px;margin-top:6px}
 #ovl ul{text-align:left;margin:4px 0;padding-left:18px;font-size:14px;line-height:1.35}
 #ovl .sub{font-size:12px;opacity:.75;margin:4px 0}
+/* v0.8.2 rounds / scorecard / records */
+#rtime{top:30px;left:50%;transform:translateX(-50%);font-size:14px;font-weight:bold;color:#fff}
+#rtime.low{color:#ff6a5a}
+#rcount{top:32%;left:50%;transform:translateX(-50%);font-size:72px;font-weight:900;color:#ffd84a;display:none;text-shadow:0 0 8px #000,3px 3px 0 #000}
+#ovl .card.wide{max-width:900px;width:96%;padding:8px 12px}
+#ovl .cols{display:flex;gap:12px;align-items:flex-start;text-align:left}
+#ovl .c1{flex:0 0 36%}#ovl .c2{flex:1;min-width:0}
+#ovl table{border-collapse:collapse;width:100%;font-size:12.5px}
+#ovl .st th,#ovl .st td{padding:1px 5px;border-bottom:1px solid #ffffff1c;white-space:nowrap}
+#ovl .st th{text-align:left;font-weight:normal;opacity:.8}#ovl .st td{text-align:center}#ovl .st.kv td{text-align:right}
+#ovl .stand td{font-size:15px;padding:2px 6px}#ovl .stand tr.nYOU{background:#2f7d3a66}
+#ovl .nYOU{color:#7dff8a}#ovl .nRED{color:#ff7a7a}#ovl .nGOLD{color:#ffd84a}
+#ovl .hl{font-size:12.5px;margin-top:6px;line-height:1.45}
+#ovl .btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px}
+#ovl .btns .go{min-width:120px;padding:8px 10px}#ovl .go.alt{background:rgba(255,255,255,.12);border-color:#fff8}#ovl .go.danger{background:#a02020;border-color:#ff8a8a}
+#ovl .lays.sm button{font-size:12px;padding:4px 6px;min-width:0}
+#ovl .lr{max-height:118px;overflow:auto}
+#ovl .life{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:12px;opacity:.95}#ovl .life b{color:#ffd84a}
+#ovl h2.sm{margin:0 0 4px}
+#ovl textarea{width:96%;height:120px;font-size:11px;font-family:monospace;background:#0b0f18;color:#cfe;border:1px solid #fff5;border-radius:6px;-webkit-user-select:text;user-select:text}
+#ovl canvas{display:block;width:100%;max-width:380px;height:60px}
+#ovl .rrow{display:flex;gap:6px;justify-content:center;align-items:center;margin:4px 0}#ovl .rrow button{font-size:13px;padding:5px 9px;min-width:0}
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.8.1</div>
-<div id="score" class="hud">KO 0</div>
+<div id="ver" class="hud">3D test v0.8.2</div>
+<div id="score" class="hud">KO 0</div><div id="rtime" class="hud"></div><div id="rcount" class="hud"></div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
 <div id="topbtns"><button id="bPause">⏸</button><button id="bCtl">🎮 HYBRID</button><button id="bDiff">AI: NORMAL</button><button id="bLQ">LQ: on</button><button id="bFS">⛶</button></div>
@@ -500,14 +522,17 @@ function showTut(l = LAY) {
 function showPause() {
   ovlMode = 'pause'; paused = true; const o = $('ovl'); o.classList.add('show');
   o.firstChild.innerHTML = '<h2>PAUSED</h2><div class="sub">TOUCH CONTROLS</div><div class="lays">' + LAYOUTS.map(l => '<button data-l="' + l + '" class="' + (l === LAY ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>'
-    + '<ul>' + TUT[LAY][1].map(x => '<li>' + x + '</li>').join('') + '</ul><button class="go" id="pzGo">RESUME</button>';
+    + '<div class="sub">ROUND LENGTH (next round)' + (RND && RND.len ? ' · this round ' + fmtT(RND.left) + ' left' : RND ? ' · free play ' + fmtT(RND.t) : '') + '</div><div class="lays rrow">' + RLENS.map(v => '<button data-r="' + v + '" class="' + (v === RLEN ? 'sel' : '') + '">' + (v === 'free' ? 'Free play' : v + ' min') + '</button>').join('') + '</div>'
+    + '<ul>' + TUT[LAY][1].map(x => '<li>' + x + '</li>').join('') + '</ul><div class="btns"><button class="go" id="pzGo">RESUME</button><button class="go alt" id="pzEnd">END ROUND</button><button class="go alt" id="pzRec">RECORDS</button></div>';
   for (const b of o.querySelectorAll('.lays button')) b.addEventListener('click', () => setLayout(b.dataset.l));
   $('pzGo').addEventListener('click', () => closeOvl());
+  for (const b of o.querySelectorAll('[data-r]')) b.addEventListener('click', () => setRLen(b.dataset.r));
+  $('pzEnd').addEventListener('click', () => endRound('quit')); $('pzRec').addEventListener('click', () => showRecords('pause'));
 }
-function closeOvl() { $('ovl').classList.remove('show'); ovlMode = null; paused = false; last = performance.now(); jumpQ = diveQ = tieQ = false;
+function closeOvl() { if (RND && RND.st === 'over') newRound(true); $('ovl').classList.remove('show'); ovlMode = null; paused = false; last = performance.now(); jumpQ = diveQ = tieQ = false;
   if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) { showTut(); return; } gzFlash(); }
 function gzFlash() { gzT = 4.5; }
-$('bPause').addEventListener('click', () => { firstInput(); if (ovlMode === 'pause') closeOvl(); else showPause(); });
+$('bPause').addEventListener('click', () => { firstInput(); if (['end', 'rec', 'exp', 'imp', 'clr'].includes(ovlMode)) return; if (ovlMode === 'pause') closeOvl(); else showPause(); });
 $('bCtl').addEventListener('click', () => { firstInput(); setLayout(LAYOUTS[(LAYOUTS.indexOf(LAY) + 1) % 3]); if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY) && !ovlMode) showTut(); else gzFlash(); });
 applyLayout();
 
@@ -532,7 +557,7 @@ function fireCable(r, i) {
   // v0.7: the tip flies in 3D. From the ground it rides at hover height (over terrain); fired in the air it dips down to the hover plane in ~0.45 s
   c.ty = r.y + 0.6; c.vty = r.air ? -Math.max(0, r.y - groundAt(mx, mz) - T.HOVER) / 0.45 : 0; c.airShot = r.air; c.seen = new Set(); c.seenF = new Set(); // v0.8: from controlled altitude the tip flies level (no auto height-aim)
   for (const p of c.pts) { p.x = p.px = mx; p.y = p.py = c.ty; p.z = p.pz = mz; }
-  stats.fired++; if (near(r)) sfx.fire(); return true;
+  stats.fired++; c.rec = 0; rsFire(r); if (near(r)) sfx.fire(); return true;
 }
 function releaseCable(r, i, quiet) {
   const c = r.cables[i];
@@ -598,6 +623,7 @@ function knockOff(victim, by, how, fx, fz, dv) {
     if (!clo) { by.vx -= dx / d * 4; by.vz -= dz / d * 4; }
   } else if (victim === player && how !== 'test') flash('CLOTHESLINED YOURSELF!');
   sfx.squish(); setTimeout(() => sfx.knock(), 60); if (clo) { sfx.crowd('cheer', 0.9); stats.clotheslines.push({ victim: victim.name, by: by ? by.name : null }); }
+  rsKO(victim, by, how);
   stats.knockoffs.push({ victim: victim.name, by: by ? by.name : '-', how: how || 'cable', t: performance.now(), aim: koAim, purpose: koPurpose }); koAim = koPurpose = null;
   return true;
 }
@@ -626,7 +652,7 @@ function kickRocketAway(r) {
 function updScore() { $('score').textContent = 'KO ' + score + ' \u00b7 ' + player.pts + ' pts'; }
 const trickList = [];
 function award(r, pts, label, show) {
-  r.pts += pts; stats.awards.push({ name: r.name, pts, label }); if (r === player) updScore();
+  r.pts += pts; stats.awards.push({ name: r.name, pts, label }); rsAward(r, pts, label); if (r === player) updScore();
   if (show !== false && (r === player || /CLOTHES|TIED|BIND|THEFT|ROCKET|ANCHOR|CRASH|STOMP|AERIAL/.test(label))) { trickList.push({ s: (r === player ? '' : r.name + ' ') + label + ' +' + pts, t: 2.2, c: r === player ? '#ffb040' : '#ddd' }); if (trickList.length > 3) trickList.shift(); drawTricks(); }
 }
 function drawTricks() { $('trick').innerHTML = trickList.map(k => `<div style="color:${k.c};opacity:${Math.min(1, k.t * 2).toFixed(2)}">${k.s}</div>`).join(''); }
@@ -667,7 +693,7 @@ function updateCable(r, i, dt, holding) {
     for (const o of riders) { if (o === r) continue;
       if (o.mounted) {
         if (o.inv > 0 || o.hop) continue; // v0.5: blinking after a remount
-        if (touch(o.x, o.z, T.RIDER_R + 0.25, o.y)) { koAim = c.aiAt ? (c.aiAt.cables ? c.aiAt.name : 'post') : (r.ai ? '?' : null); koPurpose = c.aiPurpose || null;
+        if (touch(o.x, o.z, T.RIDER_R + 0.25, o.y)) { rsHit(r, c); koAim = c.aiAt ? (c.aiAt.cables ? c.aiAt.name : 'post') : (r.ai ? '?' : null); koPurpose = c.aiPurpose || null;
           if (holding) { if (knockOff(o, r)) aerialHook(r, c, o); hookBody(r, i, o); return; } // v0.4: held cable -> knock off AND drag the body
           c.st = 'yank'; c.t = 0; c.tx = o.x; c.tz = o.z; c.ty = o.y + 1.4; if (knockOff(o, r)) aerialHook(r, c, o); return; }
         // v0.6 (2D v0.8 zones): the cable TIP striking the rocket body outside the rider zone -- NOSE / TAIL -- hooks the ridden rocket while
@@ -676,6 +702,7 @@ function updateCable(r, i, dt, holding) {
         continue; }
       // v0.5 on foot (2D v0.9.5 rules): a loose cable passes through; a HELD cable grabs the runner's body, or their empty rocket (rocket theft)
       if (!holding || !r.mounted || o.hop) continue;
+      if (o.dodge && Math.hypot(o.tum.x - c.tx, o.tum.z - c.tz) < 2.2) o.dodge.ev = 1;
       if (o.footT >= 0.4 && !(o.prone > 0) && !heldBy(o) && !tieOf(o) && tumH(o) < 2.2 && touch(o.tum.x, o.tum.z, T.RIDER_R + 0.25, o.tum.y + 0.8)) { hookBody(r, i, o); aerialHook(r, c, o); return; }
       if (!o.homing && !rocketHeldBy(o) && !rocketTie(o) && touch(o.x, o.z, 1.4, o.y)) { hookRocket(r, i, o); return; } }
     // v0.4: an out cable touching a tied rider cuts them loose
@@ -730,6 +757,7 @@ function updateCable(r, i, dt, holding) {
   }
 }
 function latchTo(r, c, a) {
+  rsHit(r, c); rsLatch(r);
   const dx = r.x - a.x, dz = r.z - a.z, d = Math.hypot(dx, dz) || 1, nx = dx / d, nz = dz / d, sp = Math.hypot(r.vx, r.vz);
   // convert current velocity to pure tangential at the same speed (no loss, no snap)
   let tx = -nz, tz = nx; r.tanDir = 1; if (r.vx * tx + r.vz * tz < 0) { tx = -tx; tz = -tz; r.tanDir = -1; }
@@ -771,7 +799,7 @@ function latchLive(r, i, o, zone) {
   Object.assign(c, { st: 'latched', tgt: L, len: clamp(d, T.LIVE_MIN, T.LIVE_MAX), t: 0, age: 0, swing: false, swept: 0, maxSwept: 0, lastA: Math.atan2(r.x - L.x, r.z - L.z), aiHold: rand(T.AI_HOLD[0], T.AI_HOLD[1]), latchLen: d, hold: undefined, allow: undefined });
   o.entangled = T.ENTANGLE; noteHit(o, r);
   stats.liveHooks.push({ by: r.name, victim: o.name, zone, t: +simTime.toFixed(2), d: +d.toFixed(1) });
-  stats.hooks++;
+  stats.hooks++; rsHit(r, c); rsHook(r, o, zone);
   const zn = zone === 'nose' ? 'NOSE' : 'TAIL';
   award(r, T.PTS_HOOK, zn + ' HOOK', r === player || o === player);
   if (r === player) flash('HOOKED ' + o.name + "'S " + zn + '!'); else if (o === player) flash(r.name + ' HOOKED YOUR ' + zn + '!');
@@ -844,7 +872,7 @@ function lineY(ya, yb, f) { return ya + (yb - ya) * f; }
 function hookBody(r, i, o) {
   const c = r.cables[i], [mx, mz] = mountOf(r, i);
   c.st = 'held'; c.vic = o; c.vk = 'foot'; c.t = 0; c.len = clamp(Math.hypot(o.tum.x - mx, o.tum.z - mz), T.TIE_L, 14);
-  stats.hooks++;
+  stats.hooks++; rsHit(r, c); rsHook(r, o, 'rider');
   award(r, T.PTS_HOOK, 'HOOK', r === player || o === player);
   if (r === player) flash('HOOKED ' + o.name + '!'); else if (o === player) flash(r.name + ' HOOKED YOU!');
   if (r === player) autoTieQ = true; // v0.8.1
@@ -854,7 +882,7 @@ function hookBody(r, i, o) {
 function hookRocket(r, i, o) {
   const c = r.cables[i], [mx, mz] = mountOf(r, i);
   Object.assign(c, { st: 'held', vic: o, vk: 'rocket', t: 0, len: clamp(Math.hypot(o.x - mx, o.z - mz), T.TIE_L, 14), steal: { x0: o.x, z0: o.z, t: 0 } });
-  stats.stealHooks.push({ by: r.name, owner: o.name });
+  stats.stealHooks.push({ by: r.name, owner: o.name }); rsHit(r, c);
   if (o === player) { flash(r.name + ' IS STEALING YOUR ROCKET!'); sfx.steal(); }
   else if (r === player) { flash('DRAGGING ' + o.name + "'S ROCKET!"); sfx.clank(); }
   if (r === player) autoTieQ = true; // v0.8.1
@@ -863,7 +891,7 @@ function payTheft(thief, o, tie) {
   if (tie ? o.theftTie : o.theftTow) return;
   const pts = tie ? (o.theftTow ? T.PTS_STEAL_TIE_BONUS : T.PTS_STEAL_TIE) : T.PTS_STEAL;
   if (tie) o.theftTie = true; else o.theftTow = true;
-  stats.thefts.push({ thief: thief.name, owner: o.name, tie, pts });
+  stats.thefts.push({ thief: thief.name, owner: o.name, tie, pts }); rsTheft(thief, o, tie ? 'tied' : 'towed');
   award(thief, pts, tie ? 'ROCKET TIED OFF' : 'ROCKET THEFT', true);
   if (thief === player) flash((tie ? 'TIED OFF ' : 'STOLE ') + o.name + "'S ROCKET!");
   else if (o === player) flash(thief.name + (tie ? ' TIED YOUR ROCKET TO A POST!' : ' STOLE YOUR ROCKET!'));
@@ -893,6 +921,7 @@ function doTie(r) {
   if (a.kind === 'live' && b.kind === 'live') t.anchor = Math.hypot(a.r.vx, a.r.vz) <= Math.hypot(b.r.vx, b.r.vz) ? a.r : b.r; // 2D: the slower rocket is the anchor, dragged by the other
   tethers.push(t); while (tethers.length > 6) freeTether(tethers[0], 'old');
   for (const v of tieRiders(t)) v.tied = t;
+  rsTie(r, kind, t);
   stats.ties.push({ by: r.name, kind, ai: !!r.ai, victims: tieRiders(t).map(v => v.name), lives: t.lives.map(v => v.name), t: +simTime.toFixed(2) });
   if (near(r) || tieRiders(t).includes(player) || t.lives.includes(player)) sfx.tie();
   const vs = tieRiders(t).map(v => v.name), ls = t.lives.map(v => v.name);
@@ -966,7 +995,7 @@ function updateTethers(dt) {
     }
     // v0.5: a runner on foot who runs into a taut line is tripped (knocked down briefly)
     if (tethers.includes(t)) for (const o of riders) { if (!canTrip(o) || vs.includes(o) || (t.immune.get(o) || 0) > simTime) continue;
-      if (footHits(o, ax2, az2, bx2, bz2) && footLine(o, lineY(ay2, by2, segDist(o.tum.x, o.tum.z, ax2, az2, bx2, bz2)[1]))) { t.immune.set(o, simTime + 1); const m = o.tum, sp = Math.hypot(m.vx, m.vz) || 1; trip(o, t.owner, -m.vx / sp, -m.vz / sp, 'line'); } }
+      if (footHits(o, ax2, az2, bx2, bz2)) { if (footLine(o, lineY(ay2, by2, segDist(o.tum.x, o.tum.z, ax2, az2, bx2, bz2)[1]))) { t.immune.set(o, simTime + 1); const m = o.tum, sp = Math.hypot(m.vx, m.vz) || 1; trip(o, t.owner, -m.vx / sp, -m.vz / sp, 'line'); } else if (o.dodge) o.dodge.ev = 1; } }
   }
   // a cable latched to a post is a taut line too: it clotheslines other mounted riders crossing it
   for (const r of riders) { if (!r.mounted) continue;
@@ -979,7 +1008,7 @@ function updateTethers(dt) {
       // v0.5: the sweeping swing line also clotheslines runners on foot (knocked down briefly, thrown along the swing)
       for (const o of riders) { if (o === r || !canTrip(o) || (c.imm.get(o) || 0) > simTime) continue;
         const sf = segDist(o.tum.x, o.tum.z, c.tgt.x, c.tgt.z, r.x, r.z)[1];
-        if (footHits(o, c.tgt.x, c.tgt.z, r.x, r.z) && sf < 0.95 && footLine(o, lineY(ly0, ly1, sf))) { c.imm.set(o, simTime + 1); const sp = Math.hypot(r.vx, r.vz) || 1; trip(o, r, r.vx / sp, r.vz / sp, 'clothes'); } } } }
+        if (footHits(o, c.tgt.x, c.tgt.z, r.x, r.z) && sf < 0.95) { if (footLine(o, lineY(ly0, ly1, sf))) { c.imm.set(o, simTime + 1); const sp = Math.hypot(r.vx, r.vz) || 1; trip(o, r, r.vx / sp, r.vz / sp, 'clothes'); } else if (o.dodge) o.dodge.ev = 1; } } } }
 }
 // ---------------- v0.5 on foot: knockdowns (run over / tripped by a line) ----------------
 function footLine(o, ly) { const m = o.tum, head = m.y + (o.prone > 0 ? 0.45 : 1.7); return ly > m.y + 0.1 && ly < head + 0.2; } // v0.8: a jump clears it (feet above the line), a dive ducks it
@@ -988,7 +1017,7 @@ function footHits(o, ax, az, bx, bz) { const m = o.tum; return segDist(m.x, m.z,
 function trip(o, by, nx, nz, how, push = 9) {
   const m = o.tum; m.vx = nx * push; m.vz = nz * push; m.vy = 6; m.wx = rand(-8, 8); m.wz = rand(-10, 10);
   o.stun = T.RUNOVER_STUN; o.hitCool = T.RUNOVER_COOL; o.tumble = 0;
-  stats.knockdowns.push({ victim: o.name, by: by ? by.name : '-', how });
+  stats.knockdowns.push({ victim: o.name, by: by ? by.name : '-', how }); rsTrip(o, by, how);
   if (how === 'clothes') { if (by === player) flash('CLOTHESLINED ' + o.name + '!'); else if (o === player) flash('CLOTHESLINED BY ' + (by ? by.name : '???') + '!'); }
   else if (how === 'line' && o === player) flash('TRIPPED!');
   if (o === player || by === player || dist2(o.tum, player) < 1600) { if (how === 'runover') sfx.runover(); else sfx.snap(); }
@@ -996,7 +1025,7 @@ function trip(o, by, nx, nz, how, push = 9) {
 // rockets running over riders on foot (2D v1.0): cartoon knockdown + spin, no points
 function runOvers() {
   for (const o of riders) { if (!o.mounted || o.hop) continue; const sp = Math.hypot(o.vx, o.vz); if (sp < 3) continue;
-    for (const f of riders) { if (f === o || !canTrip(f) || f.prone > 0 || f.tum.y - 0.3 > o.y + 0.2 || o.y - 0.6 > f.tum.y + 1.7) continue; // v0.8: prone = it passes over; a jump clears a low nose; a high rocket flies over // v0.7: flying over a runner doesn't run them over
+    for (const f of riders) { if (f.dodge && f !== o && !f.mounted && Math.hypot(f.tum.x - o.x, f.tum.z - o.z) < T.RIDER_R + 1.2) f.dodge.ev = 1; if (f === o || !canTrip(f) || f.prone > 0 || f.tum.y - 0.3 > o.y + 0.2 || o.y - 0.6 > f.tum.y + 1.7) continue; // v0.8: prone = it passes over; a jump clears a low nose; a high rocket flies over // v0.7: flying over a runner doesn't run them over
       const dx = f.tum.x - o.x, dz = f.tum.z - o.z, d = Math.hypot(dx, dz); if (d >= T.RIDER_R + 0.8) continue;
       const nx = d ? dx / d : o.vx / sp, nz = d ? dz / d : o.vz / sp;
       trip(f, o, 0, 0, 'runover'); f.tum.vx = o.vx * 0.5 + nx * 8; f.tum.vz = o.vz * 0.5 + nz * 8;
@@ -1107,8 +1136,8 @@ function stepFoot(r, dt) {
   const held = heldBy(r), grounded = t.y <= fl0 + 0.01 && t.vy <= 0;
   if (grounded && r.jumpAir) r.jumpAir = false;
   const canRun = grounded && r.tumble <= 0 && r.stun <= 0 && !r.tied && !held && !(r.prone > 0);
-  if (r.wantJump) { r.wantJump = false; if (canRun && r.jumpCool <= 0) { t.vy = T.JUMP_V; r.jumpAir = true; r.jumpCool = T.JUMP_COOL; stats.footJumps.push({ name: r.name, t: +simTime.toFixed(2) }); if (r === player || dist2(t, player) < 1600) sfx.hop(); } }
-  if (r.wantDive) { r.wantDive = false; if (canRun && r.diveCool <= 0) { r.prone = T.DIVE_T; r.diveCool = T.DIVE_COOL; const [fx, fz] = fwdOf(r.fh); t.vx += fx * T.DIVE_PUSH; t.vz += fz * T.DIVE_PUSH; stats.footDives.push({ name: r.name, t: +simTime.toFixed(2) }); if (r === player || dist2(t, player) < 1600) sfx.release(); } }
+  if (r.wantJump) { r.wantJump = false; if (canRun && r.jumpCool <= 0) { t.vy = T.JUMP_V; r.jumpAir = true; r.jumpCool = T.JUMP_COOL; stats.footJumps.push({ name: r.name, t: +simTime.toFixed(2) }); rsDodge(r, 'jump'); if (r === player || dist2(t, player) < 1600) sfx.hop(); } }
+  if (r.wantDive) { r.wantDive = false; if (canRun && r.diveCool <= 0) { r.prone = T.DIVE_T; r.diveCool = T.DIVE_COOL; const [fx, fz] = fwdOf(r.fh); t.vx += fx * T.DIVE_PUSH; t.vz += fz * T.DIVE_PUSH; stats.footDives.push({ name: r.name, t: +simTime.toFixed(2) }); rsDodge(r, 'dive'); if (r === player || dist2(t, player) < 1600) sfx.release(); } }
   t.vy -= (r.jumpAir ? T.JUMP_G : 25) * dt;
   if (canRun) {
     const k = Math.min(1, T.FOOT_ACC * dt); t.vx += (r.mv.x * T.FOOT - t.vx) * k; t.vz += (r.mv.z * T.FOOT - t.vz) * k;
@@ -1148,7 +1177,7 @@ function jackRocket(r, o) {
   r.homing = false; o.homing = false; o.footT = Math.min(o.footT, T.JACK_FOOT); o.theftTow = o.theftTie = false;
   const back = r.rocket.owner === r;
   award(r, back ? T.PTS_TAKEBACK : T.PTS_JACK, back ? 'TOOK IT BACK' : 'JACKED', true);
-  stats.jacks.push({ thief: r.name, owner: o.name, hull: r.rocket.owner.name, back, t: +simTime.toFixed(2) });
+  stats.jacks.push({ thief: r.name, owner: o.name, hull: r.rocket.owner.name, back, t: +simTime.toFixed(2) }); if (back) rsBack(r, o); else rsTheft(r, o, 'jacked');
   if (r === player) flash(back ? 'GOT YOUR ROCKET BACK!' : 'JACKED ' + o.name + "'S ROCKET!"); else if (o === player) flash(r.name + ' JACKED YOUR ROCKET! CHASE THEM!');
   if (r === player || o === player) { sfx.steal(); sfx.crowd('cheer', 0.7); }
   startHop(r);
@@ -1192,6 +1221,7 @@ function stepHop(r, dt) {
   if (f >= 1) finishMount(r);
 }
 function finishMount(r) {
+  rsRemount(r);
   stats.remounts.push({ name: r.name, footT: +r.footT.toFixed(2) });
   const [fx, fz] = fwdOf(r.h);
   Object.assign(r, { mounted: true, hop: null, prone: 0, jumpAir: false, climb: 0, vy: 0, inv: T.REMOUNT_INV, footT: 0, stun: 0, tumble: 0, lean: 0, tanPrev: null, tanCab: null, slingT: 0, homing: false, px: r.x, pz: r.z, vx: fx * T.BASE * 0.4, vz: fz * T.BASE * 0.4 });
@@ -1755,6 +1785,7 @@ function stepWorld(dt, hold) {
     if (!r.ai || !r.mounted || r.hop || liveTieOf(r) || liveHookOn(r) || r.cables.some(c => c.st === 'latched') || !nearRamp(r.x, r.z, 8) || Math.hypot(r.vx, r.vz) >= 1) { r.slowT = 0; continue; }
     r.slowT += dt; if (r.slowT > stats.rampStuckMax) { stats.rampStuckMax = r.slowT; stats.rampStuck.push({ name: r.name, t: +r.slowT.toFixed(2), x: +r.x.toFixed(1), z: +r.z.toFixed(1), mode: r.brain.mode }); }
   }
+  rsTick(dt);
 }
 function frame(now) {
   requestAnimationFrame(frame);
@@ -1762,6 +1793,7 @@ function frame(now) {
   fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { stats.fps = fpsN / fpsAcc; $('fps').textContent = stats.fps.toFixed(0) + ' fps' + (lowQ ? ' LQ' : ''); fpsAcc = 0; fpsN = 0; }
   stats.frames++;
   if (paused) { renderer.render(scene, camera); return; } // v0.8.1 pause / tutorial overlay
+  if (rsFrame(dt)) { updateCamera(dt); renderer.render(scene, camera); return; } // v0.8.2 round countdown / end
   // player input
   const kSteer = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
   if (player.mounted) {
@@ -1879,6 +1911,209 @@ applyQuality();
 requestAnimationFrame(frame);
 if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) showTut(); else gzFlash(); // v0.8.1
 
+// ---------------- v0.8.2 rounds, per-round stats, scorecard, records, export / import ----------------
+// Rounds: TIMED (2 / 3 / 5 min, 3-2-1 countdown, ends on the clock) or FREE (no timer; END ROUND from the pause screen).
+// Stats are pure observation: hooks at the existing event sites call rs*() which only bump counters (no gameplay / AI effect).
+const RS_VER = '3D test v0.8.2', RS_KEY = 'rj3d_records', RS_SCHEMA = 1, RS_CAP = 500, RS_EVCAP = 150;
+const RLENS = ['2', '3', '5', 'free'];
+let RLEN = RLENS.includes(QS.get('round')) ? QS.get('round') : RLENS.includes(localStorage.getItem('rj3d_round')) ? localStorage.getItem('rj3d_round') : '3';
+let RND = null, rsFirst = true, rsLenOverride = null;
+const KO_CAUSES = ['cable', 'crash', 'stomp', 'clothes', 'runover', 'other'];
+const z6 = () => Object.fromEntries(KO_CAUSES.map(k => [k, 0])), z3t = () => ({ towed: 0, tied: 0, jacked: 0 });
+function rsBlank() { return { pts: 0, koG: z6(), koT: z6(), hooks: { rider: 0, nose: 0, tail: 0 }, hooked: 0, tie: [0, 0], leash: [0, 0], bind: [0, 0], clo: [0, 0], cloSet: 0, trip: [0, 0],
+  theftG: z3t(), theftT: z3t(), back: 0, ride: 0, foot: 0, dism: 0, remN: 0, remT: 0, tiedT: 0, dodge: { dive: 0, jump: 0, diveOk: 0, jumpOk: 0 },
+  fired: 0, hit: 0, latch: 0, swing: 0, swSpd: 0, swT: 0, alt: [0, 0, 0], tricks: {}, best: null }; }
+function rsOn() { return RND && RND.st === 'live'; }
+function rsS(r) { return RND.S[r.name]; }
+function rsEv(type, by, vic) { if (!rsOn()) return; if (RND.ev.length < RS_EVCAP) RND.ev.push([+RND.t.toFixed(1), type, by ? by.name : '-', vic ? vic.name : '-']); }
+function rsFire(r) { if (rsOn()) rsS(r).fired++; }
+function rsHit(r, c) { if (!rsOn() || !c || c.rec !== 0) return; c.rec = 1; rsS(r).hit++; }
+function rsLatch(r) { if (rsOn()) rsS(r).latch++; }
+function rsHook(r, o, zone) { if (!rsOn()) return; rsS(r).hooks[zone]++; rsS(o).hooked++; if (o.dodge) o.dodge.hit = 1; rsEv('hook_' + zone, r, o); }
+function rsKO(v, by, how) { if (!rsOn()) return;
+  const cause = how == null ? 'cable' : KO_CAUSES.includes(how) ? how : 'other', sv = rsS(v); sv.koT[cause]++; sv.dism++; if (v.dodge) v.dodge.hit = 1;
+  if (by && by !== v) rsS(by).koG[cause]++; if (cause === 'clothes') { sv.clo[1]++; if (by && by !== v) rsS(by).clo[0]++; }
+  rsEv('ko_' + cause, by && by !== v ? by : null, v); }
+function rsTrip(o, by, how) { if (!rsOn()) return; const so = rsS(o); if (o.dodge) o.dodge.hit = 1; const b = by && by !== o ? by : null;
+  if (how === 'runover') { so.koT.runover++; if (b) rsS(b).koG.runover++; rsEv('ko_runover', b, o); }
+  else if (how === 'clothes') { so.clo[1]++; if (b) rsS(b).clo[0]++; rsEv('clo_foot', b, o); }
+  else { so.trip[1]++; if (b) rsS(b).trip[0]++; rsEv('trip', b, o); } }
+function rsTie(r, kind, t) { if (!rsOn()) return; const k = { tied: 'tie', bound: 'bind', binding: 'bind', leash: 'leash' }[kind];
+  if (kind === 'clothes') { rsS(r).cloSet++; rsEv('clo_set', r, null); return; } if (!k) return;
+  rsS(r)[k][0]++; for (const v of [...tieRiders(t), ...(t.lives || [])]) if (v !== r) { rsS(v)[k][1]++; rsEv(k, r, v); } }
+function rsTheft(thief, o, kind) { if (!rsOn()) return; rsS(thief).theftG[kind]++; rsS(o).theftT[kind]++; rsEv('theft_' + kind, thief, o); }
+function rsBack(r, o) { if (!rsOn()) return; rsS(r).back++; rsEv('tookback', r, o); }
+function rsRemount(r) { if (!rsOn()) return; const s = rsS(r); s.remN++; s.remT += r.footT; }
+function rsDodge(r, k) { if (!rsOn()) return; rsS(r).dodge[k]++; r.dodge = { k, t0: simTime, ev: 0, hit: 0 }; }
+function rsAward(r, pts, label) { if (!rsOn()) return; const s = rsS(r); s.tricks[label] = (s.tricks[label] || 0) + 1; if (!s.best || pts > s.best[1]) s.best = [label, pts]; }
+function rsTick(dt) { // per stepWorld: 3 riders x a few comparisons (CPU-light)
+  if (!rsOn()) return; RND.t += dt; if (RND.len) RND.left = Math.max(0, RND.left - dt);
+  for (const r of riders) { const s = rsS(r);
+    if (r.mounted && !r.hop) { s.ride += dt; const e = (r.y - T.HOVER) / T.ALT_MAX; s.alt[e < 1 / 3 ? 0 : e < 2 / 3 ? 1 : 2] += dt; } else { s.foot += dt; if (r.tied) s.tiedT += dt; }
+    const sw = r.mounted && (isSwingCab(r.cables[0]) || isSwingCab(r.cables[1]));
+    if (sw) { if (!r._sw) { s.swing++; r._swT = 0; } r._swT += dt; const sp = Math.hypot(r.vx, r.vz); if (sp > s.swSpd) s.swSpd = sp; if (r._swT > s.swT) s.swT = r._swT; }
+    r._sw = sw;
+    if (r.dodge && simTime - r.dodge.t0 > 1 && !(r.prone > 0) && !r.jumpAir) { if (r.dodge.ev && !r.dodge.hit) s.dodge[r.dodge.k + 'Ok']++; r.dodge = null; } }
+}
+function rsSpawn() { // a fresh round puts everyone back on their own rocket at the start spots (the same ones as a page load)
+  while (tethers.length) freeTether(tethers[0], 'reset');
+  for (const r of riders) if (r.rocket.owner !== r) { const o = riders.find(q => q.rocket.owner === r); for (const k of ['rocket', 'blob']) { const a = r[k]; r[k] = o[k]; o[k] = a; } }
+  const SP = { YOU: [0, -20, 0], RED: [-25, 20, Math.PI], GOLD: [25, 15, Math.PI * 0.7] };
+  for (const r of riders) { unFoot(r); const [x, z, h] = SP[r.name]; Object.assign(r, { x, z, h, px: x, pz: z, vx: 0, vz: 0, mounted: true, lean: 0, inv: 0, tied: null, prone: 0, jumpAir: false, dodge: null, _sw: false }); settle(r); if (r.ai) r.brain.cool = rand(2, 4); }
+  camSnap = true; camAnchor = null;
+}
+function newRound(respawn) {
+  const L = rsLenOverride != null ? rsLenOverride : RLEN === 'free' ? 0 : +RLEN * 60;
+  if (respawn) rsSpawn();
+  for (const r of riders) { r.pts = 0; r.ko = 0; r.dodge = null; r._sw = false; } score = 0; updScore(); trickList.length = 0; drawTricks();
+  RND = { st: L ? 'count' : 'live', len: L, left: L, cd: L ? 3 : 0, t: 0, ev: [], diff, lay: LAY, start: new Date().toISOString(), S: Object.fromEntries(riders.map(r => [r.name, rsBlank()])) };
+  rsHud();
+}
+function fmtT(s) { s = Math.max(0, Math.ceil(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function rsHud() { const e = $('rtime'), c = $('rcount'); if (!RND) return;
+  const tx = RND.len ? '⏱ ' + fmtT(RND.left) : 'FREE PLAY'; if (e.textContent !== tx) e.textContent = tx;
+  const cx = RND.st === 'count' ? String(Math.ceil(RND.cd)) : RND.st === 'go' ? 'GO!' : ''; if (c.textContent !== cx) c.textContent = cx; c.style.display = cx ? 'block' : 'none'; }
+function rsFrame(dt) { // called from frame() when not paused; returns true while the countdown freezes the world
+  if (!RND) return false;
+  if (RND.st === 'count') { RND.cd -= dt; if (RND.cd <= 0) { RND.st = 'live'; RND.goT = 0.8; } rsHud(); return RND.st === 'count'; }
+  if (RND.goT > 0) { RND.goT -= dt; $('rcount').textContent = RND.goT > 0 ? 'GO!' : ''; $('rcount').style.display = RND.goT > 0 ? 'block' : 'none'; }
+  if (RND.st === 'live' && RND.len && RND.left <= 0) { endRound('time'); return true; }
+  if (RND.len && RND.st === 'live') { const tx = '⏱ ' + fmtT(RND.left); if ($('rtime').textContent !== tx) { $('rtime').textContent = tx; $('rtime').classList.toggle('low', RND.left <= 10); } }
+  return false;
+}
+// ---- storage ----
+function recLoad() { try { const d = JSON.parse(localStorage.getItem(RS_KEY)); if (d && d.schema === RS_SCHEMA && Array.isArray(d.rounds)) return Object.assign({ pb: {}, life: {} }, d); } catch (e) {} return { schema: RS_SCHEMA, rounds: [], pb: {}, life: {} }; }
+function recSave(d) { d.schema = RS_SCHEMA; if (d.rounds.length > RS_CAP) d.rounds.splice(0, d.rounds.length - RS_CAP);
+  for (let k = 0; k < 6; k++) { try { localStorage.setItem(RS_KEY, JSON.stringify(d)); return true; } catch (e) { d.rounds.splice(0, Math.max(1, d.rounds.length >> 3)); } } return false; }
+const kosOf = o => Object.values(o).reduce((a, b) => a + b, 0);
+const accOf = s => s.fired ? s.hit / s.fired : 0;
+// personal bests (timed rounds only, per difficulty): [key, label, value(roundRec) | null if not eligible, format]
+const PB_DEFS = [['pts', 'High score', rr => rr.R.YOU.pts, v => v + ' pts'], ['kos', 'Most KOs', rr => kosOf(rr.R.YOU.koG), v => v],
+  ['acc', 'Best accuracy (5+ shots)', rr => rr.R.YOU.fired >= 5 ? accOf(rr.R.YOU) : null, v => Math.round(v * 100) + '%'], ['swT', 'Longest swing', rr => rr.R.YOU.swT, v => v.toFixed(1) + ' s'],
+  ['swSpd', 'Fastest swing', rr => rr.R.YOU.swSpd, v => v.toFixed(1) + ' u/s'], ['thefts', 'Most thefts', rr => kosOf(rr.R.YOU.theftG), v => v],
+  ['dodges', 'Most dodges', rr => rr.R.YOU.dodge.diveOk + rr.R.YOU.dodge.jumpOk, v => v], ['hooks', 'Most hooks', rr => kosOf(rr.R.YOU.hooks), v => v]];
+function pbApply(d, rr) { // -> list of broken records [{label, old, now}]
+  if (!rr.len) return []; const P = d.pb[rr.diff] = d.pb[rr.diff] || {}, out = [];
+  for (const [k, lab, f, fm] of PB_DEFS) { const v = f(rr); if (v == null || !(v > 0)) continue; const o = P[k];
+    if (!o || v > o.v) { if (o) out.push({ k, label: lab, old: fm(o.v), now: fm(v) }); P[k] = { v: +(+v).toFixed(3), d: rr.date, id: rr.id }; } }
+  return out; }
+const LIFE_KEYS = ['rounds', 'time', 'pts', 'koG', 'koT', 'hooks', 'ties', 'thefts', 'fired', 'hit', 'dodges', 'wins'];
+function lifeAdd(d, rr) { const L = d.life, Y = rr.R.YOU; for (const k of LIFE_KEYS) L[k] = L[k] || 0;
+  L.rounds++; L.time += rr.dur; L.pts += Y.pts; L.koG += kosOf(Y.koG); L.koT += kosOf(Y.koT); L.hooks += kosOf(Y.hooks); L.ties += Y.tie[0] + Y.leash[0] + Y.bind[0];
+  L.thefts += kosOf(Y.theftG); L.fired += Y.fired; L.hit += Y.hit; L.dodges += Y.dodge.diveOk + Y.dodge.jumpOk; if (rr.stand[0].n === 'YOU') L.wins++; }
+function rsRebuild(d) { d.pb = {}; d.life = {}; for (const rr of d.rounds) { pbApply(d, rr); lifeAdd(d, rr); } }
+function rsRound(why) { // finalize the live round into a compact record
+  const r1 = x => Math.round(x * 10) / 10, R = {};
+  for (const r of riders) { const s = JSON.parse(JSON.stringify(rsS(r))); s.pts = r.pts; for (const k of ['ride', 'foot', 'remT', 'tiedT', 'swSpd', 'swT']) s[k] = r1(s[k]); s.alt = s.alt.map(r1);
+    s.remAvg = s.remN ? r1(s.remT / s.remN) : null; s.acc = s.fired ? Math.round(100 * s.hit / s.fired) : null; R[r.name] = s; }
+  const stand = riders.map(r => ({ n: r.name, pts: r.pts, ko: kosOf(R[r.name].koG) })).sort((a, b) => b.pts - a.pts || b.ko - a.ko);
+  return { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), v: RS_VER, date: RND.start, dur: r1(RND.t), len: RND.len, mode: RND.len ? 'timed' : 'free', end: why,
+    diff: RND.diff, diffEnd: diff, lay: RND.lay, dev: TOUCH ? 'touch' : 'keyboard', stand, R, ev: RND.ev };
+}
+let lastCard = null;
+function endRound(why) {
+  if (!RND || RND.st === 'over') return null; const wasCount = RND.st === 'count'; RND.st = 'live'; const rr = rsRound(why); RND.st = 'over';
+  let broken = [], saved = false;
+  if (!wasCount && rr.dur >= 1) { const d = recLoad(); broken = pbApply(d, rr); lifeAdd(d, rr); d.rounds.push(rr); saved = recSave(d); }
+  lastCard = { rr, broken, saved }; showCard(); return rr;
+}
+// ---- UI ----
+function ovlOpen(mode, html, wide) { ovlMode = mode; paused = true; const o = $('ovl'); o.classList.add('show'); o.firstChild.classList.toggle('wide', !!wide); o.firstChild.innerHTML = html; o.firstChild.scrollTop = 0; }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const locT = iso => { const d = new Date(iso), p = n => String(n).padStart(2, '0'); return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
+const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '–';
+function cardRows(R) { const N = ['YOU', 'RED', 'GOLD'], row = (lab, f) => '<tr><th>' + lab + '</th>' + N.map(n => '<td>' + f(R[n]) + '</td>').join('') + '</tr>';
+  return '<table class="st"><tr><th></th>' + N.map(n => '<th class="n' + n + '">' + n + '</th>').join('') + '</tr>'
+    + row('Points', s => '<b>' + s.pts + '</b>') + row('KOs given / taken', s => kosOf(s.koG) + ' / ' + kosOf(s.koT))
+    + row('Cable / crash / stomp', s => s.koG.cable + ' / ' + s.koG.crash + ' / ' + s.koG.stomp) + row('Clotheslines / run-overs', s => s.clo[0] + ' / ' + s.koG.runover)
+    + row('Hooks rider / nose / tail', s => s.hooks.rider + ' / ' + s.hooks.nose + ' / ' + s.hooks.tail) + row('Ties / leashes / binds', s => s.tie[0] + ' / ' + s.leash[0] + ' / ' + s.bind[0])
+    + row('Thefts given / taken', s => kosOf(s.theftG) + ' / ' + kosOf(s.theftT)) + row('Accuracy', s => pct(s.hit, s.fired) + ' <small>(' + s.hit + '/' + s.fired + ')</small>')
+    + row('Riding / on foot', s => Math.round(s.ride) + 's / ' + Math.round(s.foot) + 's') + row('Avg remount', s => s.remAvg == null ? '–' : s.remAvg + 's')
+    + row('Dodges ok / tried', s => (s.dodge.diveOk + s.dodge.jumpOk) + ' / ' + (s.dodge.dive + s.dodge.jump)) + row('Swings · fastest', s => s.swing + ' · ' + (s.swSpd ? s.swSpd.toFixed(0) : '–'))
+    + '</table>'; }
+function hurtMost(rr) { const c = {}; for (const e of rr.ev) if (e[3] === 'YOU' && e[2] !== '-') { const k = e[2] + ' ' + e[1].replace(/_/g, ' '); c[k] = (c[k] || 0) + 1; } const b = Object.entries(c).sort((a, b) => b[1] - a[1])[0]; return b ? b[0] + ' ×' + b[1] : null; }
+function showCard() {
+  const { rr, broken, saved } = lastCard, Y = rr.R.YOU, pos = rr.stand.findIndex(s => s.n === 'YOU') + 1;
+  const hl = []; if (Y.best) hl.push('Best trick: <b>' + esc(Y.best[0]) + '</b> +' + Y.best[1]);
+  for (const b of broken) hl.push('🏆 NEW RECORD · ' + esc(b.label) + ': <b>' + b.now + '</b> <small>(was ' + b.old + ')</small>');
+  const hm = hurtMost(rr); if (hm) hl.push('Hurt you most: ' + esc(hm)); if (!saved) hl.push('<small>(round too short / not saved)</small>');
+  ovlOpen('end', '<h2>' + (rr.end === 'time' ? 'TIME!' : 'ROUND OVER') + ' · ' + ['1st', '2nd', '3rd'][pos - 1] + ' place</h2>'
+    + '<div class="sub">' + (rr.len ? fmtT(rr.len) + ' round' : 'Free play ' + fmtT(rr.dur)) + ' · AI ' + rr.diff + ' · ' + rr.lay + ' · ' + rr.dev + '</div>'
+    + '<div class="cols"><div class="c1"><table class="stand">' + rr.stand.map((s, i) => '<tr class="n' + s.n + '"><td>' + (i + 1) + '.</td><td>' + s.n + '</td><td><b>' + s.pts + '</b> pts</td><td>' + s.ko + ' KO</td></tr>').join('') + '</table>'
+    + '<div class="hl">' + hl.map(h => '<div>' + h + '</div>').join('') + '</div></div><div class="c2">' + cardRows(rr.R) + '</div></div>'
+    + '<div class="btns"><button class="go" id="cdAgain">PLAY AGAIN</button><button class="go alt" id="cdRec">RECORDS</button></div>', true);
+  $('cdAgain').addEventListener('click', () => playAgain()); $('cdRec').addEventListener('click', () => showRecords('end'));
+}
+function playAgain() { rsLenOverride = null; newRound(true); closeOvl(); }
+let recBack = 'pause', recDiff = null;
+function showRecords(from) {
+  if (from) recBack = from; const d = recLoad(), L = d.life, dk = Object.keys(DIFFS); recDiff = recDiff || diff;
+  const P = d.pb[recDiff] || {}, last = d.rounds.slice(-20).reverse();
+  const pbH = PB_DEFS.map(([k, lab, , fm]) => '<tr><th>' + lab + '</th><td>' + (P[k] ? '<b>' + fm(P[k].v) + '</b> <small>' + locT(P[k].d).slice(0, 5) + '</small>' : '–') + '</td></tr>').join('');
+  const lf = L.rounds ? [['Rounds', L.rounds + ' (' + L.wins + ' won)'], ['Play time', fmtT(L.time)], ['Points', L.pts], ['KOs given / taken', L.koG + ' / ' + L.koT], ['Hooks', L.hooks], ['Ties+leash+bind', L.ties], ['Thefts', L.thefts], ['Accuracy', pct(L.hit, L.fired)], ['Dodges', L.dodges]] : [['No rounds yet', '']];
+  const lr = last.map(rr => { const Y = rr.R.YOU, p = rr.stand.findIndex(s => s.n === 'YOU') + 1; return '<tr><td>' + locT(rr.date) + '</td><td>' + rr.diff.slice(0, 4) + '</td><td>' + (rr.len ? fmtT(rr.len) : 'free') + '</td><td>#' + p + '</td><td><b>' + Y.pts + '</b></td><td>' + kosOf(Y.koG) + '/' + kosOf(Y.koT) + '</td><td>' + (Y.acc == null ? '–' : Y.acc + '%') + '</td></tr>'; }).join('');
+  ovlOpen('rec', '<h2 class="sm">RECORDS</h2><div class="cols"><div class="c1"><div class="sub">PERSONAL BESTS (timed rounds)</div><div class="lays sm">' + dk.map(k => '<button data-d="' + k + '" class="' + (k === recDiff ? 'sel' : '') + '">' + k + '</button>').join('') + '</div><table class="st kv">' + pbH + '</table>'
+    + '</div>'
+    + '<div class="c2"><div class="sub">LIFETIME</div><div class="life">' + lf.map(([a, b]) => '<span>' + a + ' <b>' + b + '</b></span>').join('') + '</div><div class="sub">TREND · last ' + Math.min(30, d.rounds.length) + ' rounds: <span style="color:#ffd84a">score</span> · <span style="color:#ff6a6a">KOs taken</span></div><canvas id="spark" width="380" height="60"></canvas>'
+    + '<div class="sub">LAST 20 ROUNDS</div><div class="lr"><table class="st"><tr><th>when</th><th>AI</th><th>len</th><th>pos</th><th>pts</th><th>KO g/t</th><th>acc</th></tr>' + (lr || '<tr><td colspan="7">–</td></tr>') + '</table></div></div></div>'
+    + '<div class="btns"><button class="go alt" id="rcExp">EXPORT</button><button class="go alt" id="rcImp">IMPORT</button><button class="go alt" id="rcClr">CLEAR RECORDS</button><button class="go" id="rcBack">BACK</button></div>', true);
+  for (const b of $('ovl').querySelectorAll('[data-d]')) b.addEventListener('click', () => { recDiff = b.dataset.d; showRecords(); });
+  drawSpark($('spark'), d.rounds.slice(-30));
+  $('rcExp').addEventListener('click', showExport); $('rcImp').addEventListener('click', showImport); $('rcClr').addEventListener('click', showClear);
+  $('rcBack').addEventListener('click', () => { if (recBack === 'end' && lastCard) showCard(); else showPause(); });
+}
+function drawSpark(cv, rs) { const g = cv.getContext('2d'), W = cv.width, H = cv.height; g.clearRect(0, 0, W, H); g.fillStyle = 'rgba(255,255,255,.06)'; g.fillRect(0, 0, W, H);
+  if (rs.length < 2) { g.fillStyle = '#aaa'; g.font = '12px sans-serif'; g.fillText('play 2+ rounds to see trends', 10, H / 2 + 4); return; }
+  const line = (vals, col, lab) => { const mx = Math.max(1, ...vals); g.strokeStyle = col; g.lineWidth = 2; g.beginPath();
+    vals.forEach((v, i) => { const x = 6 + i * (W - 40) / (vals.length - 1), y = H - 6 - v / mx * (H - 14); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+    g.fillStyle = col; g.font = 'bold 11px sans-serif'; g.fillText(String(vals[vals.length - 1]), W - 30, lab); };
+  line(rs.map(r => r.R.YOU.pts), '#ffd84a', 14); line(rs.map(r => kosOf(r.R.YOU.koT)), '#ff6a6a', 30); }
+const SCHEMA_DOC = { about: 'Rocket Jockey 3D rounds export. One entry per finished round. Times in seconds, speeds in world units/s.',
+  round: { id: 'unique id', v: 'game version', date: 'round start ISO time (UTC)', dur: 'seconds actually played', len: 'planned length s (0 = free play)', mode: 'timed|free', end: 'time (clock ran out) | quit (END ROUND)',
+    diff: 'AI difficulty at start', diffEnd: 'AI difficulty at end', lay: 'touch layout CLASSIC|HYBRID|GESTURE', dev: 'touch|keyboard', stand: 'final standings [{n name, pts, ko given}] best first', R: 'per rider stats keyed YOU / RED / GOLD (below)',
+    ev: 'event log (max ' + RS_EVCAP + ') [t s, type, by, victim]; types ko_<cause>, hook_<zone>, tie, leash, bind, clo_foot, clo_set, trip, theft_<kind>, tookback' },
+  rider: { pts: 'points', koG: 'KOs given by cause {cable (cable catch), crash, stomp, clothes (clothesline), runover (knocked down on foot), other}', koT: 'KOs taken by cause',
+    hooks: 'hooks landed {rider (body on foot), nose, tail (ridden rocket zones)}', hooked: 'times hooked by others', tie: '[given, taken] rider tied to a post', leash: '[given, taken] ridden rocket leashed to a post', bind: '[given, taken] binds',
+    clo: '[given, taken] clothesline hits (mounted KOs + runners tripped by a swing line)', cloSet: 'post-to-post clotheslines set', trip: '[given, taken] runners tripped by a tie line',
+    theftG: 'rocket thefts given {towed, tied (to a post), jacked (hopped on)}', theftT: 'thefts suffered', back: 'took your own rocket back', ride: 's riding', foot: 's on foot', dism: 'dismounts (KOs taken while riding)',
+    remN: 'remounts', remT: 's on foot summed over remounts', remAvg: 'average s to remount', tiedT: 's spent tied up', dodge: '{dive, jump attempts on foot; diveOk, jumpOk = a cable / line / rocket passed within reach and did not hit}',
+    fired: 'cables fired', hit: 'cables that connected (KO, hook, post latch, theft)', acc: 'hit/fired %', latch: 'post latches', swing: 'swings started (post or rider pylon)', swSpd: 'max speed while swinging', swT: 'longest single swing s',
+    alt: 's riding at [low, mid, high] third of the altitude range', tricks: 'scored trick counts by label', best: '[label, pts] best single award' },
+  pb: 'personal bests per difficulty {key: {v, d date, id}} from timed rounds', life: 'lifetime totals (survive the 500-round cap)' };
+function exportJSON() { const d = recLoad(); return JSON.stringify({ schema: RS_SCHEMA, game: 'Rocket Jockey 3D', exported: new Date().toISOString(), from: RS_VER, cap: RS_CAP, doc: SCHEMA_DOC, pb: d.pb, life: d.life, rounds: d.rounds }); }
+function importJSON(txt, mode) { let j; try { j = JSON.parse(txt); } catch (e) { return { ok: false, err: 'not valid JSON' }; }
+  const rs = Array.isArray(j) ? j : j && Array.isArray(j.rounds) ? j.rounds : null; if (!rs) return { ok: false, err: 'no rounds array' };
+  const good = rs.filter(r => r && r.id && r.R && r.R.YOU && Array.isArray(r.stand) && r.date); if (rs.length && !good.length) return { ok: false, err: 'no valid rounds' };
+  const d = mode === 'replace' ? { schema: RS_SCHEMA, rounds: [], pb: {}, life: {} } : recLoad(), have = new Set(d.rounds.map(r => r.id)); let add = 0;
+  for (const r of good) if (!have.has(r.id)) { have.add(r.id); d.rounds.push(r); add++; }
+  d.rounds.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0); if (d.rounds.length > RS_CAP) d.rounds.splice(0, d.rounds.length - RS_CAP);
+  rsRebuild(d); if (mode !== 'replace' && j.life && j.life.rounds > d.life.rounds) d.life = j.life; recSave(d); return { ok: true, added: add, total: d.rounds.length };
+}
+function showExport() { const s = exportJSON();
+  ovlOpen('exp', '<h2>EXPORT ' + recLoad().rounds.length + ' ROUNDS</h2><div class="sub">Copied to the clipboard if allowed. Otherwise: select the text below and copy it, or download the file.</div><textarea id="expTxt" readonly></textarea><div class="sub" id="expMsg"></div>'
+    + '<div class="btns"><button class="go alt" id="expCopy">COPY</button><button class="go alt" id="expDl">DOWNLOAD .JSON</button><button class="go" id="expBack">BACK</button></div>', true);
+  const ta = $('expTxt'); ta.value = s;
+  const copy = () => { ta.focus(); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    const p = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(s) : Promise.reject();
+    p.then(() => { $('expMsg').textContent = '✓ copied (' + (s.length / 1024).toFixed(1) + ' KB)'; }, () => { $('expMsg').textContent = ok ? '✓ copied (' + (s.length / 1024).toFixed(1) + ' KB)' : 'Clipboard blocked: the text is selected, copy it by hand.'; }); };
+  $('expCopy').addEventListener('click', copy); copy();
+  $('expDl').addEventListener('click', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([s], { type: 'application/json' })); a.download = 'rocketjockey3d-rounds-' + new Date().toISOString().slice(0, 10) + '.json'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); });
+  $('expBack').addEventListener('click', () => showRecords());
+}
+function showImport() {
+  ovlOpen('imp', '<h2>IMPORT</h2><div class="sub">Paste an export below. MERGE adds rounds you do not have; REPLACE swaps all records for the pasted ones.</div><textarea id="impTxt" placeholder="paste JSON here"></textarea><div class="sub" id="impMsg"></div>'
+    + '<div class="btns"><button class="go alt" id="impMerge">MERGE</button><button class="go alt" id="impRep">REPLACE</button><button class="go" id="impBack">BACK</button></div>', true);
+  const go = m => { const r = importJSON($('impTxt').value, m); $('impMsg').textContent = r.ok ? '✓ ' + r.added + ' rounds added, ' + r.total + ' total' : '✗ ' + r.err; };
+  $('impMerge').addEventListener('click', () => go('merge')); $('impRep').addEventListener('click', () => go('replace')); $('impBack').addEventListener('click', () => showRecords());
+}
+function clearRecords() { localStorage.removeItem(RS_KEY); }
+function showClear() { const n = recLoad().rounds.length;
+  ovlOpen('clr', '<h2>CLEAR RECORDS?</h2><div class="sub" style="font-size:14px">This deletes ' + n + ' rounds, all personal bests and lifetime totals on this device. Export first if you want to keep them.</div>'
+    + '<div class="btns"><button class="go danger" id="clrYes">YES, DELETE</button><button class="go" id="clrNo">CANCEL</button></div>');
+  $('clrYes').addEventListener('click', () => { clearRecords(); showRecords(); }); $('clrNo').addEventListener('click', () => showRecords()); }
+function setRLen(v) { if (!RLENS.includes(v)) return; RLEN = v; localStorage.setItem('rj3d_round', v); if (ovlMode === 'pause') showPause(); }
+newRound(false);
+
 // ---------------- test hooks ----------------
 const gl = renderer.getContext();
 function unFoot(r) { // test helper: back on the rocket, clean state
@@ -1890,7 +2125,7 @@ function unFoot(r) { // test helper: back on the rocket, clean state
   if (r === player) hideRunHint();
 }
 window.__rj3d = {
-  version: '3D test v0.8.1', ready: true,
+  version: '3D test v0.8.2', ready: true,
   renderer: () => ({ webgl: !!gl, isWebGL2: renderer.capabilities.isWebGL2, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   tuning: () => ({ tipDrag: T.TIP_DRAG, tipMass: T.TIP_MASS, payOut: T.PAY_OUT, reelIn: T.REEL_IN, turn: T.TURN, latchSteer: T.LATCH_STEER, cableMax: T.CABLE_MAX, cableSpeed: T.CABLE_SPEED, cableLife: T.CABLE_LIFE, cableFwdDeg: T.CABLE_FWD * 180 / Math.PI }),
   cable: i => { const c = player.cables[i], [tx, tz] = cableTip(player, i); const [mx, mz] = mountOf(player, i); return { mx, mz, vx: c.vx, vz: c.vz, taut: c.taut, len: c.len, latchSpeed: c.latchSpeed, latchLen: c.latchLen, hold: c.hold, allow: c.allow, boost: player.boost, ax: c.tgt?.x, az: c.tgt?.z, pvx: player.vx, pvz: player.vz, sag: c.pts.map(p => [p.x, p.y, p.z]), st: c.st, ext: c.ext, t: c.t, kind: c.tgt?.kind || null, tx, tz, px: player.x, pz: player.z, h: player.h }; },
@@ -2041,6 +2276,12 @@ window.__rj3d = {
   layout: () => ({ lay: LAY, saved: localStorage.getItem('rj3d_layout'), paused, ovl: ovlMode, ovlText: $('ovl').classList.contains('show') ? $('ovl').innerText : '', tut: Object.fromEntries(LAYOUTS.map(l => [l, tutSeen(l)])), touch: TOUCH, gz: document.body.classList.contains('gzon'), gzT,
     stick: stickId !== null, sx: inp.stickX, sy: inp.stickY, climb: player.climb, steer: player.steer, boost: player.boost, hold: player._h.slice(), g: { L: inp.gL, R: inp.gR, boost: inp.gBoost, burst: gBurst, n: gT.size }, gestLog: gestLog.slice(), autoTies: stats.autoTies.slice() }),
   setLayout: l => setLayout(l), closeOvl: () => closeOvl(), pause: () => showPause(), resetTut() { for (const l of LAYOUTS) localStorage.removeItem('rj3d_tut_' + l); },
+  // v0.8.2 hooks
+  round: () => RND ? { st: RND.st, len: RND.len, left: RND.left, t: RND.t, cd: RND.cd, diff: RND.diff, ev: RND.ev.slice(), S: JSON.parse(JSON.stringify(RND.S)), rlen: RLEN, pts: riders.map(r => r.pts) } : null,
+  newRound(sec, respawn = true) { rsLenOverride = sec == null ? null : sec; newRound(respawn); rsLenOverride = null; }, skipCount() { if (RND && RND.st === 'count') { RND.cd = 0; RND.st = 'live'; } },
+  tieNow: () => doTie(player),
+  endRound: why => endRound(why || 'quit'), records: () => recLoad(), exportJSON: () => exportJSON(), importJSON: (s, m) => importJSON(s, m), clearRecords: () => clearRecords(), recCap: RS_CAP,
+  showRecords: () => showRecords('pause'), ovlMode: () => ovlMode, setRLen: v => setRLen(v), lastCard: () => lastCard && { broken: lastCard.broken, saved: lastCard.saved, id: lastCard.rr.id },
   freezeAI(on) { window.__rj3dNoAIHook = on; for (const r of riders) if (r.ai) { r.brain.cool = on ? 1e9 : 2; r.brain.lock = false; releaseAll(r, true); } },
 };
 </script>
