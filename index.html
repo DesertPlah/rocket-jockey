@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#0e2816">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>Rocket Jockey v1.0</title>
-<link rel="manifest" id="manifest">
-<link rel="icon" id="favicon">
-<link rel="apple-touch-icon" id="appleicon">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/rj-192.png">
+<link rel="apple-touch-icon" href="icons/rj-192.png">
+<meta name="apple-mobile-web-app-title" content="RJ 2D">
 <style>
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;
   touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
@@ -271,33 +272,8 @@ const hyp = Math.hypot;
 function angDiff(a, b) { let d = (a - b) % TAU; if (d > Math.PI) d -= TAU; else if (d < -Math.PI) d += TAU; return d; }
 function gauss() { return (Math.random() + Math.random() + Math.random() - 1.5) / 0.5; }
 
-// ---------- PWA bits (inline manifest + generated icon) ----------
-function makeIcon(size) {
-  const c = document.createElement('canvas'); c.width = c.height = size;
-  const g = c.getContext('2d'); const s = size / 64;
-  g.fillStyle = '#000'; g.fillRect(0, 0, size, size);
-  g.strokeStyle = '#0ff'; g.lineWidth = 3 * s; g.beginPath(); g.arc(14 * s, 14 * s, 6 * s, 0, TAU); g.stroke();
-  g.beginPath(); g.moveTo(14 * s, 20 * s); g.lineTo(34 * s, 34 * s); g.stroke();
-  g.save(); g.translate(38 * s, 38 * s); g.rotate(-0.6);
-  g.fillStyle = '#fa3'; g.beginPath(); g.moveTo(-14 * s, -4 * s); g.lineTo(-26 * s, 0); g.lineTo(-14 * s, 4 * s); g.fill();
-  g.fillStyle = '#ccc'; g.fillRect(-14 * s, -5 * s, 26 * s, 10 * s);
-  g.beginPath(); g.moveTo(12 * s, -5 * s); g.lineTo(20 * s, 0); g.lineTo(12 * s, 5 * s); g.fill();
-  g.fillStyle = '#3cf'; g.beginPath(); g.arc(0, 0, 6 * s, 0, TAU); g.fill();
-  g.restore();
-  return c.toDataURL('image/png');
-}
-try {
-  const i192 = makeIcon(192), i512 = makeIcon(512);
-  document.getElementById('favicon').href = i192;
-  document.getElementById('appleicon').href = i192;
-  const start = location.href.split('#')[0];
-  const man = {
-    name: 'Rocket Jockey', short_name: 'R.Jockey', start_url: start, scope: start.replace(/[^/]*$/, ''),
-    display: 'fullscreen', orientation: 'landscape', background_color: '#000000', theme_color: '#000000',
-    icons: [{ src: i192, sizes: '192x192', type: 'image/png' }, { src: i512, sizes: '512x512', type: 'image/png' }]
-  };
-  document.getElementById('manifest').href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(man));
-} catch (e) { /* non-fatal */ }
+// ---------- PWA: static manifest.webmanifest + icons/ ; offline shell via ../sw.js ----------
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 
 // ---------- audio (v1.0: Web Audio sound pass, all synthesized; master bus + voice cap + mute/volume) ----------
 let AC = null, eng = null, master = null, sfxBus = null, noiseBuf = null, crushCurve = null;

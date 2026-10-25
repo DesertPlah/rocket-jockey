@@ -1,0 +1,17 @@
+{
+  "id": "./",
+  "name": "Rocket Jockey 3D (fan remake)",
+  "short_name": "RJ 3D",
+  "description": "Unofficial fan-made 3D homage test build. Original code and art; not affiliated with the 1996 Rocket Jockey or its rights holders.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#0e2816",
+  "icons": [
+    { "src": "../icons/rj3d-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "../icons/rj3d-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
