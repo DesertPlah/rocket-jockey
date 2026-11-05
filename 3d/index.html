@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="RJ 3D">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.9.3</title>
+<title>Rocket Jockey 3D test v0.9.4</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -101,7 +101,7 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp{display:flex}
 <script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('../sw.js', { scope: '../' }).catch(() => {}));</script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.9.3</div>
+<div id="ver" class="hud">3D test v0.9.4</div>
 <div id="score" class="hud">KO 0</div><div id="rtime" class="hud"></div><div id="rcount" class="hud"></div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
@@ -719,7 +719,7 @@ function updateCable(r, i, dt, holding) {
   if (c.st === 'out') {
     if (!r.mounted || c.t > T.CABLE_LIFE) { releaseCable(r, i, true); return; }
     // free-flying weighted tip
-    const dr = Math.exp(-T.TIP_DRAG * dt); c.vx *= dr; c.vz *= dr; c.tx += c.vx * dt; c.tz += c.vz * dt;
+    const dr = Math.exp(-T.TIP_DRAG * dt); c.vx *= dr; c.vz *= dr; c.tx += c.vx * dt; c.tz += c.vz * dt; tipWall(c);
     c.ty += c.vty * dt; { const tf = groundAt(c.tx, c.tz) + T.HOVER + 0.6; if (c.ty <= tf) { c.ty = tf; c.vty = 0; } else if (c.airShot || c.vty) c.vty -= T.GRAV * 0.5 * dt; } // v0.8: a shot from controlled altitude flies level // v0.7
     const [mx, mz] = mountOf(r, i); let dx = c.tx - mx, dz = c.tz - mz, d = Math.hypot(dx, dz);
     c.taut = d >= T.CABLE_MAX - 0.01;
@@ -1961,7 +1961,7 @@ if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) showTut(); else gzFlash(); 
 // ---------------- v0.8.2 rounds, per-round stats, scorecard, records, export / import ----------------
 // Rounds: TIMED (2 / 3 / 5 min, 3-2-1 countdown, ends on the clock) or FREE (no timer; END ROUND from the pause screen).
 // Stats are pure observation: hooks at the existing event sites call rs*() which only bump counters (no gameplay / AI effect).
-const RS_VER = '3D test v0.9.3', RS_KEY = 'rj3d_records', RS_SCHEMA = 1, RS_CAP = 500, RS_EVCAP = 150;
+const RS_VER = '3D test v0.9.4', RS_KEY = 'rj3d_records', RS_SCHEMA = 1, RS_CAP = 500, RS_EVCAP = 150;
 const RLENS = ['2', '3', '5', 'free'];
 let RLEN = RLENS.includes(QS.get('round')) ? QS.get('round') : RLENS.includes(localStorage.getItem('rj3d_round')) ? localStorage.getItem('rj3d_round') : '3';
 let RND = null, rsFirst = true, rsLenOverride = null;
@@ -2216,6 +2216,8 @@ function pickArena() { // RANDOM: a different layout than last round
   if (ARENA_SEL !== 'random') return ARENA.id === ARENA_SEL ? ARENA.id : applyArena(ARENA_SEL);
   const pool = ARENA_IDS.filter(i => i !== ARENA.id); const id = pool[Math.floor(Math.random() * pool.length)]; arenaHist.push(id); return applyArena(id); }
 function setArena(id) { if (![...ARENA_IDS, 'random'].includes(id)) return false; ARENA_SEL = id; localStorage.setItem('rj3d_arena', id); if (isBall()) newRound(true); else if (id !== 'random') applyArena(id); if (ovlMode === 'pause') showPause(); return true; }
+function rbEject(b) { const sz = Math.sign(b.z) || 1; b.z = sz * (RB.GZ - RB.R - 0.5); b.vz = -sz * (10 + Math.random() * 4); b.vx = (Math.random() - 0.5) * 6; b.vy = Math.max(b.vy, 4); b.boxT = 0; b.touchT = simTime; }
+function tipWall(c) { if (!arenaWalls.length) return 0; const o = { x: c.tx, z: c.tz, vx: c.vx, vz: c.vz }; const hit = wallHit(o, 0.35, c.ty - 0.3, 0.5); c.tx = o.x; c.tz = o.z; c.vx = o.vx; c.vz = o.vz; return hit; } // v0.9.4 cable tips bounce off arena walls
 function wallHit(o, rad, yb, bounce) { // push o (x, z, vx, vz) out of any arena wall block it overlaps; returns the normal speed hit (<0) or 0
   let hit = 0;
   for (const w of arenaWalls) { if (!w.on || yb > w.h) continue; const dx = o.x - w.x, dz = o.z - w.z, px = w.hx + rad - Math.abs(dx), pz = w.hz + rad - Math.abs(dz);
@@ -2317,7 +2319,7 @@ function rbStep(h) {
     // goal: centre fully past the plane (the whole ball is over the line), inside the mouth and under the bar
     const gz = RB.GZ + RB.R;
     if (Math.abs(b.z) >= gz && Math.abs(b.pz) < gz && Math.abs(b.x) < RB.GW - 0.3 && b.y < RB.GH) { rbGoal(b, Math.sign(b.z)); continue; }
-    if (inBox && !b.holder) { b.boxT += h; if (b.boxT > RB.BOX_T) { rbStats.boxed++; rbRemove(b); continue; } } else b.boxT = 0; // came in over the bar / round the side: no goal, serve a new one
+    if (inBox && !b.holder) { b.boxT += h; if (b.boxT > RB.BOX_T) { rbStats.boxed++; rbEject(b); } } else b.boxT = 0; // v0.9.4: boxed balls get kicked back into play, never vanish. Came in over the bar / round the side: no goal, serve a new one
     if (!b.holder && simTime - b.touchT > RB.STALE && Math.hypot(b.vx, b.vz) < 1) { rbStats.stale++; rbRemove(b); continue; } // nobody wants it: recycle
   }
 }
@@ -2480,12 +2482,13 @@ function unFoot(r) { // test helper: back on the rocket, clean state
   if (r === player) hideRunHint();
 }
 window.__rj3d = {
-  version: '3D test v0.9.3', ready: true,
+  version: '3D test v0.9.4', ready: true,
   get arena() { return ARENA.id; }, shotCam(x, y, z, tx, ty, tz) { paused = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); renderer.render(scene, camera); }, setArena: id => setArena(id), looks: () => ({ frontFins: player.rocket.g.userData.frontFins, person: player.jockey.userData.person, arms: player.jockey.userData.arms.length }),
   // v0.9 ROCKETBALL hooks
   rb: {
     mode: () => MODE, setMode: m => setMode(m), arena: () => ({ id: ARENA.id, sel: ARENA_SEL, gw: RB.GW, walls: arenaWalls.length, hist: arenaHist.slice() }), setArena: id => setArena(id), arenas: () => ARENA_IDS.slice(), RB, TEAMS, disp: () => ({ cool: disp.cool }),
     balls: () => balls.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, holder: b.holder ? b.holder.name : null, owner: b.owner ? b.owner.name : null, prev: b.prev ? b.prev.name : null })),
+    tipWall: (x, z, vx, vz, y = 2) => { const c = { tx: x, tz: z, ty: y, vx, vz }; tipWall(c); return { x: c.tx, z: c.tz, vx: c.vx, vz: c.vz }; }, walls: () => arenaWalls.map(w => ({ ...w })),
     spawnBall: (x, y, z, vx, vy, vz) => spawnBall(x, y, z, vx ?? 0, vy ?? 0, vz ?? 0).id,
     clearBalls: () => { for (const b of balls.slice()) rbRemove(b); }, holdDisp: (t = 1e9) => { disp.cool = t; },
     setOwner: (id, n, pn) => { const b = balls.find(q => q.id === id), f = x => riders.find(r => r.name === x) || null; b.owner = f(n); b.ownT = simTime; b.prev = pn ? f(pn) : null; b.prevT = simTime - 1; },
