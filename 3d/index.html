@@ -134,7 +134,7 @@ const T = {
   // v0.6 hooking ridden rockets (ported from 2D v0.8/v0.9 'live' hooks; 2D px -> 3D units at 0.09). Rocket body zones along the
   // rocket's axis (units from its centre, + = nose): the rider zone is the existing RIDER_R circle (knockoff, unchanged); the
   // NOSE zone runs from the rider circle out to the nose tip, the TAIL zone back to the fins. ZONE_W = half-width of the hull + tip tolerance.
-  NOSE_Z: [1.45, 3.0], TAIL_Z: [-2.3, -1.45], ZONE_W: 0.75, NOSE_PT: 2.4, TAIL_PT: -1.7,
+  NOSE_Z: [1.45, 3.6], TAIL_Z: [-2.9, -1.45], ZONE_W: 0.75, NOSE_PT: 3.0, TAIL_PT: -2.3, // v0.9.4 longer rockets
   LIVE_MIN: 5.4, LIVE_MAX: 27, LIVE_STRETCH: 5.4, LIVE_STIFF: 6, LIVE_TURN: 3, LATCH_MAX: 4, AI_HOLD: [1.5, 3.5], // 2D ROCKET_LATCH_MAX / LIVE_* / AI hold
   MASS: 1, BOOST_MASS: 0.5, SWING_ENTER: 8, // pull is mass-weighted (equal rockets = 50/50 like 2D; boosting digs in: +50%); relative tangential speed that turns a hook into a swing
   CRASH_DV: 20.7, ENTANGLE: 0.6, CREDIT: 3, // 2D CRASH_DV 230 px/s, ENTANGLE_GRACE, CREDIT_WINDOW
@@ -386,19 +386,19 @@ function placeBlob(m, x, z, hgt, show) {
 // ---------------- riders ----------------
 function makeRocket(col) {
   const g = new THREE.Group();
-  const bodyM = M(col), body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 3.2, 6), bodyM); body.rotation.x = Math.PI / 2; body.castShadow = true; g.add(body);
+  const bodyM = M(col), body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 4.4, 6), bodyM); body.rotation.x = Math.PI / 2; body.castShadow = true; g.add(body);
   g.userData.kindAll = 'rocket';
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.2, 6), M(0xeeeeee)); nose.rotation.x = Math.PI / 2; nose.position.z = 2.2; g.add(nose);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.2, 6), M(0xeeeeee)); nose.rotation.x = Math.PI / 2; nose.position.z = 2.8; g.add(nose);
   // v0.9.2: rider-team trim (stripes + fins), owner nose cap, team glow ring, tinted exhaust
   const trimM = new THREE.MeshBasicMaterial({ color: col });
-  for (const z of [0.75, -0.55]) { const st = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.38, 6), trimM); st.rotation.x = Math.PI / 2; st.position.z = z; g.add(st); }
-  box(0.12, 0.9, 0.8, 0x333333, 0, 0.45, -1.3, g).material = trimM; box(1.8, 0.12, 0.7, 0x333333, 0, 0, -1.3, g).material = trimM;
+  for (const z of [1.0, -0.8]) { const st = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.38, 6), trimM); st.rotation.x = Math.PI / 2; st.position.z = z; g.add(st); }
+  box(0.12, 0.9, 0.8, 0x333333, 0, 0.45, -1.9, g).material = trimM; box(1.8, 0.12, 0.7, 0x333333, 0, 0, -1.9, g).material = trimM;
   // v0.9.3: classic Rocket Jockey front fins -- vertical blades offset left/right of the nose like arms (team trim)
-  for (const sx of [-1, 1]) { box(0.55, 0.12, 0.5, 0x333333, sx * 0.62, 0.05, 1.35, g).material = trimM; const fin = box(0.12, 1.15, 1.0, 0x333333, sx * 0.95, 0.15, 1.3, g); fin.material = trimM; fin.rotation.y = sx * 0.12; fin.userData.fin = 'front'; g.userData.frontFins = (g.userData.frontFins || 0) + 1; }
-  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), new THREE.MeshBasicMaterial({ color: col })); cap.rotation.x = Math.PI / 2; cap.position.z = 2.75; g.add(cap);
+  for (const sx of [-1, 1]) { box(0.55, 0.12, 0.5, 0x333333, sx * 0.62, 0.05, 1.75, g).material = trimM; const fin = box(0.12, 1.15, 1.0, 0x333333, sx * 0.95, 0.15, 1.7, g); fin.material = trimM; fin.rotation.y = sx * 0.12; fin.userData.fin = 'front'; g.userData.frontFins = (g.userData.frontFins || 0) + 1; }
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), new THREE.MeshBasicMaterial({ color: col })); cap.rotation.x = Math.PI / 2; cap.position.z = 3.35; g.add(cap);
   const glowM = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
   const glow = new THREE.Mesh(new THREE.RingGeometry(1.5, 2.1, 20), glowM); glow.rotation.x = -Math.PI / 2; glow.position.y = -0.55; g.add(glow);
-  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.6, 6), new THREE.MeshBasicMaterial({ color: 0xffa020 })); flame.rotation.x = -Math.PI / 2; flame.position.z = -2.4; g.add(flame);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.6, 6), new THREE.MeshBasicMaterial({ color: 0xffa020 })); flame.rotation.x = -Math.PI / 2; flame.position.z = -3.0; g.add(flame);
   g.traverse(o => { if (o.isMesh) o.userData.kind = 'rocket'; }); flame.userData.kind = 'flame';
   scene.add(g); return { g, flame, bodyM, trimM, glow, glowM, capM: cap.material, look: null, flashT: 0, cols: {} };
 }
@@ -2187,12 +2187,12 @@ const ballGeo = new THREE.SphereGeometry(RB.R, 20, 14);
   disp.hop = hop;
 })();
 
-// v0.9.3 ROCKETBALL ARENAS: scenery + solid wall blocks (AABB {x, z, hx, hz, h}) riders and balls bounce off; Wide also widens the goal mouths.
+// v0.9.4: roomier gaps between features. v0.9.3 ROCKETBALL ARENAS: scenery + solid wall blocks (AABB {x, z, hx, hz, h}) riders and balls bounce off; Wide also widens the goal mouths.
 const ARENAS = [
   { id: 'classic', label: 'Classic', gw: 10, walls: [] },
-  { id: 'bottleneck', label: 'Bottleneck', gw: 10, walls: [{ x: -38, z: 0, hx: 22, hz: 1.5, h: 5 }, { x: 38, z: 0, hx: 22, hz: 1.5, h: 5 }, { x: -12, z: -22, hx: 2, hz: 2, h: 5 }, { x: 12, z: 22, hx: 2, hz: 2, h: 5 }] },
-  { id: 'split', label: 'Split', gw: 10, walls: [{ x: 0, z: 31, hx: 1.2, hz: 15, h: 5 }, { x: 0, z: -31, hx: 1.2, hz: 15, h: 5 }] },
-  { id: 'wide', label: 'Wide', gw: 15, walls: [{ x: -55, z: 55, hx: 8, hz: 8, h: 5 }, { x: 55, z: -55, hx: 8, hz: 8, h: 5 }] },
+  { id: 'bottleneck', label: 'Bottleneck', gw: 10, walls: [{ x: -46, z: 0, hx: 17, hz: 1.5, h: 5 }, { x: 46, z: 0, hx: 17, hz: 1.5, h: 5 }, { x: -20, z: -28, hx: 2, hz: 2, h: 5 }, { x: 20, z: 28, hx: 2, hz: 2, h: 5 }] },
+  { id: 'split', label: 'Split', gw: 10, walls: [{ x: 0, z: 37, hx: 1.2, hz: 11, h: 5 }, { x: 0, z: -37, hx: 1.2, hz: 11, h: 5 }] },
+  { id: 'wide', label: 'Wide', gw: 15, walls: [{ x: -62, z: 58, hx: 6, hz: 6, h: 5 }, { x: 62, z: -58, hx: 6, hz: 6, h: 5 }] },
 ], ARENA_IDS = ARENAS.map(a => a.id);
 let ARENA_SEL = [...ARENA_IDS, 'random'].includes(QS.get('arena')) ? QS.get('arena') : [...ARENA_IDS, 'random'].includes(localStorage.getItem('rj3d_arena')) ? localStorage.getItem('rj3d_arena') : 'classic';
 let ARENA = ARENAS[0], arenaWalls = [], arenaMeshes = [], goalGroups = [], arenaHist = [];
