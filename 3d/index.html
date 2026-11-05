@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="RJ 3D">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.9.2</title>
+<title>Rocket Jockey 3D test v0.9.3</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -69,6 +69,7 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp{display:flex}
 #ovl h2{margin:2px 0 8px;font-size:20px;color:#ffd84a}
 #ovl :is(.lays,.mrow){display:flex;gap:8px;justify-content:center;margin:6px 0 10px}
 #ovl :is(.lays,.mrow) button,#ovl .go{font-size:15px;font-weight:bold;padding:10px 12px;border-radius:10px;border:2px solid #fff8;background:rgba(255,255,255,.1);color:#fff;min-width:110px}
+#ovl .arow{flex-wrap:wrap}#ovl .arow button{min-width:84px}
 #ovl :is(.lays,.mrow) button.sel{background:#2f7d3a;border-color:#7dff8a}
 #ovl .go{background:#c46a12;border-color:#ffc070;min-width:160px;margin-top:6px}
 #ovl ul{text-align:left;margin:4px 0;padding-left:18px;font-size:14px;line-height:1.35}
@@ -100,7 +101,7 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp{display:flex}
 <script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('../sw.js', { scope: '../' }).catch(() => {}));</script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.9.2</div>
+<div id="ver" class="hud">3D test v0.9.3</div>
 <div id="score" class="hud">KO 0</div><div id="rtime" class="hud"></div><div id="rcount" class="hud"></div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
@@ -392,6 +393,8 @@ function makeRocket(col) {
   const trimM = new THREE.MeshBasicMaterial({ color: col });
   for (const z of [0.75, -0.55]) { const st = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.38, 6), trimM); st.rotation.x = Math.PI / 2; st.position.z = z; g.add(st); }
   box(0.12, 0.9, 0.8, 0x333333, 0, 0.45, -1.3, g).material = trimM; box(1.8, 0.12, 0.7, 0x333333, 0, 0, -1.3, g).material = trimM;
+  // v0.9.3: classic Rocket Jockey front fins -- vertical blades offset left/right of the nose like arms (team trim)
+  for (const sx of [-1, 1]) { box(0.55, 0.12, 0.5, 0x333333, sx * 0.62, 0.05, 1.35, g).material = trimM; const fin = box(0.12, 1.15, 1.0, 0x333333, sx * 0.95, 0.15, 1.3, g); fin.material = trimM; fin.rotation.y = sx * 0.12; fin.userData.fin = 'front'; g.userData.frontFins = (g.userData.frontFins || 0) + 1; }
   const cap = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), new THREE.MeshBasicMaterial({ color: col })); cap.rotation.x = Math.PI / 2; cap.position.z = 2.75; g.add(cap);
   const glowM = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
   const glow = new THREE.Mesh(new THREE.RingGeometry(1.5, 2.1, 20), glowM); glow.rotation.x = -Math.PI / 2; glow.position.y = -0.55; g.add(glow);
@@ -413,11 +416,18 @@ function rocketLook(r, dt) {
   set(k.glowM, tc, 1, 'glow'); k.glow.visible = ridden; k.glowM.opacity = 0.45 + fl * 0.5; k.glow.scale.setScalar(1 + fl * 0.6);
   k.cols.flame = ridden ? tc : own; k.flame.material.color.setHex(0xffa020).lerp(_c2.setHex(tc), 0.45);
 }
-function makeJockey(col) {
-  const g = new THREE.Group();
-  box(0.8, 1.0, 0.5, col, 0, 0.9, 0, g); box(0.55, 0.55, 0.55, 0xf0c090, 0, 1.7, 0.05, g); box(0.6, 0.25, 0.6, col, 0, 2.0, 0, g);
-  g.userData.legs = [box(0.25, 0.8, 0.25, 0x333344, -0.3, 0.25, 0.2, g), box(0.25, 0.8, 0.25, 0x333344, 0.3, 0.25, 0.2, g)];
-  box(0.9, 0.2, 0.2, col, 0, 1.2, 0.4, g);
+function makeJockey(col) { // v0.9.3: a bit more person -- hips, tapered torso, neck, head + helmet/visor, shoulders, two arms reaching for the grips, legs + boots
+  const g = new THREE.Group(), SK = 0xf0c090, PN = 0x333344;
+  box(0.7, 0.3, 0.45, PN, 0, 0.62, 0, g); // hips
+  box(0.78, 0.75, 0.45, col, 0, 1.15, 0.02, g); box(0.95, 0.22, 0.5, col, 0, 1.45, 0.02, g); // torso + shoulders
+  box(0.2, 0.18, 0.2, SK, 0, 1.63, 0.04, g); box(0.46, 0.5, 0.46, SK, 0, 1.95, 0.05, g); // neck + head
+  box(0.54, 0.24, 0.54, col, 0, 2.22, 0, g); box(0.4, 0.12, 0.08, 0x112233, 0, 1.98, 0.29, g); // helmet + visor
+  g.userData.arms = [];
+  for (const sx of [-1, 1]) { const arm = new THREE.Group(); arm.position.set(sx * 0.55, 1.45, 0.02); g.add(arm); arm.rotation.x = -0.9; arm.rotation.z = sx * 0.12;
+    box(0.2, 0.5, 0.2, col, 0, -0.25, 0, arm); box(0.18, 0.45, 0.18, SK, 0, -0.68, 0, arm); box(0.22, 0.18, 0.22, PN, 0, -0.95, 0, arm); g.userData.arms.push(arm); }
+  g.userData.legs = [box(0.26, 0.7, 0.26, PN, -0.2, 0.25, 0.15, g), box(0.26, 0.7, 0.26, PN, 0.2, 0.25, 0.15, g)];
+  for (const l of g.userData.legs) box(0.3, 0.16, 0.42, 0x221a14, 0, -0.33, 0.07, l); // boots ride with the legs
+  g.userData.person = 1;
   g.traverse(o => { if (o.isMesh) o.userData.kind = 'jockey'; });
   scene.add(g); return g;
 }
@@ -549,11 +559,12 @@ function showTut(l = LAY) {
 }
 function showPause() {
   ovlMode = 'pause'; paused = true; const o = $('ovl'); o.classList.add('show');
-  o.firstChild.innerHTML = '<h2>PAUSED</h2><div class="sub">GAME MODE (switching starts a new round)</div><div class="mrow">' + MODES.map(m => '<button data-m="' + m + '" class="' + (m === MODE ? 'sel' : '') + '">' + MODE_LABEL[m] + '</button>').join('') + '</div>' + (isBall() ? '<div class="sub" style="font-size:13px;opacity:.9">⚽ YOU+GOLD (green) vs RED+VIOLET. Hold a cable into a ball to snag + tow it; let go to fling (swing to sling it). Score in the far (red) goal. Rockets ram loose balls.</div>' : '') + '<div class="sub">TOUCH CONTROLS</div><div class="lays">' + LAYOUTS.map(l => '<button data-l="' + l + '" class="' + (l === LAY ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>'
+  o.firstChild.innerHTML = '<h2>PAUSED</h2><div class="sub">GAME MODE (switching starts a new round)</div><div class="mrow">' + MODES.map(m => '<button data-m="' + m + '" class="' + (m === MODE ? 'sel' : '') + '">' + MODE_LABEL[m] + '</button>').join('') + '</div>' + (isBall() ? '<div class="sub">ARENA (switching starts a new round)' + (ARENA_SEL === 'random' ? ' · now: ' + ARENA.label : '') + '</div><div class="mrow arow">' + [...ARENAS.map(a => [a.id, a.label]), ['random', '🎲 RANDOM']].map(([i, l]) => '<button data-a="' + i + '" class="' + (i === ARENA_SEL ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>' : '') + (isBall() ? '<div class="sub" style="font-size:13px;opacity:.9">⚽ YOU+GOLD (green) vs RED+VIOLET. Hold a cable into a ball to snag + tow it; let go to fling (swing to sling it). Score in the far (red) goal. Rockets ram loose balls.</div>' : '') + '<div class="sub">TOUCH CONTROLS</div><div class="lays">' + LAYOUTS.map(l => '<button data-l="' + l + '" class="' + (l === LAY ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>'
     + '<div class="sub">ROUND LENGTH (next round)' + (RND && RND.len ? ' · this round ' + fmtT(RND.left) + ' left' : RND ? ' · free play ' + fmtT(RND.t) : '') + '</div><div class="lays rrow">' + RLENS.map(v => '<button data-r="' + v + '" class="' + (v === RLEN ? 'sel' : '') + '">' + (v === 'free' ? 'Free play' : v + ' min') + '</button>').join('') + '</div>'
     + '<ul>' + TUT[LAY][1].map(x => '<li>' + x + '</li>').join('') + '</ul><div class="btns"><button class="go" id="pzGo">RESUME</button><button class="go alt" id="pzEnd">END ROUND</button><button class="go alt" id="pzRec">RECORDS</button></div>';
   for (const b of o.querySelectorAll('[data-l]')) b.addEventListener('click', () => setLayout(b.dataset.l));
   for (const b of o.querySelectorAll('[data-m]')) b.addEventListener('click', () => setMode(b.dataset.m));
+  for (const b of o.querySelectorAll('[data-a]')) b.addEventListener('click', () => setArena(b.dataset.a));
   $('pzGo').addEventListener('click', () => closeOvl());
   for (const b of o.querySelectorAll('[data-r]')) b.addEventListener('click', () => setRLen(b.dataset.r));
   $('pzEnd').addEventListener('click', () => endRound('quit')); $('pzRec').addEventListener('click', () => showRecords('pause'));
@@ -1299,6 +1310,7 @@ function collide(r) {
   if (Math.abs(r.z) > lim) { r.z = Math.sign(r.z) * lim; if (Math.abs(r.vz) > 6 && r === player && gate('wall', 250)) sfx.wall(); r.vz *= -0.4; hit = true; }
   for (const a of anchors) { if (a.kind !== 'post' || r.y - 0.6 > a.h) continue; const dx = r.x - a.x, dz = r.z - a.z, d = Math.hypot(dx, dz), m = a.r + 0.9; // v0.7: clear over a post cap
     if (d < m && d > 0) { const nx = dx / d, nz = dz / d; r.x = a.x + nx * m; r.z = a.z + nz * m; const vn = r.vx * nx + r.vz * nz; if (vn < 0) { r.vx -= 1.5 * vn * nx; r.vz -= 1.5 * vn * nz; hit = true; if (r === player && vn < -6 && gate('post', 250)) sfx.crunch(0.5); } } }
+  if (arenaWalls.length) { const wv = wallHit(r, 1.0, r.y - 0.6, 0.4); if (wv < 0) { hit = true; if (r === player && wv < -6 && gate('wall', 250)) sfx.wall(); } } // v0.9.3 arena walls
   // v0.7: ramp sides / backs taller than STEP are walls (bounce off like a post); already inside one (pushed in) = pop up onto it
   const nb = terrainBlock(r.px, r.pz, r.x, r.z, r.y - T.HOVER, T.STEP);
   if (nb === 'pop') { r.y = groundAt(r.x, r.z) + T.HOVER; }
@@ -1949,7 +1961,7 @@ if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) showTut(); else gzFlash(); 
 // ---------------- v0.8.2 rounds, per-round stats, scorecard, records, export / import ----------------
 // Rounds: TIMED (2 / 3 / 5 min, 3-2-1 countdown, ends on the clock) or FREE (no timer; END ROUND from the pause screen).
 // Stats are pure observation: hooks at the existing event sites call rs*() which only bump counters (no gameplay / AI effect).
-const RS_VER = '3D test v0.9.2', RS_KEY = 'rj3d_records', RS_SCHEMA = 1, RS_CAP = 500, RS_EVCAP = 150;
+const RS_VER = '3D test v0.9.3', RS_KEY = 'rj3d_records', RS_SCHEMA = 1, RS_CAP = 500, RS_EVCAP = 150;
 const RLENS = ['2', '3', '5', 'free'];
 let RLEN = RLENS.includes(QS.get('round')) ? QS.get('round') : RLENS.includes(localStorage.getItem('rj3d_round')) ? localStorage.getItem('rj3d_round') : '3';
 let RND = null, rsFirst = true, rsLenOverride = null;
@@ -1999,9 +2011,10 @@ function rsSpawn() { // a fresh round puts everyone back on their own rocket at 
 }
 function newRound(respawn) {
   const L = rsLenOverride != null ? rsLenOverride : RLEN === 'free' ? 0 : +RLEN * 60;
+  if (isBall() && ARENAS.length) pickArena();
   if (respawn) rsSpawn();
   rbClear(); for (const r of riders) { r.pts = 0; r.ko = 0; r.dodge = null; r._sw = false; r.brain.rbRole = null; } score = 0; updScore(); trickList.length = 0; drawTricks();
-  RND = { st: L ? 'count' : 'live', len: L, left: L, cd: L ? 3 : 0, t: 0, ev: [], diff, lay: LAY, start: new Date().toISOString(), game: MODE, goals: [0, 0], S: Object.fromEntries(riders.map(r => [r.name, isBall() ? Object.assign(rsBlank(), { rb: rbBlank() }) : rsBlank()])) };
+  RND = { st: L ? 'count' : 'live', len: L, left: L, cd: L ? 3 : 0, t: 0, ev: [], diff, lay: LAY, start: new Date().toISOString(), game: MODE, arena: isBall() ? ARENA.id : undefined, goals: [0, 0], S: Object.fromEntries(riders.map(r => [r.name, isBall() ? Object.assign(rsBlank(), { rb: rbBlank() }) : rsBlank()])) };
   rsHud();
 }
 function fmtT(s) { s = Math.max(0, Math.ceil(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
@@ -2169,25 +2182,55 @@ let teamGoals = [0, 0], ballN = 0, violet = null;
 const ballGeo = new THREE.SphereGeometry(RB.R, 20, 14);
 (function buildPitch() {
   const add = m => { m.visible = false; rbMeshes.push(m); return m; };
-  for (const s of [-1, 1]) { const col = TEAMS[s > 0 ? 1 : 0].hex, g = add(new THREE.Group()); g.position.set(0, 0, s * RB.GZ); scene.add(g);
-    const bz = s * (A - RB.GZ - 0.4), W = RB.GW, H = RB.GH;
+  const hop = add(new THREE.Mesh(new THREE.TorusGeometry(2.0, 0.35, 8, 20), new THREE.MeshBasicMaterial({ color: 0xfff2a0 }))); hop.rotation.x = Math.PI / 2; hop.position.set(0, 9.9, 0); hop.userData.kind = 'deco'; scene.add(hop);
+  const base = add(new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.3, 8, 20), M(0xfff2a0))); base.rotation.x = Math.PI / 2; base.position.set(0, 0.3, 0); base.userData.kind = 'deco'; scene.add(base);
+  disp.hop = hop;
+})();
+
+// v0.9.3 ROCKETBALL ARENAS: scenery + solid wall blocks (AABB {x, z, hx, hz, h}) riders and balls bounce off; Wide also widens the goal mouths.
+const ARENAS = [
+  { id: 'classic', label: 'Classic', gw: 10, walls: [] },
+  { id: 'bottleneck', label: 'Bottleneck', gw: 10, walls: [{ x: -38, z: 0, hx: 22, hz: 1.5, h: 5 }, { x: 38, z: 0, hx: 22, hz: 1.5, h: 5 }, { x: -12, z: -22, hx: 2, hz: 2, h: 5 }, { x: 12, z: 22, hx: 2, hz: 2, h: 5 }] },
+  { id: 'split', label: 'Split', gw: 10, walls: [{ x: 0, z: 31, hx: 1.2, hz: 15, h: 5 }, { x: 0, z: -31, hx: 1.2, hz: 15, h: 5 }] },
+  { id: 'wide', label: 'Wide', gw: 15, walls: [{ x: -55, z: 55, hx: 8, hz: 8, h: 5 }, { x: 55, z: -55, hx: 8, hz: 8, h: 5 }] },
+], ARENA_IDS = ARENAS.map(a => a.id);
+let ARENA_SEL = [...ARENA_IDS, 'random'].includes(QS.get('arena')) ? QS.get('arena') : [...ARENA_IDS, 'random'].includes(localStorage.getItem('rj3d_arena')) ? localStorage.getItem('rj3d_arena') : 'classic';
+let ARENA = ARENAS[0], arenaWalls = [], arenaMeshes = [], goalGroups = [], arenaHist = [];
+function buildGoals(W) { for (const g of goalGroups) { scene.remove(g); rbMeshes.splice(rbMeshes.indexOf(g), 1); } goalGroups = [];
+  for (const s of [-1, 1]) { const col = TEAMS[s > 0 ? 1 : 0].hex, g = new THREE.Group(); g.visible = isBall(); rbMeshes.push(g); goalGroups.push(g); g.position.set(0, 0, s * RB.GZ); scene.add(g);
+    const bz = s * (A - RB.GZ - 0.4), H = RB.GH;
     box(0.9, H, 0.9, col, -W, H / 2, 0, g); box(0.9, H, 0.9, col, W, H / 2, 0, g); box(W * 2 + 0.9, 0.9, 0.9, col, 0, H, 0, g);
     box(0.5, H, 0.5, col, -W, H / 2, bz, g); box(0.5, H, 0.5, col, W, H / 2, bz, g); box(W * 2, 0.5, 0.5, col, 0, H, bz, g);
     box(0.4, 0.4, Math.abs(bz), col, -W, H, bz / 2, g); box(0.4, 0.4, Math.abs(bz), col, W, H, bz / 2, g);
     for (let k = -W + 3; k < W; k += 3) box(0.1, H, 0.1, 0xdddddd, k, H / 2, bz, g);
     for (let y = 2; y < H; y += 2) { box(W * 2, 0.1, 0.1, 0xdddddd, 0, y, bz, g); box(0.1, 0.1, Math.abs(bz), 0xdddddd, -W, y, bz / 2, g); box(0.1, 0.1, Math.abs(bz), 0xdddddd, W, y, bz / 2, g); }
-    box(W * 2, 0.06, 0.6, col, 0, 0.04, 0, g); }
-  const hop = add(new THREE.Mesh(new THREE.TorusGeometry(2.0, 0.35, 8, 20), new THREE.MeshBasicMaterial({ color: 0xfff2a0 }))); hop.rotation.x = Math.PI / 2; hop.position.set(0, 9.9, 0); hop.userData.kind = 'deco'; scene.add(hop);
-  const base = add(new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.3, 8, 20), M(0xfff2a0))); base.rotation.x = Math.PI / 2; base.position.set(0, 0.3, 0); base.userData.kind = 'deco'; scene.add(base);
-  disp.hop = hop;
-})();
+    box(W * 2, 0.06, 0.6, col, 0, 0.04, 0, g); } }
+function applyArena(id) { const a = ARENAS.find(q => q.id === id) || ARENAS[0]; ARENA = a; RB.GW = a.gw;
+  for (const m of arenaMeshes) scene.remove(m); arenaMeshes = []; arenaWalls = a.walls.map(w => ({ ...w }));
+  buildGoals(a.gw);
+  for (const w of arenaWalls) { const g = new THREE.Group(); g.position.set(w.x, 0, w.z); scene.add(g); arenaMeshes.push(g);
+    box(w.hx * 2, w.h, w.hz * 2, 0x5a6478, 0, w.h / 2, 0, g, 'post'); box(w.hx * 2 + 0.2, 0.35, w.hz * 2 + 0.2, 0xff7a1a, 0, w.h + 0.17, 0, g, 'postCap'); }
+  arenaVis(); return a.id; }
+function arenaVis() { for (const m of arenaMeshes) m.visible = isBall(); for (const w of arenaWalls) w.on = isBall(); }
+function pickArena() { // RANDOM: a different layout than last round
+  if (ARENA_SEL !== 'random') return ARENA.id === ARENA_SEL ? ARENA.id : applyArena(ARENA_SEL);
+  const pool = ARENA_IDS.filter(i => i !== ARENA.id); const id = pool[Math.floor(Math.random() * pool.length)]; arenaHist.push(id); return applyArena(id); }
+function setArena(id) { if (![...ARENA_IDS, 'random'].includes(id)) return false; ARENA_SEL = id; localStorage.setItem('rj3d_arena', id); if (isBall()) newRound(true); else if (id !== 'random') applyArena(id); if (ovlMode === 'pause') showPause(); return true; }
+function wallHit(o, rad, yb, bounce) { // push o (x, z, vx, vz) out of any arena wall block it overlaps; returns the normal speed hit (<0) or 0
+  let hit = 0;
+  for (const w of arenaWalls) { if (!w.on || yb > w.h) continue; const dx = o.x - w.x, dz = o.z - w.z, px = w.hx + rad - Math.abs(dx), pz = w.hz + rad - Math.abs(dz);
+    if (px <= 0 || pz <= 0) continue;
+    if (px < pz) { const sx = Math.sign(dx) || 1; o.x = w.x + sx * (w.hx + rad); if (o.vx * sx < 0) { hit = Math.min(hit, o.vx * sx); o.vx = -o.vx * bounce; } }
+    else { const sz = Math.sign(dz) || 1; o.z = w.z + sz * (w.hz + rad); if (o.vz * sz < 0) { hit = Math.min(hit, o.vz * sz); o.vz = -o.vz * bounce; } } }
+  return hit; }
+applyArena(ARENA_SEL === 'random' ? 'classic' : ARENA_SEL);
 function setRiderVis(r, v) { r.rocket.visible = v; r.jockey.visible = v; if (!v) { r.blob.visible = false; r.blobJ.visible = false; for (const cm of r.cableMeshes) for (const m of cm) m.visible = false; for (const t of r.tipMeshes) t.visible = false; } }
 function ensureViolet() { if (violet) return violet; violet = addRider('VIOLET', 0x9a4af0, -8, 55, Math.PI, true); riders.splice(riders.indexOf(violet), 1); setRiderVis(violet, false); return violet; }
 function applyMode() { // add / remove the 4th rider and the pitch; the caller starts a new round
   const b = isBall(); ensureViolet(); const i = riders.indexOf(violet);
   if (b && i < 0) { riders.push(violet); setRiderVis(violet, true); }
   if (!b && i >= 0) { rsSpawn(); releaseAll(violet, true); riders.splice(riders.indexOf(violet), 1); setRiderVis(violet, false); }
-  for (const m of rbMeshes) m.visible = b; rbClear();
+  for (const m of rbMeshes) m.visible = b; arenaVis(); rbClear();
 }
 function setMode(m) { if (!MODES.includes(m)) return false; const ch = m !== MODE; MODE = m; localStorage.setItem('rj3d_mode', m); if (ch) { applyMode(); newRound(true); } if (ovlMode === 'pause') showPause(); return ch; }
 function rbClear() { for (const b of balls.slice()) rbRemove(b); teamGoals = [0, 0]; disp.cool = RB.FIRST; }
@@ -2265,6 +2308,7 @@ function rbStep(h) {
       if (d < m && b.y < RB.GH + RB.R && d > 1e-6) { const nx = dx / d, nz = dz / d; b.x = sx * RB.GW + nx * m; b.z = sz * RB.GZ + nz * m; const vn = b.vx * nx + b.vz * nz; if (vn < 0) { b.vx -= (1 + RB.WALL) * vn * nx; b.vz -= (1 + RB.WALL) * vn * nz; } } }
     for (const a of anchors) { if (b.y - RB.R > a.h) continue; const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz), m = a.r + RB.R;
       if (d < m && d > 1e-6) { const nx = dx / d, nz = dz / d; b.x = a.x + nx * m; b.z = a.z + nz * m; const vn = b.vx * nx + b.vz * nz; if (vn < 0) { b.vx -= (1 + RB.WALL) * vn * nx; b.vz -= (1 + RB.WALL) * vn * nz; } } }
+    if (arenaWalls.length) wallHit(b, RB.R, b.y - RB.R, RB.WALL); // v0.9.3 arena walls
     // rockets ram loose (or other riders') balls
     for (const o of riders) { if (!o.mounted || o.hop || o === b.holder) continue; const dx = b.x - o.x, dz = b.z - o.z, d = Math.hypot(dx, dz), m = T.RIDER_R + RB.R;
       if (d >= m || d < 1e-6 || Math.abs(b.y - o.y) > RB.R + 1.0) continue; const nx = dx / d, nz = dz / d; b.x = o.x + nx * m; b.z = o.z + nz * m;
@@ -2436,10 +2480,11 @@ function unFoot(r) { // test helper: back on the rocket, clean state
   if (r === player) hideRunHint();
 }
 window.__rj3d = {
-  version: '3D test v0.9.2', ready: true,
+  version: '3D test v0.9.3', ready: true,
+  get arena() { return ARENA.id; }, shotCam(x, y, z, tx, ty, tz) { paused = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); renderer.render(scene, camera); }, setArena: id => setArena(id), looks: () => ({ frontFins: player.rocket.g.userData.frontFins, person: player.jockey.userData.person, arms: player.jockey.userData.arms.length }),
   // v0.9 ROCKETBALL hooks
   rb: {
-    mode: () => MODE, setMode: m => setMode(m), RB, TEAMS, disp: () => ({ cool: disp.cool }),
+    mode: () => MODE, setMode: m => setMode(m), arena: () => ({ id: ARENA.id, sel: ARENA_SEL, gw: RB.GW, walls: arenaWalls.length, hist: arenaHist.slice() }), setArena: id => setArena(id), arenas: () => ARENA_IDS.slice(), RB, TEAMS, disp: () => ({ cool: disp.cool }),
     balls: () => balls.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, holder: b.holder ? b.holder.name : null, owner: b.owner ? b.owner.name : null, prev: b.prev ? b.prev.name : null })),
     spawnBall: (x, y, z, vx, vy, vz) => spawnBall(x, y, z, vx ?? 0, vy ?? 0, vz ?? 0).id,
     clearBalls: () => { for (const b of balls.slice()) rbRemove(b); }, holdDisp: (t = 1e9) => { disp.cool = t; },
