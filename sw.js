@@ -1,6 +1,6 @@
 // Rocket Jockey (fan remake) service worker: offline shell for / and /3d/.
 // Bump VERSION on every deploy that changes cached files (old caches are deleted on activate).
-const VERSION = 'rj-pwa-2026-10-24a';
+const VERSION = 'rj-pwa-2026-11-11a'; // 3D v0.9.5 shelf build
 const SHELL = ['./', './index.html', './manifest.webmanifest', './3d/', './3d/index.html', './3d/manifest.webmanifest',
   './icons/rj-192.png', './icons/rj-512.png', './icons/rj3d-192.png', './icons/rj3d-512.png'];
 const CDN = ['https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js'];

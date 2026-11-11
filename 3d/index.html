@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="RJ 3D">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Rocket Jockey 3D test v0.9.4</title>
+<title>Rocket Jockey 3D test v0.9.5</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -97,11 +97,16 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp{display:flex}
 #ovl textarea{width:96%;height:120px;font-size:11px;font-family:monospace;background:#0b0f18;color:#cfe;border:1px solid #fff5;border-radius:6px;-webkit-user-select:text;user-select:text}
 #ovl canvas{display:block;width:100%;max-width:380px;height:60px}
 #ovl .rrow{display:flex;gap:6px;justify-content:center;align-items:center;margin:4px 0}#ovl .rrow button{font-size:13px;padding:5px 9px;min-width:0}
+/* v0.9.5 controls card */
+#ovl .help .cols{gap:14px}#ovl .help .c1{flex:0 0 44%}#ovl .help .hk th{white-space:nowrap;color:#ffd84a;font-weight:bold;opacity:1;padding-right:8px}#ovl .help .hk td{text-align:left;white-space:normal;font-size:13px}
+#ovl .help .hk th,#ovl .help .hk td{font-size:13px;padding:2px 4px}#ovl .help .hul{font-size:13px;line-height:1.3;margin:2px 0}#ovl .help .hl3{margin:3px 0 4px}
+#ovl .help .hgoal{font-size:12.5px;line-height:1.35;margin:6px 0 2px;text-align:left;opacity:.95}
+@media (max-width:620px){#ovl .help .cols{flex-direction:column}#ovl .help .c1{flex:none;width:100%}}
 </style>
 <script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('../sw.js', { scope: '../' }).catch(() => {}));</script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"}}</script>
 </head><body>
-<div id="ver" class="hud">3D test v0.9.4</div>
+<div id="ver" class="hud">3D test v0.9.5</div>
 <div id="score" class="hud">KO 0</div><div id="rtime" class="hud"></div><div id="rcount" class="hud"></div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
@@ -283,6 +288,7 @@ function box(w, h, d, c, x = 0, y = 0, z = 0, parent = scene, kind = 'deco') { c
 
 // ground: checker of big flat tiles
 const A = T.ARENA;
+T.ROPE_WALL_T = 0.3; // v0.9.5: a rope may cut through an arena wall this long (s) before it snags and lets go
 { const g = new THREE.PlaneGeometry(A * 2, A * 2, 10, 10).toNonIndexed(); g.rotateX(-Math.PI / 2);
   const col = [], c1 = new THREE.Color(0x5f8f3a), c2 = new THREE.Color(0x6e9c44);
   for (let i = 0; i < g.attributes.position.count; i += 6) { const c = ((i / 6) + Math.floor(i / 60)) % 2 ? c1 : c2; for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b); }
@@ -528,7 +534,7 @@ for (const id of ['bL', 'bR']) { const f = () => { if (!player.mounted && LAY ==
 let tieQ = false;
 $('bT').addEventListener('touchstart', e => { e.preventDefault(); firstInput(); tieQ = true; $('bT').classList.add('on'); setTimeout(() => $('bT').classList.remove('on'), 120); }, { passive: false });
 $('bT').addEventListener('mousedown', e => { firstInput(); tieQ = true; });
-addEventListener('keydown', e => { if (e.code === 'KeyT' && !e.repeat) tieQ = true; });
+addEventListener('keydown', e => { if (e.code === 'KeyT' && !e.repeat) tieQ = true; if (e.code === 'KeyH' && !e.repeat) { if (ovlMode === 'help') helpDone(); else if (!ovlMode || ovlMode === 'pause') showHelp(ovlMode === 'pause' ? 'pause' : null); } });
 cvs.addEventListener('mousedown', e => { firstInput(); if (e.button === 0) inp.mouseL = true; if (e.button === 2) inp.mouseR = true; if (e.button === 1) { tieQ = true; e.preventDefault(); } });
 addEventListener('mouseup', e => { if (e.button === 0) inp.mouseL = false; if (e.button === 2) inp.mouseR = false; });
 cvs.addEventListener('contextmenu', e => e.preventDefault());
@@ -557,22 +563,39 @@ function showTut(l = LAY) {
   o.firstChild.innerHTML = '<h2>' + h + '</h2><ul>' + items.map(x => '<li>' + x + '</li>').join('') + '</ul><div class="sub">Change it any time: ⏸ or 🎮 (top right). Keyboard / mouse unchanged.</div><button class="go" id="tutGo">GOT IT, PLAY</button>';
   $('tutGo').addEventListener('click', () => { localStorage.setItem('rj3d_tut_' + l, '1'); closeOvl(); });
 }
+// ---------------- v0.9.5 CONTROLS card: keyboard + all three touch layouts; from the pause screen (or H), and once on first launch ----------------
+const HELP_KB = [['A D &nbsp;/&nbsp; ← →', 'steer'], ['W &nbsp;/&nbsp; ↑ &nbsp;/&nbsp; Shift', 'boost'], ['R &nbsp;/&nbsp; F &nbsp;·&nbsp; wheel', 'climb / descend'],
+  ['Q &nbsp;/&nbsp; E &nbsp;·&nbsp; L / R mouse', 'left / right cable: <b>hold</b> = latch / grab, press again = reel in'], ['T &nbsp;·&nbsp; middle mouse', 'tie'],
+  ['<i>on foot</i>: WASD / arrows', 'run (camera-relative)'], ['Space &nbsp;/&nbsp; C (or T)', 'jump / dive'], ['⏸ &nbsp;·&nbsp; H', 'pause &nbsp;·&nbsp; this card']];
+let helpBack = null, helpLay = null;
+function showHelp(back = null, first = false) {
+  helpBack = back; helpLay = helpLay || LAY; ovlMode = 'help'; paused = true; const o = $('ovl'); o.classList.add('show');
+  const kb = '<table class="st kv hk">' + HELP_KB.map(([k, v]) => '<tr><th>' + k + '</th><td>' + v + '</td></tr>').join('') + '</table>';
+  o.firstChild.className = 'card wide help'; o.firstChild.innerHTML = '<h2 class="sm">' + (first ? 'WELCOME TO ROCKET JOCKEY 3D · ' : '') + 'CONTROLS</h2><div class="cols"><div class="c1 hcol"><div class="sub">⌨️ KEYBOARD + MOUSE</div>' + kb + '</div>'
+    + '<div class="c2 hcol"><div class="sub">📱 TOUCH · layout (change it on the ⏸ screen or 🎮)</div><div class="lays sm hl3">' + LAYOUTS.map(l => '<button data-hl="' + l + '" class="' + (l === helpLay ? 'sel' : '') + '">' + l + (l === LAY ? ' ✓' : '') + '</button>').join('') + '</div>'
+    + '<ul class="hul">' + TUT[helpLay][1].map(x => '<li>' + x + '</li>').join('') + '</ul></div></div>'
+    + '<div class="hgoal"><b>WAR</b>: knock riders off with your cable (rope or tip). Hold a cable on a post to swing round it. &nbsp;<b>ROCKETBALL</b>: YOU + GOLD (green) vs RED + VIOLET: hold a cable into the ball to tow it, let go to fling, score in the red goal. &nbsp;<b>Knocked off?</b> Run back to your rocket, or hop on any empty one.</div>'
+    + '<button class="go" id="hlGo">' + (back === 'pause' ? 'BACK' : 'GOT IT, PLAY') + '</button>';
+  for (const b of o.querySelectorAll('[data-hl]')) b.addEventListener('click', () => { helpLay = b.dataset.hl; showHelp(helpBack, first); });
+  $('hlGo').addEventListener('click', () => helpDone());
+}
+function helpDone() { localStorage.setItem('rj3d_help', '1'); localStorage.setItem('rj3d_tut_' + LAY, '1'); helpLay = null; $('ovl').firstChild.className = 'card'; if (helpBack === 'pause') showPause(); else closeOvl(); }
 function showPause() {
   ovlMode = 'pause'; paused = true; const o = $('ovl'); o.classList.add('show');
-  o.firstChild.innerHTML = '<h2>PAUSED</h2><div class="sub">GAME MODE (switching starts a new round)</div><div class="mrow">' + MODES.map(m => '<button data-m="' + m + '" class="' + (m === MODE ? 'sel' : '') + '">' + MODE_LABEL[m] + '</button>').join('') + '</div>' + (isBall() ? '<div class="sub">ARENA (switching starts a new round)' + (ARENA_SEL === 'random' ? ' · now: ' + ARENA.label : '') + '</div><div class="mrow arow">' + [...ARENAS.map(a => [a.id, a.label]), ['random', '🎲 RANDOM']].map(([i, l]) => '<button data-a="' + i + '" class="' + (i === ARENA_SEL ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>' : '') + (isBall() ? '<div class="sub" style="font-size:13px;opacity:.9">⚽ YOU+GOLD (green) vs RED+VIOLET. Hold a cable into a ball to snag + tow it; let go to fling (swing to sling it). Score in the far (red) goal. Rockets ram loose balls.</div>' : '') + '<div class="sub">TOUCH CONTROLS</div><div class="lays">' + LAYOUTS.map(l => '<button data-l="' + l + '" class="' + (l === LAY ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>'
+  o.firstChild.className = 'card'; o.firstChild.innerHTML = '<h2>PAUSED</h2><div class="sub">GAME MODE (switching starts a new round)</div><div class="mrow">' + MODES.map(m => '<button data-m="' + m + '" class="' + (m === MODE ? 'sel' : '') + '">' + MODE_LABEL[m] + '</button>').join('') + '</div>' + (isBall() ? '<div class="sub">ARENA (switching starts a new round)' + (ARENA_SEL === 'random' ? ' · now: ' + ARENA.label : '') + '</div><div class="mrow arow">' + [...ARENAS.map(a => [a.id, a.label]), ['random', '🎲 RANDOM']].map(([i, l]) => '<button data-a="' + i + '" class="' + (i === ARENA_SEL ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>' : '') + (isBall() ? '<div class="sub" style="font-size:13px;opacity:.9">⚽ YOU+GOLD (green) vs RED+VIOLET. Hold a cable into a ball to snag + tow it; let go to fling (swing to sling it). Score in the far (red) goal. Rockets ram loose balls.</div>' : '') + '<div class="sub">TOUCH CONTROLS</div><div class="lays">' + LAYOUTS.map(l => '<button data-l="' + l + '" class="' + (l === LAY ? 'sel' : '') + '">' + l + '</button>').join('') + '</div>'
     + '<div class="sub">ROUND LENGTH (next round)' + (RND && RND.len ? ' · this round ' + fmtT(RND.left) + ' left' : RND ? ' · free play ' + fmtT(RND.t) : '') + '</div><div class="lays rrow">' + RLENS.map(v => '<button data-r="' + v + '" class="' + (v === RLEN ? 'sel' : '') + '">' + (v === 'free' ? 'Free play' : v + ' min') + '</button>').join('') + '</div>'
-    + '<ul>' + TUT[LAY][1].map(x => '<li>' + x + '</li>').join('') + '</ul><div class="btns"><button class="go" id="pzGo">RESUME</button><button class="go alt" id="pzEnd">END ROUND</button><button class="go alt" id="pzRec">RECORDS</button></div>';
+    + '<ul>' + TUT[LAY][1].map(x => '<li>' + x + '</li>').join('') + '</ul><div class="btns"><button class="go" id="pzGo">RESUME</button><button class="go alt" id="pzEnd">END ROUND</button><button class="go alt" id="pzRec">RECORDS</button><button class="go alt" id="pzHelp">❓ CONTROLS</button></div>';
   for (const b of o.querySelectorAll('[data-l]')) b.addEventListener('click', () => setLayout(b.dataset.l));
   for (const b of o.querySelectorAll('[data-m]')) b.addEventListener('click', () => setMode(b.dataset.m));
   for (const b of o.querySelectorAll('[data-a]')) b.addEventListener('click', () => setArena(b.dataset.a));
   $('pzGo').addEventListener('click', () => closeOvl());
   for (const b of o.querySelectorAll('[data-r]')) b.addEventListener('click', () => setRLen(b.dataset.r));
-  $('pzEnd').addEventListener('click', () => endRound('quit')); $('pzRec').addEventListener('click', () => showRecords('pause'));
+  $('pzEnd').addEventListener('click', () => endRound('quit')); $('pzRec').addEventListener('click', () => showRecords('pause')); $('pzHelp').addEventListener('click', () => showHelp('pause'));
 }
 function closeOvl() { if (RND && RND.st === 'over') newRound(true); $('ovl').classList.remove('show'); ovlMode = null; paused = false; last = performance.now(); jumpQ = diveQ = tieQ = false;
   if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) { showTut(); return; } gzFlash(); }
 function gzFlash() { gzT = 4.5; }
-$('bPause').addEventListener('click', () => { firstInput(); if (['end', 'rec', 'exp', 'imp', 'clr'].includes(ovlMode)) return; if (ovlMode === 'pause') closeOvl(); else showPause(); });
+$('bPause').addEventListener('click', () => { firstInput(); if (['end', 'rec', 'exp', 'imp', 'clr'].includes(ovlMode)) return; if (ovlMode === 'help') { helpDone(); return; } if (ovlMode === 'pause') closeOvl(); else showPause(); });
 $('bCtl').addEventListener('click', () => { firstInput(); setLayout(LAYOUTS[(LAYOUTS.indexOf(LAY) + 1) % 3]); if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY) && !ovlMode) showTut(); else gzFlash(); });
 applyLayout();
 
@@ -593,7 +616,7 @@ function newCable() { const pts = []; for (let k = 0; k <= RN; k++) pts.push({ x
 function fireCable(r, i) {
   const c = r.cables[i]; if (c.st !== 'none' || !r.mounted) return false;
   const [mx, mz] = mountOf(r, i), [dx, dz] = cableDir(r, i);
-  Object.assign(c, { st: 'out', ext: 0, t: 0, tgt: null, tx: mx, tz: mz, vx: dx * T.CABLE_SPEED + r.vx, vz: dz * T.CABLE_SPEED + r.vz, taut: false });
+  Object.assign(c, { st: 'out', ext: 0, t: 0, wallT: 0, tgt: null, tx: mx, tz: mz, vx: dx * T.CABLE_SPEED + r.vx, vz: dz * T.CABLE_SPEED + r.vz, taut: false });
   // v0.7: the tip flies in 3D. From the ground it rides at hover height (over terrain); fired in the air it dips down to the hover plane in ~0.45 s
   c.ty = r.y + 0.6; c.vty = r.air ? -Math.max(0, r.y - groundAt(mx, mz) - T.HOVER) / 0.45 : 0; c.airShot = r.air; c.seen = new Set(); c.seenF = new Set(); // v0.8: from controlled altitude the tip flies level (no auto height-aim)
   for (const p of c.pts) { p.x = p.px = mx; p.y = p.py = c.ty; p.z = p.pz = mz; }
@@ -679,7 +702,7 @@ function predictBodyRest(t) {
     if (vy === 0 && Math.hypot(vx, vz) < 0.05) break; }
   return [clamp(x, -A + 1, A - 1), clamp(z, -A + 1, A - 1)];
 }
-function restClear(x, z) { if (Math.abs(x) > A - 4 || Math.abs(z) > A - 4) return false; for (const rp of RAMPS) if (Math.hypot(rp.x - x, rp.z - z) < rp.br + 2) return false; for (const a of anchors) if (Math.hypot(a.x - x, a.z - z) < a.r + 2.2) return false; return true; }
+function restClear(x, z) { if (Math.abs(x) > A - 4 || Math.abs(z) > A - 4) return false; for (const rp of RAMPS) if (Math.hypot(rp.x - x, rp.z - z) < rp.br + 2) return false; for (const a of anchors) if (Math.hypot(a.x - x, a.z - z) < a.r + 2.2) return false; for (const w of arenaWalls) if (w.on && boxDist(x, z, w) < 2.2) return false; return true; }
 function kickRocketAway(r) {
   const KD = 1 / T.ROCKET_DRAG, [bx, bz] = predictBodyRest(r.tum);
   const sx = r.x + r.vx * KD - bx, sz = r.z + r.vz * KD - bz, s0 = Math.hypot(sx, sz);
@@ -713,9 +736,14 @@ function stepRope(r, i, dt) {
     a.x += dx * diff * wa; a.y += dy * diff * wa; a.z += dz * diff * wa; b.x -= dx * diff * wb; b.y -= dy * diff * wb; b.z -= dz * diff * wb;
   }
   for (let k = 1; k < RN; k++) { const fl = groundAt(P[k].x, P[k].z) + 0.15; if (P[k].y < fl) P[k].y = fl; }
+  if (arenaWalls.length) for (let k = 1; k < RN; k++) { const p = P[k]; for (const w of arenaWalls) { if (!w.on || p.y > w.h + 0.15) continue; // v0.9.5: the drawn rope never goes inside a wall block (drapes over the top or hugs the side)
+    const dx = p.x - w.x, dz = p.z - w.z, px = w.hx + 0.15 - Math.abs(dx), pz = w.hz + 0.15 - Math.abs(dz), py = w.h + 0.15 - p.y; if (px <= 0 || pz <= 0) continue;
+    if (py <= px && py <= pz) p.y = w.h + 0.15; else if (px < pz) p.x = w.x + (Math.sign(dx) || 1) * (w.hx + 0.15); else p.z = w.z + (Math.sign(dz) || 1) * (w.hz + 0.15); } }
 }
 function updateCable(r, i, dt, holding) {
   const c = r.cables[i]; c.t += dt;
+  if (arenaWalls.length && (c.st === 'latched' || c.st === 'held' || c.st === 'out')) { // v0.9.5: a rope cutting through an arena wall snags after a short grace
+    if (ropeWallCross(r, i)) { c.wallT = (c.wallT || 0) + dt; if (c.wallT > T.ROPE_WALL_T) { c.wallT = 0; ropeWallSnag(r, i); return; } } else c.wallT = 0; }
   if (c.st === 'out') {
     if (!r.mounted || c.t > T.CABLE_LIFE) { releaseCable(r, i, true); return; }
     // free-flying weighted tip
@@ -1200,6 +1228,7 @@ function stepFoot(r, dt) {
   // runners bump off posts (dragged / tied bodies pass through them exactly as in v0.4.1, so tie-offs are unchanged)
   for (const a of anchors) { const dx = t.x - a.x, dz = t.z - a.z, d = Math.hypot(dx, dz), m = a.r + 0.5;
     if (d < m && d > 0 && t.y < a.h && !held && !r.tied) { const nx = dx / d, nz = dz / d; t.x = a.x + nx * m; t.z = a.z + nz * m; const vn = t.vx * nx + t.vz * nz; if (vn < 0) { t.vx -= vn * nx; t.vz -= vn * nz; } } }
+  if (arenaWalls.length) wallHit(t, 0.5, t.y - 0.3, 0); // v0.9.5: runners (and dragged bodies) don't pass through arena walls
   t.x = clamp(t.x, -A + 1, A - 1); t.z = clamp(t.z, -A + 1, A - 1);
   // remount by touching your rocket
   const rd = Math.hypot(r.x - t.x, r.z - t.z);
@@ -1339,6 +1368,7 @@ function aiFoot(r) {
     for (const o of riders) { if (o === r || o.mounted || o.hop || o.homing) continue; const dd = Math.hypot(o.x - t.x, o.z - t.z) - (o === player ? (D.you > 0 ? 4 : 0) : 0); if (dd < bd) { bd = dd; tgt = o; } }
     if (tgt) { gx = tgt.x; gz = tgt.z; r.brain.hopTgt = tgt.name; } }
   if (!r.brain.hopTgt && rocketHeldBy(r)) { const d = Math.hypot(gx - t.x, gz - t.z), lead = clamp(d / 18, 0, 1.2); gx += r.vx * lead; gz += r.vz * lead; }
+  if (arenaWalls.length) [gx, gz] = wallRoute(t.x, t.z, gx, gz, 0.9, 1.8, r.brain, 'fw', 1.2); // v0.9.5: run round arena walls, not into them
   const dx = gx - t.x, dz = gz - t.z, d = Math.hypot(dx, dz); if (d < 0.3) return;
   let ux = dx / d, uz = dz / d;
   const fa = faceAhead(t.x, t.z, ux, uz, t.y - 0.3, 3); // v0.7: a ramp side ahead -> sidestep round it (away from its middle)
@@ -1490,6 +1520,7 @@ function aiGhost(r, D) {
 function aiSteer(r, tx, tz) { // steer to a point; walls: only bail to the middle when the rocket is actually heading into one; dodge posts in the way
   const lim = A - 4, la = 0.5, fx = r.x + r.vx * la, fz = r.z + r.vz * la; // (wall-huggers can still be hunted: aim up to 7 off the wall, bail only when about to hit it)
   tx = clamp(tx, -A + 7, A - 7); tz = clamp(tz, -A + 7, A - 7);
+  if (arenaWalls.length) [tx, tz] = wallRoute(r.x, r.z, tx, tz, 2.4, 6, r.brain, 'rw'); // v0.9.5: steer round arena walls via the nearest good wall end
   if (Math.abs(fx) > lim && fx * r.vx > 0) tx = r.x - Math.sign(r.x) * 25 + r.vx * 0.2; // run along the wall, turning in
   if (Math.abs(fz) > lim && fz * r.vz > 0) tz = r.z - Math.sign(r.z) * 25 + r.vz * 0.2;
   let dh = wrapA(Math.atan2(tx - r.x, tz - r.z) - r.h);
@@ -1503,6 +1534,8 @@ function aiSteer(r, tx, tz) { // steer to a point; walls: only bail to the middl
   if (b && fa && fa.la <= 3 && Math.hypot(r.vx, r.vz) < 5 && !(b.unst && simTime < b.unst.until)) { const side = (fa.rp.x - r.x) * -hz + (fa.rp.z - r.z) * hx; b.unst = { until: simTime + 0.9, s: side > 0 ? -1 : 1 }; }
   if (b && Math.hypot(r.vx, r.vz) < 5 && !(b.unst && simTime < b.unst.until)) for (const a of anchors) { const px = a.x - r.x, pz = a.z - r.z;
     if (Math.hypot(px, pz) < a.r + 3 && px * hx + pz * hz > 0) { b.unst = { until: simTime + 0.8, s: (px * -hz + pz * hx) > 0 ? 1 : -1 }; break; } }
+  if (b && arenaWalls.length && Math.hypot(r.vx, r.vz) < 5 && !(b.unst && simTime < b.unst.until)) { const qx = r.x + hx * 2.6, qz = r.z + hz * 2.6; // v0.9.5: nosed into a wall block: commit to a turn toward the route
+    if (arenaWalls.some(w => w.on && Math.abs(qx - w.x) < w.hx + 1 && Math.abs(qz - w.z) < w.hz + 1)) { b.unst = { until: simTime + 0.7, s: dh > 0 ? -1 : 1 }; stats.wallUnstick = (stats.wallUnstick || 0) + 1; } }
   if (b && b.unst && simTime < b.unst.until) { r.steer = b.unst.s; return dh; }
   r.steer = clamp(-dh * 2.2, -1, 1); return dh;
 }
@@ -1549,6 +1582,7 @@ function aiDragPost(v) { // haul a body to a post away from its own rocket (drop
 function aiThink(r, dt) {
   const b = r.brain; if (!r.mounted) { b.mode = 'RECOVER'; b.rampPlan = null; aiFoot(r); return; }
   if (b.lock) { r.steer = 0; r.boost = !!b.forceBoost; r.aiHold = false; return; }
+  if (b.testGoto) { b.mode = 'GOTO'; r.boost = false; r.aiHold = false; aiSteer(r, b.testGoto[0], b.testGoto[1]); return; } // test hook (v0.9.5 wall routing)
   if (aiLive(r, dt)) { b.mode = liveHookOn(r) || liveTieOf(r) ? 'EVADE' : 'TOW'; return; } else b.cool += dt; // (aiLive ticks the fire cooldown; undo it on the normal path, which ticks it itself)
   b.scool = (b.scool || 0) - dt;
   if (aiSteal(r, dt)) { b.mode = 'STEAL'; b.hold -= dt; r.aiHold = false; return; }
@@ -1956,12 +1990,13 @@ function recordFrame(dt) {
 }
 applyQuality();
 requestAnimationFrame(frame);
-if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) showTut(); else gzFlash(); // v0.8.1
+if (QS.get('tut') !== '0' && QS.get('help') !== '0' && localStorage.getItem('rj3d_help') !== '1') showHelp(null, true); // v0.9.5: the controls card once on first launch (covers the touch tutorial)
+else if (TOUCH && QS.get('tut') !== '0' && !tutSeen(LAY)) showTut(); else gzFlash(); // v0.8.1
 
 // ---------------- v0.8.2 rounds, per-round stats, scorecard, records, export / import ----------------
 // Rounds: TIMED (2 / 3 / 5 min, 3-2-1 countdown, ends on the clock) or FREE (no timer; END ROUND from the pause screen).
 // Stats are pure observation: hooks at the existing event sites call rs*() which only bump counters (no gameplay / AI effect).
-const RS_VER = '3D test v0.9.4', RS_KEY = 'rj3d_records', RS_SCHEMA = 1, RS_CAP = 500, RS_EVCAP = 150;
+const RS_VER = '3D test v0.9.5', RS_KEY = 'rj3d_records', RS_SCHEMA = 1, RS_CAP = 500, RS_EVCAP = 150;
 const RLENS = ['2', '3', '5', 'free'];
 let RLEN = RLENS.includes(QS.get('round')) ? QS.get('round') : RLENS.includes(localStorage.getItem('rj3d_round')) ? localStorage.getItem('rj3d_round') : '3';
 let RND = null, rsFirst = true, rsLenOverride = null;
@@ -2212,6 +2247,14 @@ function applyArena(id) { const a = ARENAS.find(q => q.id === id) || ARENAS[0]; 
     box(w.hx * 2, w.h, w.hz * 2, 0x5a6478, 0, w.h / 2, 0, g, 'post'); box(w.hx * 2 + 0.2, 0.35, w.hz * 2 + 0.2, 0xff7a1a, 0, w.h + 0.17, 0, g, 'postCap'); }
   arenaVis(); return a.id; }
 function arenaVis() { for (const m of arenaMeshes) m.visible = isBall(); for (const w of arenaWalls) w.on = isBall(); }
+const WAR_POSTS = [];
+function postVis() { // v0.9.5: the WAR posts / pylons are gone in ROCKETBALL (no mesh, no collisions, no latches, no ties); WAR gets them back
+  if (!WAR_POSTS.length) WAR_POSTS.push(...anchors);
+  const b = isBall();
+  if (b) { for (const r of riders) for (let i = 0; i < 2; i++) { const c = r.cables[i]; if (c.st === 'latched' && c.tgt && c.tgt.kind === 'post') releaseCable(r, i, true); }
+    for (const t of tethers.slice()) if (t.a.kind === 'post' || t.b.kind === 'post') freeTether(t, 'reset'); }
+  anchors.length = 0; if (!b) anchors.push(...WAR_POSTS);
+  for (const a of WAR_POSTS) { a.obj.visible = !b; if (!b) { a.fade = 1; a.fadeSet = 1; setFade(a); } } }
 function pickArena() { // RANDOM: a different layout than last round
   if (ARENA_SEL !== 'random') return ARENA.id === ARENA_SEL ? ARENA.id : applyArena(ARENA_SEL);
   const pool = ARENA_IDS.filter(i => i !== ARENA.id); const id = pool[Math.floor(Math.random() * pool.length)]; arenaHist.push(id); return applyArena(id); }
@@ -2225,6 +2268,51 @@ function wallHit(o, rad, yb, bounce) { // push o (x, z, vx, vz) out of any arena
     if (px < pz) { const sx = Math.sign(dx) || 1; o.x = w.x + sx * (w.hx + rad); if (o.vx * sx < 0) { hit = Math.min(hit, o.vx * sx); o.vx = -o.vx * bounce; } }
     else { const sz = Math.sign(dz) || 1; o.z = w.z + sz * (w.hz + rad); if (o.vz * sz < 0) { hit = Math.min(hit, o.vz * sz); o.vz = -o.vz * bounce; } } }
   return hit; }
+// ---- v0.9.5: AI path-finding round arena walls (and ropes vs walls) ----
+function boxDist(x, z, w) { return Math.hypot(Math.max(0, Math.abs(x - w.x) - w.hx), Math.max(0, Math.abs(z - w.z) - w.hz)); }
+function segBox2(ax, az, bx, bz, w, m) { // segment a->b vs wall box grown by m: [t enter, t exit] or null
+  const lo = [w.x - w.hx - m, w.z - w.hz - m], hi = [w.x + w.hx + m, w.z + w.hz + m], p = [ax, az], d = [bx - ax, bz - az]; let t0 = 0, t1 = 1;
+  for (let k = 0; k < 2; k++) { if (Math.abs(d[k]) < 1e-9) { if (p[k] < lo[k] || p[k] > hi[k]) return null; continue; }
+    let u = (lo[k] - p[k]) / d[k], v = (hi[k] - p[k]) / d[k]; if (u > v) { const q = u; u = v; v = q; } t0 = Math.max(t0, u); t1 = Math.min(t1, v); if (t0 > t1) return null; }
+  return [t0, t1]; }
+function wallBlocked(ax, az, bx, bz, w, rad) { const m = Math.max(0.05, Math.min(rad, boxDist(ax, az, w) - 0.1, boxDist(bx, bz, w) - 0.1)); return !!segBox2(ax, az, bx, bz, w, m); }
+function wallsBlock(ax, az, bx, bz, rad = 0.3) { for (const w of arenaWalls) if (w.on && wallBlocked(ax, az, bx, bz, w, rad)) return w; return null; }
+// From (x, z) to (tx, tz): if a wall (grown by rad) is in the way, head for the cheapest visible corner of that wall (M out from it) instead.
+// Up to 3 passes (a corner path blocked by a second wall routes round that one). Sticky corner choice (mem) so it doesn't flip-flop.
+function wallRoute(x, z, tx, tz, rad, M, mem, key, reach = M + 2) {
+  if (!arenaWalls.length) return [tx, tz];
+  for (const w of arenaWalls) { if (!w.on) continue; const dx = tx - w.x, dz = tz - w.z, px = w.hx + rad - Math.abs(dx), pz = w.hz + rad - Math.abs(dz); // target in / hugging a wall: the nearest spot outside it
+    if (px > 0 && pz > 0) { if (px < pz) tx = w.x + (Math.sign(dx) || 1) * (w.hx + rad); else tz = w.z + (Math.sign(dz) || 1) * (w.hz + rad); } }
+  const memo = mem ? (mem[key] = mem[key] || {}) : null; let gx = tx, gz = tz;
+  for (let it = 0; it < 3; it++) {
+    let hit = null, ht = 2;
+    for (const w of arenaWalls) { if (!w.on || !wallBlocked(x, z, gx, gz, w, rad)) continue; const sb = segBox2(x, z, gx, gz, w, 0.05), t = sb ? sb[0] : 0; if (t < ht) { ht = t; hit = w; } }
+    if (!hit) break;
+    const wi = arenaWalls.indexOf(hit), pm = memo && memo[wi]; let best = null, bc = 1e9;
+    if (pm && !pm[3] && Math.hypot(hit.x + pm[0] * (hit.hx + M) - x, hit.z + pm[1] * (hit.hz + M) - z) < reach) { pm[3] = 1; pm[2] = simTime; } // reached that corner: go on to the next one
+    for (const vis of [true, false]) { for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const cx = hit.x + sx * (hit.hx + M), cz = hit.z + sz * (hit.hz + M);
+        if (Math.abs(cx) > A - 3 || Math.abs(cz) > A - 3) continue;
+        if (pm && pm[3] && pm[0] === sx && pm[1] === sz && simTime - pm[2] < 2.5) continue; // (don't circle back to a corner we just rounded)
+        if (vis && wallBlocked(x, z, cx, cz, hit, rad * 0.6)) continue;
+        let c = Math.hypot(cx - x, cz - z) + Math.hypot(gx - cx, gz - cz); if (pm && !pm[3] && pm[0] === sx && pm[1] === sz && simTime - pm[2] < 1.5) c *= 0.8;
+        if (c < bc) { bc = c; best = [cx, cz, sx, sz]; } }
+      if (best) break; }
+    if (!best) break;
+    if (memo && !(pm && pm[0] === best[2] && pm[1] === best[3] && pm[3])) memo[wi] = [best[2], best[3], simTime, 0]; gx = best[0]; gz = best[1];
+  }
+  return [gx, gz]; }
+function ropeEndY(r, c) { const my = r.y + 0.6; return c.st === 'held' ? (c.vk === 'ball' ? c.vic.y : c.vk === 'rocket' ? c.vic.y + 0.4 : c.vic.tum.y + 0.6) : c.st === 'latched' ? (c.tgt.kind === 'post' ? Math.min(c.tgt.h - 0.2, my) : (c.tgt.hookY ?? my)) : (c.ty ?? my); }
+function ropeWallCross(r, i) { // does the straight rope (mount -> end, in 3D) cut through an arena wall? (grazing a corner doesn't count)
+  const c = r.cables[i], [mx, mz] = mountOf(r, i), [ex, ez] = cableTip(r, i), my = r.y + 0.6, ey = ropeEndY(r, c);
+  for (const w of arenaWalls) { if (!w.on) continue; const sb = segBox2(mx, mz, ex, ez, w, -0.25); if (!sb) continue;
+    if (Math.min(my + (ey - my) * sb[0], my + (ey - my) * sb[1]) < w.h) return w; }
+  return null; }
+function ropeWallSnag(r, i) { // the rope stayed through a wall past the grace time: it snags on the wall and lets go
+  const c = r.cables[i], o = c.st === 'latched' && c.tgt.kind === 'live' ? c.tgt.r : null;
+  stats.ropeWall = (stats.ropeWall || 0) + 1; stats.ropeWallLog = stats.ropeWallLog || []; stats.ropeWallLog.push({ by: r.name, st: c.st, vk: c.vk || (o ? 'live' : null), t: +simTime.toFixed(2) });
+  if (o) stats.liveEnds.push({ by: r.name, victim: o.name, why: 'wall' });
+  if (r === player) flash('ROPE SNAGGED ON THE WALL'); else if (o === player) flash(r.name + "'S ROPE SNAGGED ON THE WALL");
+  releaseCable(r, i, true); }
 applyArena(ARENA_SEL === 'random' ? 'classic' : ARENA_SEL);
 function setRiderVis(r, v) { r.rocket.visible = v; r.jockey.visible = v; if (!v) { r.blob.visible = false; r.blobJ.visible = false; for (const cm of r.cableMeshes) for (const m of cm) m.visible = false; for (const t of r.tipMeshes) t.visible = false; } }
 function ensureViolet() { if (violet) return violet; violet = addRider('VIOLET', 0x9a4af0, -8, 55, Math.PI, true); riders.splice(riders.indexOf(violet), 1); setRiderVis(violet, false); return violet; }
@@ -2232,7 +2320,7 @@ function applyMode() { // add / remove the 4th rider and the pitch; the caller s
   const b = isBall(); ensureViolet(); const i = riders.indexOf(violet);
   if (b && i < 0) { riders.push(violet); setRiderVis(violet, true); }
   if (!b && i >= 0) { rsSpawn(); releaseAll(violet, true); riders.splice(riders.indexOf(violet), 1); setRiderVis(violet, false); }
-  for (const m of rbMeshes) m.visible = b; arenaVis(); rbClear();
+  for (const m of rbMeshes) m.visible = b; arenaVis(); postVis(); rbClear();
 }
 function setMode(m) { if (!MODES.includes(m)) return false; const ch = m !== MODE; MODE = m; localStorage.setItem('rj3d_mode', m); if (ch) { applyMode(); newRound(true); } if (ovlMode === 'pause') showPause(); return ch; }
 function rbClear() { for (const b of balls.slice()) rbRemove(b); teamGoals = [0, 0]; disp.cool = RB.FIRST; }
@@ -2334,6 +2422,10 @@ function rbCarrying(r) { return r.cables.some(c => c.st === 'held' && c.vk === '
 const RBAI = { EASY: { think: [0.45, 0.7], err: 3.5, fire: 0.35, cool: 1.1, shotD: 24, shotA: 0.32, aim: 8, ko: 0.10, defR: 26, maxCarry: 9 },
   NORMAL: { think: [0.25, 0.4], err: 3.6, fire: 0.36, cool: 1.1, shotD: 20, shotA: 0.16, aim: 9, ko: 0.2, defR: 30, maxCarry: 8 },
   HARD: { think: [0.12, 0.22], err: 1.0, fire: 0.85, cool: 0.45, shotD: 32, shotA: 0.2, aim: 3.5, ko: 0.3, defR: 34, maxCarry: 7 } };
+// v0.9.5: NORMAL RED + VIOLET one notch sharper (Paul went 5-1, goals 55-28 on v0.9.4 NORMAL). GOLD (your teammate) keeps the v0.9.4 NORMAL brain.
+const RBAI_NORMAL_V094 = { ...RBAI.NORMAL };
+Object.assign(RBAI.NORMAL, { think: [0.16, 0.28], err: 1.2, fire: 0.8, cool: 0.5, aim: 6, ko: 0.3, defR: 32, maxCarry: 7 }); // snag accuracy + cable rate were the levers (sim); shot range kept at NORMAL
+function rbK(r) { return diff === 'NORMAL' && teamOf(r) === 0 ? RBAI_NORMAL_V094 : RBAI[diff] || RBAI.NORMAL; }
 function rbShotSim(r, i, b, err) { // fly cable i (same launch / drag / reach as the real one) against the ball's straight-line path
   const [cdx, cdz] = cableDir(r, i), [mx0, mz0] = mountOf(r, i), h = 0.03, dr = Math.exp(-T.TIP_DRAG * h);
   let tx = mx0, tz = mz0, vx = cdx * T.CABLE_SPEED + r.vx, vz = cdz * T.CABLE_SPEED + r.vz; const ex = err ? err[0] : 0, ez = err ? err[1] : 0;
@@ -2395,7 +2487,7 @@ function aiMatePick(r, b, cand, t, es, ownZ, encZ, K) { // -> a ball to chase, t
   b.mode = 'DEFEND'; const nb = balls.reduce((m, q) => !m || Math.abs(q.z - ownZ) < Math.abs(m.z - ownZ) ? q : m, null), gx = nb ? clamp(nb.x * 0.35, -9, 9) : 0, gz = ownZ + es * 14;
   const a = Math.atan2(r.x - gx, r.z - gz) + 0.9; aiSteer(r, gx + Math.sin(a) * 8, gz + Math.cos(a) * 8); return true; }
 function aiBall(r, dt) { // returns true when it steered this tick; false = hand over to the WAR brain (going for the ball carrier)
-  const b = r.brain, K = RBAI[diff] || RBAI.NORMAL, t = teamOf(r), es = goalSign(t), ownZ = -es * RB.GZ, encZ = es * RB.GZ;
+  const b = r.brain, K = rbK(r), t = teamOf(r), es = goalSign(t), ownZ = -es * RB.GZ, encZ = es * RB.GZ;
   r.aiHold = false; b.stalk = false; b.rbCool = (b.rbCool || 0) - dt; b.rbT = (b.rbT || 0) - dt;
   if (simTime - rbRoleT > 0.3) { rbRoleT = simTime; rbRoles(); }
   const ci = r.cables.findIndex(c => c.st === 'held' && c.vk === 'ball');
@@ -2445,7 +2537,7 @@ function aiChaseBall(r, b, tgt, K, es, ownZ) {
   if (Math.abs(tgt.z - ownZ) < 24 && Math.abs(r.z - ownZ) > Math.abs(tgt.z - ownZ) && d < 16) { // v0.9.1 (all teams): ball between us and our own goal -> swing round it to the goal side instead of ramming it in
     const sx = r.x >= tgt.x ? 1 : -1; aiSteer(r, tgt.x + sx * 9, clamp(tgt.z - es * 7, -RB.GZ + 4, RB.GZ - 4)); r.boost = false; b.mode = 'GET GOAL SIDE'; }
   const runIn = Math.abs(tgt.z - ownZ) < 30 && r.vz * es < -10 && !(Math.sign(tgt.vz) === -es && Math.abs(tgt.vz) > 10); // v0.9.1: racing back at our own goal -> don't hook it yet (we'd tow it in during the U-turn)
-  if (b.rbCool <= 0 && !runIn && d < T.CABLE_MAX + 4) for (let i = 0; i < 2; i++) { if (r.cables[i].st !== 'none') continue;
+  if (b.rbCool <= 0 && !runIn && d < T.CABLE_MAX + 4 && !wallsBlock(r.x, r.z, tgt.x, tgt.z)) for (let i = 0; i < 2; i++) { if (r.cables[i].st !== 'none') continue;
     if (rbShotSim(r, i, tgt, b.rbErr) && Math.random() < K.fire) { aiFire(r, i, null, 'ball', true, 'ball'); b.rbCool = K.cool; break; } }
   return true;
 }
@@ -2482,7 +2574,7 @@ function unFoot(r) { // test helper: back on the rocket, clean state
   if (r === player) hideRunHint();
 }
 window.__rj3d = {
-  version: '3D test v0.9.4', ready: true,
+  version: '3D test v0.9.5', ready: true,
   get arena() { return ARENA.id; }, shotCam(x, y, z, tx, ty, tz) { paused = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); renderer.render(scene, camera); }, setArena: id => setArena(id), looks: () => ({ frontFins: player.rocket.g.userData.frontFins, person: player.jockey.userData.person, arms: player.jockey.userData.arms.length }),
   // v0.9 ROCKETBALL hooks
   rb: {
@@ -2666,6 +2758,15 @@ window.__rj3d = {
   tieNow: () => doTie(player),
   endRound: why => endRound(why || 'quit'), records: () => recLoad(), exportJSON: () => exportJSON(), importJSON: (s, m) => importJSON(s, m), clearRecords: () => clearRecords(), recCap: RS_CAP,
   showRecords: () => showRecords('pause'), ovlMode: () => ovlMode, setRLen: v => setRLen(v), lastCard: () => lastCard && { broken: lastCard.broken, saved: lastCard.saved, id: lastCard.rr.id },
+  // v0.9.5 hooks
+  v095: () => ({ posts: anchors.length, warPosts: WAR_POSTS.length, postVis: WAR_POSTS.filter(a => a.obj.visible).length, ropeWall: stats.ropeWall || 0, ropeWallLog: (stats.ropeWallLog || []).slice(), wallUnstick: stats.wallUnstick || 0, ropeWallT: T.ROPE_WALL_T,
+    rbNormal: { ...RBAI.NORMAL }, rbNormalMate: { ...RBAI_NORMAL_V094 }, rbHard: { ...RBAI.HARD }, rbEasy: { ...RBAI.EASY }, warNormal: { ...DIFFS.NORMAL } }),
+  route: (x, z, tx, tz, rad = 2.4, M = 6) => wallRoute(x, z, tx, tz, rad, M, null), ropeCross: (n, i) => { const r = riders.find(q => q.name === n); return !!ropeWallCross(r, i); },
+  ropePts: (n, i) => riders.find(q => q.name === n).cables[i].pts.map(p => [p.x, p.y, p.z]),
+  goto(i, xz) { const r = riders.filter(q => q.ai)[i]; r.brain.testGoto = xz || null; },
+  snagBall(i, id) { const b = balls.find(q => q.id === id); rbSnag(player, i, b); },
+  rbCfg(o) { if (o) Object.assign(RBAI.NORMAL, o); return { ...RBAI.NORMAL }; },
+  help: () => ({ open: ovlMode === 'help', text: ovlMode === 'help' ? $('ovl').innerText : '', seen: localStorage.getItem('rj3d_help'), lay: helpLay, back: helpBack }), showHelp: b => showHelp(b || null), helpDone: () => helpDone(),
   freezeAI(on) { window.__rj3dNoAIHook = on; for (const r of riders) if (r.ai) { r.brain.cool = on ? 1e9 : 2; r.brain.lock = false; releaseAll(r, true); } },
 };
 </script>
