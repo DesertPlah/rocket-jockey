@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b3550">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Fisher Family Adventures v0.1</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#0b3550;color:#f3ead7;
+  font:14px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;touch-action:manipulation;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#app{display:flex;width:100vw;height:100vh}
+#mapwrap{flex:1;position:relative;min-width:0}
+#map{position:absolute;inset:0;width:100%;height:100%;display:block}
+#panel{width:272px;flex:none;display:flex;flex-direction:column;gap:4px;padding:4px;background:#13293d;border-left:2px solid #24425e;min-height:0}
+#score{display:flex;flex-direction:column;gap:2px}
+.sc{display:flex;align-items:center;gap:5px;padding:1px 4px;border-radius:5px;font-size:12px;white-space:nowrap}
+.sc.cur{background:#24425e;outline:1px solid #f2c14e}
+.sc .dot{width:10px;height:10px;border-radius:50%;flex:none}
+.sc .nm{flex:1;overflow:hidden;text-overflow:ellipsis}
+.sc .hp{width:34px;height:6px;background:#3a1f1f;border-radius:3px;overflow:hidden;flex:none}
+.sc .hp i{display:block;height:100%;background:#5fd35f}
+#status{font-size:12px;min-height:30px;background:#0e2233;border-radius:5px;padding:3px 6px;color:#ffe9a8}
+#btns{display:grid;grid-template-columns:repeat(4,1fr);gap:3px}
+button{font:inherit;font-size:13px;font-weight:600;border:0;border-radius:6px;padding:0 4px;height:34px;background:#2d5b84;color:#fff;cursor:pointer}
+button:disabled{background:#26384a;color:#6d7f90;cursor:default}
+button.hot{background:#d9922e}
+#hand{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}
+.card{height:50px;border-radius:6px;padding:3px 4px;font-size:11px;cursor:pointer;border:2px solid transparent;overflow:hidden;color:#1b1b1b}
+.card b{display:block;font-size:12px}
+.card.shot{background:#f0b9a3}.card.crew{background:#b9d8f0}.card.event{background:#d8c3f0}
+.card.dim{opacity:.55}
+.card.ok{border-color:#ffd24a}
+#log{flex:1;min-height:0;overflow-y:auto;background:#0e2233;border-radius:5px;padding:3px 6px;font-size:11.5px}
+#log div{margin:1px 0}
+#top{position:absolute;left:6px;top:4px;display:flex;gap:4px;pointer-events:auto}
+#top button{height:30px;width:34px;background:#13293dcc}
+.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:5}
+.modal.on{display:flex}
+.box{background:#f3ead7;color:#1d2a35;border-radius:10px;padding:12px 14px;max-width:min(720px,96vw);max-height:94vh;overflow-y:auto;box-shadow:0 6px 30px #000}
+.box h1{margin:0 0 4px;font-size:22px}.box h2{margin:6px 0 4px;font-size:16px}
+.box p,.box li{font-size:13px;margin:3px 0}
+.box ul{margin:2px 0;padding-left:18px}
+.box .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.box button{background:#2d5b84;min-width:90px}
+.box button.alt{background:#7a8b99}
+.story{display:flex;gap:10px;align-items:flex-start;background:#fff8e6;border:2px solid #b08a4a;border-radius:8px;padding:8px}
+.story canvas{flex:none;border-radius:5px}
+.locked{margin-top:6px;padding:6px 8px;border:2px dashed #9aa;border-radius:8px;color:#556;font-size:12px}
+input{font:inherit;padding:5px 7px;border-radius:5px;border:1px solid #888;width:160px}
+.tag{font-size:10px;background:#d6e4ee;border-radius:4px;padding:0 3px;color:#234}
+#rot{display:none;position:fixed;inset:0;background:#0b3550;z-index:9;align-items:center;justify-content:center;text-align:center;font-size:18px;padding:20px}
+@media (orientation:portrait) and (max-width:700px){#rot{display:flex}}
+@media (max-height:380px){.card{height:44px}button{height:30px}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="mapwrap"><canvas id="map"></canvas>
+    <div id="top"><button id="bHelp" title="How to play (H)">?</button><button id="bSpeed" title="AI speed (F)">▶</button><button id="bNew" title="New game">↺</button></div>
+  </div>
+  <div id="panel">
+    <div id="score"></div>
+    <div id="status"></div>
+    <div id="btns">
+      <button id="bLoad" title="L">Load</button><button id="bUnload" title="U">Unload</button><button id="bTurn" title="T">Turn</button><button id="bEnd" title="E">End</button>
+    </div>
+    <div id="hand"></div>
+    <div id="log"></div>
+  </div>
+</div>
+<div id="modal" class="modal"><div class="box" id="mbox"></div></div>
+<div id="rot">Turn your phone sideways (landscape) to play Fisher Family Adventures.</div>
+<script>
+'use strict';
+const VERSION = '0.1';
+const Q = new URLSearchParams(location.search);
+// ---------- RNG ----------
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let rnd = Math.random;
+const d6 = () => 1 + Math.floor(rnd() * 6);
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+// ---------- Hex grid (flat-top, odd-q offset) ----------
+const COLS = 15, ROWS = 9, NP = 4;
+const DIRS = [[0,-1],[1,-1],[1,0],[0,1],[-1,1],[-1,0]]; // axial: N NE SE S SW NW
+const DIRN = ['N','NE','SE','S','SW','NW'];
+const toAx = (c,r) => ({q:c, r:r-((c-(c&1))>>1)});
+const toOff = (q,r) => ({c:q, r:r+((q-(q&1))>>1)});
+const K = (c,r) => c+','+r;
+const inB = (c,r) => c>=0 && c<COLS && r>=0 && r<ROWS;
+function nb(c,r,d){const a=toAx(c,r);return toOff(a.q+DIRS[d][0], a.r+DIRS[d][1]);}
+function hdist(c1,r1,c2,r2){const a=toAx(c1,r1),b=toAx(c2,r2);const dq=a.q-b.q,dr=a.r-b.r;return (Math.abs(dq)+Math.abs(dr)+Math.abs(dq+dr))/2;}
+const ALLHEX=[];for(let c=0;c<COLS;c++)for(let r=0;r<ROWS;r++)ALLHEX.push([c,r]);
+
+// ---------- Story card ----------
+const STORY = {
+  id:'family-gold-grab', name:'Family Gold Grab', teams:'Every Fisher for themself',
+  homes:[[1,7],[1,1],[13,1],[13,7]],
+  isles:[[[4,1]],[[4,7]],[[10,1]],[[10,7]],[[7,0],[7,1]],[[7,7],[7,8]],[[5,4]],[[9,4]]],
+  chests:[1,1,2,2,2,3,3,3,4,4,5,5]
+};
+const COLORS = ['#3b82f6','#ef4444','#22c55e','#a855f7'];
+const LETTERS = ['A','B','C','D'];
+
+// ---------- Cards ----------
+const CARDS = {
+  chain:{name:'Chain-shot',type:'shot',text:'Play right before firing. Target moves 1 hex less on its next turn.'},
+  bomb:{name:'Bomb-shot',type:'shot',text:'Play right before firing. Target takes 2 extra damage.'},
+  grape:{name:'Grape-shot',type:'shot',text:'Play right before firing. Target may not fire on its next turn.'},
+  hook:{name:'Hook-shot',type:'shot',text:'Play right before firing. After your cannons, your ship moves 1 hex closer to the target.'},
+  navigator:{name:'Navigator',type:'crew',text:'Your next sail this turn may go 1 hex farther.'},
+  gunner:{name:'Gunner',type:'crew',text:'Your next shot this turn reaches 1 hex farther (3 hexes).'},
+  shipwright:{name:'Shipwright',type:'crew',text:'Heal 3 HP now.'},
+  deckmaster:{name:'Deck Master',type:'crew',text:'Load or unload right now as a free action.'},
+  typhoon:{name:'Typhoon',type:'event',text:'End of another Fisher\'s turn. Roll a die (1=N 2=NE 3=SE 4=S 5=SW 6=NW): every ship is blown 2 hexes that way; an island in the way costs 1 HP.'},
+  monkeys:{name:'Thieving Monkeys',type:'event',text:'End of another Fisher\'s turn. You draw first, then everyone takes a random card from the Fisher to their left.'},
+  mixup:{name:'Loading Mixup',type:'event',text:'End of another Fisher\'s turn. Move 1 chest from any ship to any other ship with room.'},
+};
+const TYPE_LABEL = {shot:'Shot',crew:'Crew',event:'Event'};
+function makeDeck(){const d=[];for(const id in CARDS){const n=CARDS[id].type==='event'?2:3;for(let i=0;i<n;i++)d.push(id);}return shuffle(d);}
+
+// ---------- State ----------
+let S = null;
+let LOGHOOK = null;
+function log(text, pid){ if(!S) return; S.log.push({t:text, p:pid==null?-1:pid}); if(S.log.length>300) S.log.shift(); if(LOGHOOK) LOGHOOK(); }
+function newGame(opts){
+  opts = opts||{};
+  const seed = opts.seed!=null ? opts.seed : (+Q.get('seed') || ((Date.now()^ (Math.random()*1e9))>>>0));
+  rnd = mulberry(seed);
+  const names = opts.names || [];
+  S = {seed, version:VERSION, players:[], islands:[], isleAt:{}, deck:makeDeck(), discard:[], cur:0, round:1, tick:0,
+       actions:2, loaded:false, armed:{navigator:false,gunner:false,shot:null}, phase:'turn', skip:false, evQueue:[], evFor:-1,
+       log:[], over:false, winners:[], lost:[], stats:{shots:0,sinks:0,respawns:0,cards:{},typhoons:0}};
+  STORY.homes.forEach((h,i)=>addIsland([h], i));
+  STORY.isles.forEach(hs=>addIsland(hs,-1));
+  // chests: one per treasure island, rest random
+  const ch = shuffle(STORY.chests.slice()); const tis = S.islands.filter(i=>i.home<0);
+  tis.forEach(i=>i.chests.push(ch.pop()));
+  while(ch.length) tis[Math.floor(rnd()*tis.length)].chests.push(ch.pop());
+  for(let p=0;p<NP;p++){
+    const ai = opts.allAI ? true : p!==0;
+    const P = {id:p, name:names[p]||('Fisher '+LETTERS[p]), color:COLORS[p], ai, hand:[], home:p, homeChests:[], played:0,
+      ship:{c:0,r:0,f:0,hp:10,maxHp:10,cannons:2,cap:5,cargo:[],sunk:false,sunkTick:0,chained:false,graped:false,chainNow:false,grapeNow:false}};
+    S.players.push(P);
+    placeAtHome(P);
+    for(let k=0;k<3;k++) draw(P);
+  }
+  log('Story card: '+STORY.name+' — '+STORY.teams+'. 12 face-down chests are on the 8 treasure islands.');
+  startTurn();
+  return S;
+}
+function addIsland(hexes, home){const id=S.islands.length;S.islands.push({id,hexes,home,chests:[]});hexes.forEach(([c,r])=>S.isleAt[K(c,r)]=id);}
+function draw(P){ if(!S.deck.length){ if(!S.discard.length) return; S.deck=shuffle(S.discard); S.discard=[]; } P.hand.push(S.deck.pop()); }
+function shipAt(c,r,exceptPid){ for(const P of S.players){ if(P.id===exceptPid) continue; const s=P.ship; if(!s.sunk && s.c===c && s.r===r) return P; } return null; }
+function isWater(c,r){ return inB(c,r) && S.isleAt[K(c,r)]==null; }
+function free(c,r,pid){ return isWater(c,r) && !shipAt(c,r,pid); }
+function islandNeighbors(c,r){ const s=new Set(); for(let d=0;d<6;d++){const n=nb(c,r,d); if(inB(n.c,n.r)){const id=S.isleAt[K(n.c,n.r)]; if(id!=null) s.add(id);}} return [...s]; }
+function placeAtHome(P){
+  const isl=S.islands[P.home]; const [hc,hr]=isl.hexes[0];
+  const cx=(COLS-1)/2, cy=(ROWS-1)/2; let best=null;
+  for(let d=0;d<6;d++){const n=nb(hc,hr,d); if(!free(n.c,n.r,P.id)) continue;
+    const sc=Math.hypot(n.c-cx,n.r-cy); if(!best||sc<best.sc) best={c:n.c,r:n.r,f:d,sc};}
+  if(!best){ // fallback: nearest free water anywhere
+    let bd=1e9; for(const [c,r] of ALLHEX){ if(!free(c,r,P.id)) continue; const dd=hdist(c,r,hc,hr); if(dd<bd){bd=dd;best={c,r,f:0};} } }
+  const s=P.ship; s.c=best.c; s.r=best.r; s.f=best.f; // stern touches home, bow points away
+}
+const curP = () => S.players[S.cur];
+const canPlayCard = P => P.played !== S.round;
+function goldOf(P){ return P.homeChests.reduce((a,b)=>a+b,0); }
+function chestsLeft(){ let n=0; S.islands.forEach(i=>{ if(i.home<0) n+=i.chests.length; }); S.players.forEach(P=>n+=P.ship.cargo.length); return n; }
+
+// ---------- Turn flow ----------
+function startTurn(){
+  const P=curP(), s=P.ship; S.tick++; S.actions=2; S.loaded=false; S.armed={navigator:false,gunner:false,shot:null}; S.skip=false; S.phase='turn';
+  if(s.sunk){
+    if(S.tick - s.sunkTick >= NP){ s.sunk=false; s.hp=s.maxHp; s.cargo=[]; placeAtHome(P); S.stats.respawns++; P._fx=1;
+      log(P.name+'\'s ship is back at home with full HP (no actions this turn).', P.id); }
+    else log(P.name+' is still swimming home (back next turn).', P.id);
+    S.actions=0; S.skip=true; return;
+  }
+  s.chainNow=s.chained; s.chained=false; s.grapeNow=s.graped; s.graped=false;
+  if(s.chainNow) log(P.name+' is chain-shot: sails 1 hex less this turn.', P.id);
+  if(s.grapeNow) log(P.name+'\'s crew is grape-shot: no firing this turn.', P.id);
+}
+function endTurn(){
+  if(S.over || S.phase!=='turn') return false;
+  const P=curP(); P.ship.chainNow=false; P.ship.grapeNow=false; S.armed={navigator:false,gunner:false,shot:null};
+  S.evQueue=[]; for(let k=1;k<NP;k++) S.evQueue.push((S.cur+k)%NP);
+  S.phase='events'; processEvents(); return true;
+}
+function hasEvent(P){ return P.hand.some(id=>CARDS[id].type==='event'); }
+function processEvents(){
+  while(S.evQueue.length && !S.over){
+    const pid=S.evQueue[0], P=S.players[pid];
+    if(!canPlayCard(P) || !hasEvent(P)){ S.evQueue.shift(); continue; }
+    if(!P.ai && !S.noPrompt){ S.phase='event'; S.evFor=pid; return; }
+    S.evQueue.shift(); if(P.ai) aiEvent(P);
+  }
+  S.evFor=-1; advance();
+}
+function resolveEventPrompt(idx, opt){ // human answer; idx<0 = skip
+  if(S.phase!=='event') return false;
+  const pid=S.evFor; S.evQueue.shift();
+  if(idx>=0) playCard(pid, idx, opt);
+  S.phase='events'; processEvents(); return true;
+}
+function advance(){
+  if(checkOver()) return;
+  S.cur=(S.cur+1)%NP; if(S.cur===0) S.round++;
+  if(S.round>60){ finish('Round 60 safety stop'); return; }
+  startTurn();
+}
+function checkOver(){ if(S.over) return true; if(chestsLeft()===0){ finish('Every chest is home or sunk'); return true;} return false; }
+function finish(why){
+  S.over=true; S.phase='over'; const best=Math.max(...S.players.map(goldOf));
+  S.winners=S.players.filter(P=>goldOf(P)===best).map(P=>P.id);
+  log(why+'. '+S.winners.map(i=>S.players[i].name).join(' & ')+(S.winners.length>1?' tie':' wins')+' with '+best+' gold!');
+}
+
+// ---------- Rules / legality ----------
+function moveRange(P){ let m=2; if(S.armed.navigator && S.cur===P.id) m++; if(P.ship.chainNow) m--; return Math.max(0,m); }
+function legalMoves(pid){
+  const P=S.players[pid], s=P.ship; if(S.over||S.phase!=='turn'||S.cur!==pid||s.sunk||S.actions<=0) return [];
+  const R=moveRange(P), best=new Map(); let front=[{c:s.c,r:s.r,f:s.f,path:[]}]; const seen=new Set([s.c+','+s.r+','+s.f]);
+  for(let st=0; st<R; st++){ const nf=[];
+    for(const x of front) for(const dd of [0,-1,1]){ const d=(x.f+dd+6)%6, n=nb(x.c,x.r,d);
+      if(!free(n.c,n.r,pid)) continue; const k=n.c+','+n.r+','+d; if(seen.has(k)) continue; seen.add(k);
+      const y={c:n.c,r:n.r,f:d,path:x.path.concat([[n.c,n.r]])}; nf.push(y); const hk=K(n.c,n.r); if(!best.has(hk)&&!(n.c===s.c&&n.r===s.r)) best.set(hk,y); }
+    front=nf; }
+  return [...best.values()];
+}
+function fireRange(P){ return 2 + (S.armed.gunner && S.cur===P.id ? 1 : 0); }
+function fireTargets(pid, extra){
+  const P=S.players[pid], s=P.ship; if(S.over||S.phase!=='turn'||S.cur!==pid||s.sunk||S.actions<=0||s.grapeNow) return [];
+  const R=fireRange(P)+(extra||0);
+  return S.players.filter(T=>T.id!==pid && !T.ship.sunk && hdist(s.c,s.r,T.ship.c,T.ship.r)<=R).map(T=>T.id);
+}
+function loadIsland(pid){ const P=S.players[pid], s=P.ship; if(s.sunk||s.cargo.length>=s.cap) return -1;
+  const ids=islandNeighbors(s.c,s.r).filter(id=>S.islands[id].home<0 && S.islands[id].chests.length); return ids.length?ids[0]:-1; }
+function canUnloadHere(pid){ const P=S.players[pid], s=P.ship; return !s.sunk && s.cargo.length>0 && islandNeighbors(s.c,s.r).includes(P.home); }
+function canLoadAction(pid, free_){ if(S.over||S.phase!=='turn'||S.cur!==pid) return false; if(!free_ && (S.actions<=0||S.loaded)) return false; return loadIsland(pid)>=0; }
+function canUnloadAction(pid, free_){ if(S.over||S.phase!=='turn'||S.cur!==pid) return false; if(!free_ && (S.actions<=0||S.loaded)) return false; return canUnloadHere(pid); }
+
+// ---------- Actions ----------
+function spend(){ S.actions--; }
+function doMove(pid,c,r){
+  const m=legalMoves(pid).find(x=>x.c===c&&x.r===r); if(!m) return false;
+  const P=S.players[pid], s=P.ship; s.anim={path:[[s.c,s.r]].concat(m.path), t0:performance.now()};
+  s.c=m.c; s.r=m.r; s.f=m.f; spend(); if(S.armed.navigator) S.armed.navigator=false;
+  log(P.name+' sails '+m.path.length+' hex'+(m.path.length>1?'es':'')+', now facing '+DIRN[m.f]+'.', pid); return true;
+}
+function doTurn(pid,f){
+  const P=S.players[pid], s=P.ship; if(S.over||S.phase!=='turn'||S.cur!==pid||s.sunk||S.actions<=0||f===s.f||f<0||f>5) return false;
+  s.f=f; spend(); log(P.name+' comes about to face '+DIRN[f]+'.', pid); return true;
+}
+function doLoad(pid, free_){
+  if(!canLoadAction(pid, free_)) return false; const P=S.players[pid], s=P.ship, isl=S.islands[loadIsland(pid)];
+  const n=Math.min(s.cap-s.cargo.length, isl.chests.length); shuffle(isl.chests); for(let i=0;i<n;i++) s.cargo.push(isl.chests.pop());
+  if(!free_){ spend(); S.loaded=true; }
+  log(P.name+' loads '+n+' face-down chest'+(n>1?'s':'')+(free_?' (free, Deck Master)':'')+'. Cargo '+s.cargo.length+'/'+s.cap+'.', pid);
+  fx(s.c,s.r,'+'+n+' chest'+(n>1?'s':''),'#ffd24a'); checkOver(); return true;
+}
+function doUnload(pid, free_){
+  if(!canUnloadAction(pid, free_)) return false; const P=S.players[pid], s=P.ship; const vals=s.cargo.splice(0);
+  P.homeChests.push(...vals); if(!free_){ spend(); S.loaded=true; }
+  const sum=vals.reduce((a,b)=>a+b,0);
+  log(P.name+' unloads '+vals.length+' chest'+(vals.length>1?'s':'')+' at home: '+vals.join(' + ')+' = '+sum+' gold'+(free_?' (free, Deck Master)':'')+'. Home total '+goldOf(P)+'.', pid);
+  fx(s.c,s.r,'+'+sum+' gold','#ffd24a'); checkOver(); return true;
+}
+function doFire(pid, tid){
+  if(!fireTargets(pid).includes(tid)) return false;
+  const P=S.players[pid], s=P.ship, T=S.players[tid], t=T.ship; const dice=[]; for(let i=0;i<s.cannons;i++) dice.push(d6());
+  let dmg=dice.reduce((a,b)=>a+b,0); let shot=S.armed.shot; let extra='';
+  if(shot==='bomb'){ dmg+=2; extra=' + Bomb-shot 2'; }
+  spend(); S.armed.gunner=false; S.armed.shot=null; S.stats.shots++;
+  t.hp=Math.max(0,t.hp-dmg);
+  s.shotAnim={from:[s.c,s.r],to:[t.c,t.r],t0:performance.now()};
+  log(P.name+' fires at '+T.name+': 🎲'+dice.join(' 🎲')+extra+' = '+dmg+' damage. '+T.name+' HP '+t.hp+'/'+t.maxHp+'.', pid);
+  fx(t.c,t.r,'-'+dmg,'#ff6b6b');
+  const tc=t.c, tr=t.r;
+  if(t.hp<=0){ sink(T,P); }
+  else { if(shot==='chain'){ t.chained=true; log('Chain-shot: '+T.name+' sails 1 hex less next turn.', pid);} if(shot==='grape'){ t.graped=true; log('Grape-shot: '+T.name+' cannot fire next turn.', pid);} }
+  if(shot==='hook') hookMove(P, tc, tr);
+  checkOver(); return true;
+}
+function hookMove(P, tc, tr){
+  const s=P.ship; const d0=hdist(s.c,s.r,tc,tr); let best=null;
+  for(let d=0;d<6;d++){ const n=nb(s.c,s.r,d); if(!free(n.c,n.r,P.id)) continue; const dd=hdist(n.c,n.r,tc,tr); if(dd<d0 && (!best||dd<best.dd)) best={c:n.c,r:n.r,d,dd}; }
+  if(best){ s.anim={path:[[s.c,s.r],[best.c,best.r]],t0:performance.now()}; s.c=best.c; s.r=best.r; s.f=best.d; log('Hook-shot: '+P.name+' hauls 1 hex closer.', P.id); }
+  else log('Hook-shot: no room to haul closer.', P.id);
+}
+function sink(T, by){
+  const t=T.ship; const cargo=shuffle(t.cargo.splice(0)); let got=0, lostN=0;
+  if(by){ const half=Math.floor(cargo.length/2); const room=by.ship.cap-by.ship.cargo.length; got=Math.min(half,room); for(let i=0;i<got;i++) by.ship.cargo.push(cargo.pop()); }
+  lostN=cargo.length; S.lost.push(...cargo);
+  t.sunk=true; t.hp=0; t.sunkTick=S.tick; t.chained=t.graped=t.chainNow=t.grapeNow=false; S.stats.sinks++;
+  fx(t.c,t.r,'SUNK','#ffffff');
+  log('💥 '+T.name+'\'s ship sinks!'+(got?' '+by.name+' grabs '+got+' chest'+(got>1?'s':'')+'.':'')+(lostN?' '+lostN+' chest'+(lostN>1?'s':'')+' lost to the deep.':'')+' Back at home after one full round.', T.id);
+}
+function playCard(pid, idx, opt){
+  const P=S.players[pid]; const id=P.hand[idx]; if(!id || S.over) return false; const C=CARDS[id]; opt=opt||{};
+  if(!cardPlayable(pid, idx, opt)) return false;
+  P.hand.splice(idx,1); S.discard.push(id); P.played=S.round; S.stats.cards[id]=(S.stats.cards[id]||0)+1;
+  log(P.name+' plays '+C.name+'.', pid);
+  const s=P.ship;
+  if(C.type==='shot'){ S.armed.shot=id; draw(P); return true; }
+  if(id==='navigator'){ S.armed.navigator=true; draw(P); return true; }
+  if(id==='gunner'){ S.armed.gunner=true; draw(P); return true; }
+  if(id==='shipwright'){ const h=Math.min(3,s.maxHp-s.hp); s.hp+=h; log(P.name+' patches the hull: +'+h+' HP ('+s.hp+'/'+s.maxHp+').', pid); fx(s.c,s.r,'+'+h+' HP','#5fd35f'); draw(P); return true; }
+  if(id==='deckmaster'){ draw(P); if(canUnloadAction(pid,true)) doUnload(pid,true); else doLoad(pid,true); return true; }
+  if(id==='typhoon'){ draw(P); typhoon(); return true; }
+  if(id==='monkeys'){ draw(P); monkeys(); return true; }
+  if(id==='mixup'){ draw(P); const A=S.players[opt.from], B=S.players[opt.to]; const v=A.ship.cargo.splice(Math.floor(rnd()*A.ship.cargo.length),1)[0]; B.ship.cargo.push(v);
+    log('Loading Mixup: 1 chest moves from '+A.name+' to '+B.name+'.', pid); fx(B.ship.c,B.ship.r,'+1 chest','#ffd24a'); return true; }
+  return false;
+}
+function mixupOK(from,to){ const A=S.players[from], B=S.players[to]; return A&&B&&from!==to&&!A.ship.sunk&&!B.ship.sunk&&A.ship.cargo.length>0&&B.ship.cargo.length<B.ship.cap; }
+function cardPlayable(pid, idx, opt){
+  const P=S.players[pid]; const id=P.hand[idx]; if(!id||S.over||!canPlayCard(P)) return false; const C=CARDS[id]; const s=P.ship;
+  if(C.type==='event'){ if(S.phase!=='event'&&S.phase!=='events') return false; if(S.cur===pid) return false;
+    if(id==='mixup'){ if(!opt) return anyMixup(); return mixupOK(opt.from,opt.to); } return true; }
+  if(S.phase!=='turn'||S.cur!==pid||s.sunk) return false;
+  if(C.type==='shot') return !S.armed.shot && fireTargets(pid).length>0;
+  if(id==='navigator') return !S.armed.navigator && S.actions>0 && legalMoves(pid).length>0;
+  if(id==='gunner') return !S.armed.gunner && S.actions>0 && !s.grapeNow && fireTargets(pid,1).length>0;
+  if(id==='shipwright') return s.hp<s.maxHp;
+  if(id==='deckmaster') return canLoadAction(pid,true)||canUnloadAction(pid,true);
+  return false;
+}
+function anyMixup(){ for(let a=0;a<NP;a++) for(let b=0;b<NP;b++) if(mixupOK(a,b)) return true; return false; }
+function typhoon(){
+  const roll=d6(), d=roll-1; S.stats.typhoons++; log('🌀 Typhoon! Rolled '+roll+': every ship is blown '+DIRN[d]+'.');
+  const moving=S.players.filter(P=>!P.ship.sunk);
+  moving.forEach(P=>{ P._st=false; P._from=[P.ship.c,P.ship.r]; });
+  for(let step=0;step<2;step++) for(const P of moving){ if(P._st||P.ship.sunk) continue; const s=P.ship, n=nb(s.c,s.r,d);
+    if(!inB(n.c,n.r)){ P._st=true; continue; }
+    if(S.isleAt[K(n.c,n.r)]!=null){ P._st=true; s.hp=Math.max(0,s.hp-1); log(P.name+' is thrown onto an island: -1 HP ('+s.hp+').', P.id); fx(s.c,s.r,'-1','#ff6b6b'); if(s.hp<=0) sink(P,null); continue; }
+    if(shipAt(n.c,n.r,P.id)){ P._st=true; continue; }
+    s.c=n.c; s.r=n.r; }
+  moving.forEach(P=>{ if(!P.ship.sunk && (P._from[0]!==P.ship.c||P._from[1]!==P.ship.r)) P.ship.anim={path:[P._from,[P.ship.c,P.ship.r]],t0:performance.now()}; });
+  checkOver();
+}
+function monkeys(){
+  const picks=[]; for(let i=0;i<NP;i++){ const L=S.players[(i+1)%NP]; picks.push(L.hand.length? Math.floor(rnd()*L.hand.length) : -1); }
+  const taken=picks.map((k,i)=>k<0?null:S.players[(i+1)%NP].hand[k]);
+  // remove (highest index first per hand)
+  for(let i=0;i<NP;i++){ if(picks[i]<0) continue; const L=S.players[(i+1)%NP]; L.hand[picks[i]]=null; }
+  S.players.forEach(P=>P.hand=P.hand.filter(x=>x)); taken.forEach((id,i)=>{ if(id) S.players[i].hand.push(id); });
+  log('🐒 Thieving Monkeys! Everyone grabs a random card from the Fisher to their left.');
+}
+let FX=[];
+function fx(c,r,text,color){ FX.push({c,r,text,color,t0:performance.now()}); if(FX.length>30) FX.shift(); }
+
+// ---------- AI ----------
+function distField(sources){ // BFS over water from source hexes
+  const D={}; let q=[]; for(const [c,r] of sources){ const k=K(c,r); if(D[k]==null&&isWater(c,r)){D[k]=0;q.push([c,r]);} }
+  while(q.length){ const nq=[]; for(const [c,r] of q){ const dv=D[K(c,r)]; for(let d=0;d<6;d++){ const n=nb(c,r,d); if(!isWater(n.c,n.r)) continue; const k=K(n.c,n.r); if(D[k]==null){D[k]=dv+1;nq.push([n.c,n.r]);} } } q=nq; }
+  return D;
+}
+function waterAround(isl){ const out=[]; isl.hexes.forEach(([c,r])=>{ for(let d=0;d<6;d++){ const n=nb(c,r,d); if(isWater(n.c,n.r)) out.push([n.c,n.r]); } }); return out; }
+function aiGoal(P){
+  const s=P.ship; const home=S.islands[P.home];
+  const chestIsles=S.islands.filter(i=>i.home<0&&i.chests.length);
+  const homeF=distField(waterAround(home)); const dHome=homeF[K(s.c,s.r)]??99;
+  let chestF=null, dChest=99;
+  if(chestIsles.length && s.cargo.length<s.cap){ chestF=distField([].concat(...chestIsles.map(waterAround))); dChest=chestF[K(s.c,s.r)]??99; }
+  if(s.cargo.length>0 && (s.cargo.length>=2 || !chestF || dChest>dHome || s.cargo.length>=s.cap)) return homeF;
+  if(chestF) return chestF;
+  // chase the nearest enemy carrying chests
+  const carriers=S.players.filter(T=>T.id!==P.id&&!T.ship.sunk&&T.ship.cargo.length);
+  if(carriers.length){ const src=[]; carriers.forEach(T=>ALLHEX.forEach(([c,r])=>{ if(hdist(c,r,T.ship.c,T.ship.r)<=2) src.push([c,r]); })); return distField(src); }
+  if(s.cargo.length) return homeF;
+  return null;
+}
+function findCard(P,id){ return P.hand.indexOf(id); }
+function aiTryCard(P,id){ const i=findCard(P,id); if(i>=0 && cardPlayable(P.id,i)) return playCard(P.id,i); return false; }
+function aiAct(pid){ // one decision; false = end turn
+  const P=S.players[pid], s=P.ship; if(S.over||S.phase!=='turn'||S.cur!==pid||S.skip) return false;
+  if(s.hp<=5 && aiTryCard(P,'shipwright')) return true;
+  if(canUnloadHere(pid)){ if(S.actions>0&&!S.loaded) return doUnload(pid); if(aiTryCard(P,'deckmaster')) return true; }
+  if(loadIsland(pid)>=0){ if(S.actions>0&&!S.loaded) return doLoad(pid); if(aiTryCard(P,'deckmaster')) return true; }
+  if(S.actions<=0) return false;
+  // attack?
+  const want=T=>T.ship.cargo.length>0 || T.ship.hp<=(s.cargo.length?4:7);
+  let tg=fireTargets(pid).map(i=>S.players[i]).filter(want);
+  if(!tg.length && !S.armed.gunner && canPlayCard(P) && findCard(P,'gunner')>=0){ const far=fireTargets(pid,1).map(i=>S.players[i]).filter(want); if(far.length){ aiTryCard(P,'gunner'); return true; } }
+  if(tg.length){ tg.sort((a,b)=>(b.ship.cargo.length-a.ship.cargo.length)||(a.ship.hp-b.ship.hp)); const T=tg[0];
+    if(!S.armed.shot && canPlayCard(P)){ for(const id of ['bomb','grape','chain','hook']) if(aiTryCard(P,id)) return true; }
+    return doFire(pid,T.id); }
+  // move
+  const F=aiGoal(P); if(!F) return false;
+  const here=F[K(s.c,s.r)]??99; if(here===0) return false;
+  if(!S.armed.navigator && here>2 && canPlayCard(P) && findCard(P,'navigator')>=0 && aiTryCard(P,'navigator')) return true;
+  const ms=legalMoves(pid); let best=null;
+  for(const m of ms){ const v=F[K(m.c,m.r)]??99; const ahead=nb(m.c,m.r,m.f); const av=F[K(ahead.c,ahead.r)]??99; const sc=v*10+(av<v?0:3)+(m.path.length===1?0.5:0); if(!best||sc<best.sc) best={m,sc,v}; }
+  if(best && best.v<here) return doMove(pid,best.m.c,best.m.r);
+  // come about toward the goal
+  let bd=-1,bv=99; for(let d=0;d<6;d++){ const n=nb(s.c,s.r,d); const v=F[K(n.c,n.r)]; if(v!=null && v<bv && free(n.c,n.r,pid)){bv=v;bd=d;} }
+  if(bd>=0 && bd!==s.f) return doTurn(pid,bd);
+  return false;
+}
+function aiEvent(P){
+  if(!canPlayCard(P)||P.ship.sunk&&false) return;
+  const mi=findCard(P,'mixup');
+  if(mi>=0 && !P.ship.sunk && P.ship.cargo.length<P.ship.cap){ const rich=S.players.filter(T=>T.id!==P.id&&mixupOK(T.id,P.id)).sort((a,b)=>b.ship.cargo.length-a.ship.cargo.length)[0];
+    if(rich){ playCard(P.id,mi,{from:rich.id,to:P.id}); return; } }
+  const ty=findCard(P,'typhoon'); if(ty>=0 && rnd()<0.2){ playCard(P.id,ty); return; }
+  const mo=findCard(P,'monkeys'); if(mo>=0 && rnd()<0.2){ playCard(P.id,mo); return; }
+}
+function aiFullTurn(){ let g=0; while(!S.over && S.phase==='turn' && g++<12){ if(!aiAct(S.cur)) break; } if(!S.over && S.phase==='turn') endTurn(); }
+function runToEnd(maxTicks){ maxTicks=maxTicks||2000; let g=0; while(!S.over && g++<maxTicks){ if(S.phase==='event'){ resolveEventPrompt(-1); continue; } aiFullTurn(); } return {over:S.over, winners:S.winners, round:S.round, tick:S.tick}; }
+
+// ---------- Rendering ----------
+const cv=document.getElementById('map'), ctx=cv.getContext('2d');
+let GEO={R:20,ox:0,oy:0,W:0,H:0};
+function resize(){ const w=cv.clientWidth, h=cv.clientHeight, dpr=Math.min(2,window.devicePixelRatio||1);
+  cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); ctx.setTransform(dpr,0,0,dpr,0,0);
+  const top=36; const R=Math.min((w-8)/(1.5*(COLS-1)+2), (h-top-6)/(Math.sqrt(3)*(ROWS+0.5)));
+  const mw=R*(1.5*(COLS-1)+2), mh=R*Math.sqrt(3)*(ROWS+0.5);
+  GEO={R, ox:(w-mw)/2+R, oy:top+(h-top-mh)/2+R*Math.sqrt(3)/2, W:w, H:h}; }
+function hp(c,r){ return {x:GEO.ox+GEO.R*1.5*c, y:GEO.oy+GEO.R*Math.sqrt(3)*(r+0.5*(c&1))}; }
+function hexPath(x,y,R){ ctx.beginPath(); for(let i=0;i<6;i++){ const a=Math.PI/3*i; ctx.lineTo(x+R*Math.cos(a), y+R*Math.sin(a)); } ctx.closePath(); }
+const UI={mode:'normal', sel:null, speed:1, hover:null};
+function shipPos(P, now){ const s=P.ship; const p=hp(s.c,s.r);
+  if(s.anim){ const per=170, n=s.anim.path.length-1, t=(now-s.anim.t0)/per; if(t>=n){ s.anim=null; return p; }
+    const i=Math.floor(t), f=t-i, a=hp(...s.anim.path[i]), b=hp(...s.anim.path[i+1]); return {x:a.x+(b.x-a.x)*f, y:a.y+(b.y-a.y)*f}; }
+  return p; }
+function render(){
+  const now=performance.now(); const R=GEO.R;
+  const g=ctx.createLinearGradient(0,0,0,GEO.H); g.addColorStop(0,'#14567f'); g.addColorStop(1,'#0c3c5c'); ctx.fillStyle=g; ctx.fillRect(0,0,GEO.W,GEO.H);
+  if(!S) return;
+  // grid
+  ctx.lineWidth=1; ctx.strokeStyle='rgba(255,255,255,0.09)';
+  for(const [c,r] of ALLHEX){ const p=hp(c,r); hexPath(p.x,p.y,R*0.98); ctx.stroke(); }
+  // highlights
+  const me=S.players[S.cur]; const humanTurn=!me.ai && S.phase==='turn' && !S.over && !S.skip;
+  if(humanTurn){
+    if(UI.mode==='turn'){ const s=me.ship; for(let d=0;d<6;d++){ if(d===s.f) continue; const n=nb(s.c,s.r,d); if(!inB(n.c,n.r)) continue; const p=hp(n.c,n.r); hexPath(p.x,p.y,R*0.9); ctx.fillStyle='rgba(255,210,74,0.28)'; ctx.fill(); arrow(p.x,p.y,d,R*0.5,'#ffd24a'); } }
+    else { for(const m of legalMoves(me.id)){ const p=hp(m.c,m.r); hexPath(p.x,p.y,R*0.9); ctx.fillStyle='rgba(120,200,255,0.22)'; ctx.fill(); ctx.beginPath(); ctx.arc(p.x,p.y,R*0.18,0,7); ctx.fillStyle='rgba(170,225,255,0.9)'; ctx.fill(); }
+      // range ring
+      const s=me.ship; if(!s.sunk && !s.grapeNow && S.actions>0){ const fr=fireRange(me); ctx.strokeStyle='rgba(255,120,120,0.35)'; ctx.setLineDash([4,4]); for(const [c,r] of ALLHEX){ if(hdist(c,r,s.c,s.r)===fr){ const p=hp(c,r); ctx.beginPath(); ctx.arc(p.x,p.y,2,0,7); ctx.stroke(); } } ctx.setLineDash([]); } }
+  }
+  // islands
+  for(const isl of S.islands){
+    isl.hexes.forEach(([c,r])=>{ const p=hp(c,r); hexPath(p.x,p.y,R*0.95); ctx.fillStyle='#e7cf8f'; ctx.fill(); ctx.beginPath(); ctx.arc(p.x,p.y,R*0.55,0,7); ctx.fillStyle=isl.home>=0?'#5f9d48':'#4f8a3c'; ctx.fill(); });
+    const [c0,r0]=isl.hexes[0]; const p=hp(c0,r0);
+    if(isl.home>=0){ const P=S.players[isl.home]; ctx.strokeStyle='#3b2a14'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(p.x-R*0.1,p.y+R*0.45); ctx.lineTo(p.x-R*0.1,p.y-R*0.55); ctx.stroke();
+      ctx.fillStyle=P.color; ctx.beginPath(); ctx.moveTo(p.x-R*0.1,p.y-R*0.55); ctx.lineTo(p.x+R*0.5,p.y-R*0.38); ctx.lineTo(p.x-R*0.1,p.y-R*0.2); ctx.fill();
+      txt(goldOf(P)+'g', p.x, p.y+R*0.33, '#fff', Math.max(10,R*0.42), true); }
+    else if(isl.chests.length){ const cx=p.x, cy=p.y; ctx.fillStyle='#7a4a1c'; rr(cx-R*0.34,cy-R*0.22,R*0.68,R*0.46,3); ctx.fill(); ctx.fillStyle='#d9a441'; ctx.fillRect(cx-R*0.34,cy-R*0.04,R*0.68,R*0.07);
+      txt('×'+isl.chests.length, cx, cy+R*0.62, '#fff', Math.max(10,R*0.42), true); }
+  }
+  // ships
+  for(const P of S.players){ const s=P.ship; if(s.sunk) continue; const p=shipPos(P,now);
+    if(P.id===S.cur && !S.over){ ctx.beginPath(); ctx.arc(p.x,p.y,R*0.82,0,7); ctx.strokeStyle='#ffd24a'; ctx.lineWidth=2.5; ctx.stroke(); }
+    if(humanTurn && UI.mode!=='turn' && fireTargets(me.id).includes(P.id)){ ctx.beginPath(); ctx.arc(p.x,p.y,R*0.78,0,7); ctx.strokeStyle='#ff5b5b'; ctx.lineWidth=3; ctx.setLineDash([5,3]); ctx.stroke(); ctx.setLineDash([]); }
+    drawShip(p.x,p.y,s.f,R,P.color);
+    // hp bar
+    const bw=R*1.1; ctx.fillStyle='#331'; ctx.fillRect(p.x-bw/2,p.y+R*0.55,bw,4); ctx.fillStyle=s.hp>5?'#5fd35f':s.hp>2?'#f2c14e':'#ff5b5b'; ctx.fillRect(p.x-bw/2,p.y+R*0.55,bw*s.hp/s.maxHp,4);
+    if(s.cargo.length){ ctx.beginPath(); ctx.arc(p.x+R*0.5,p.y-R*0.5,R*0.26,0,7); ctx.fillStyle='#ffd24a'; ctx.fill(); txt(String(s.cargo.length),p.x+R*0.5,p.y-R*0.5,'#3b2a00',Math.max(9,R*0.34),true); }
+    txt(LETTERS[P.id], p.x-R*0.55, p.y-R*0.5, P.color, Math.max(9,R*0.36), true);
+    if(s.shotAnim){ const t=(now-s.shotAnim.t0)/350; if(t>1) s.shotAnim=null; else { const a=hp(...s.shotAnim.from), b=hp(...s.shotAnim.to); ctx.beginPath(); ctx.arc(a.x+(b.x-a.x)*t, a.y+(b.y-a.y)*t - Math.sin(t*Math.PI)*R*0.6, 3.5,0,7); ctx.fillStyle='#222'; ctx.fill(); } }
+  }
+  // fx
+  FX=FX.filter(f=>now-f.t0<1300); for(const f of FX){ const p=hp(f.c,f.r), t=(now-f.t0)/1300; ctx.globalAlpha=1-t; txt(f.text,p.x,p.y-R*0.9-t*R,f.color,Math.max(12,R*0.5),true); ctx.globalAlpha=1; }
+  // compass
+  txt('N ↑', GEO.W-22, 50, 'rgba(255,255,255,0.6)', 12, true);
+}
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect?ctx.roundRect(x,y,w,h,r):ctx.rect(x,y,w,h); }
+function txt(t,x,y,col,size,bold){ ctx.font=(bold?'700 ':'')+Math.round(size)+'px system-ui,sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,0.55)'; ctx.strokeText(t,x,y); ctx.fillStyle=col; ctx.fillText(t,x,y); }
+function arrow(x,y,d,len,col){ const a=-Math.PI/2+d*Math.PI/3; ctx.save(); ctx.translate(x,y); ctx.rotate(a); ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo(len*0.6,0); ctx.lineTo(-len*0.3,-len*0.4); ctx.lineTo(-len*0.3,len*0.4); ctx.fill(); ctx.restore(); }
+function drawShip(x,y,f,R,col){ const a=-Math.PI/2+f*Math.PI/3; ctx.save(); ctx.translate(x,y); ctx.rotate(a);
+  const L=R*0.72, W=R*0.32; ctx.beginPath(); ctx.moveTo(L,0); ctx.quadraticCurveTo(L*0.3,-W*1.1,-L*0.7,-W); ctx.lineTo(-L*0.75,W); ctx.quadraticCurveTo(L*0.3,W*1.1,L,0); ctx.closePath();
+  ctx.fillStyle='#6b4423'; ctx.fill(); ctx.strokeStyle='#2a1a0c'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.fillStyle=col; ctx.strokeStyle='#fff'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(L*0.25,-W*1.3); ctx.quadraticCurveTo(L*0.05,0,L*0.25,W*1.3); ctx.lineTo(-L*0.1,W*1.3); ctx.quadraticCurveTo(-L*0.3,0,-L*0.1,-W*1.3); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(L*0.82,0,1.8,0,7); ctx.fill(); ctx.restore(); }
+function hexAt(x,y){ let best=null,bd=1e9; for(const [c,r] of ALLHEX){ const p=hp(c,r); const d=Math.hypot(p.x-x,p.y-y); if(d<bd){bd=d;best=[c,r];} } return bd<GEO.R*0.95?best:null; }
+function loop(){ render(); requestAnimationFrame(loop); }
+
+// ---------- Panel UI ----------
+const $=id=>document.getElementById(id);
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function refresh(){
+  if(!S) return; const me=S.players[0];
+  $('score').innerHTML=S.players.map(P=>{ const s=P.ship; const st=s.sunk?'sunk':('⛵'+s.cargo.length+'/'+s.cap);
+    return '<div class="sc'+(P.id===S.cur&&!S.over?' cur':'')+'"><span class="dot" style="background:'+P.color+'"></span><span class="nm">'+esc(P.name)+(P.ai?'':' (you)')+'</span><span>🏠'+goldOf(P)+'g</span><span>'+st+'</span><span class="hp"><i style="width:'+(100*s.hp/s.maxHp)+'%"></i></span></div>'; }).join('');
+  const cur=curP(); let st='';
+  if(S.over) st='Game over — '+S.winners.map(i=>esc(S.players[i].name)).join(' & ')+' '+(S.winners.length>1?'tie':'wins')+'.';
+  else if(S.phase==='event') st='Event window: '+esc(cur.name)+' ended their turn.';
+  else if(!cur.ai && S.skip) st=me.ship.sunk?'Your ship is sunk. Waiting to respawn…':'Your ship is back at home. No actions this respawn turn.';
+  else if(!cur.ai){ const bits=[]; bits.push('<b>Your turn</b> · '+S.actions+' action'+(S.actions===1?'':'s')+' left · round '+S.round);
+    if(UI.mode==='turn') bits.push('Tap a yellow hex to face that way.');
+    else if(S.actions>0) bits.push('Blue = sail · red ring = fire'+(S.armed.shot?' ('+CARDS[S.armed.shot].name+' loaded)':'')+(S.armed.gunner?' · Gunner +1 range':'')+(S.armed.navigator?' · Navigator +1 hex':''));
+    else bits.push('No actions left. Tap End.');
+    if(me.ship.chainNow) bits.push('Chain-shot: 1 hex sails.'); if(me.ship.grapeNow) bits.push('Grape-shot: no firing.');
+    st=bits.join('<br>'); }
+  else st=esc(cur.name)+' is taking their turn… (round '+S.round+')';
+  $('status').innerHTML=st;
+  const my=!cur.ai && S.phase==='turn' && !S.over && !S.skip;
+  $('bLoad').disabled=!(my && canLoadAction(0)); $('bUnload').disabled=!(my && canUnloadAction(0));
+  $('bTurn').disabled=!(my && S.actions>0); $('bTurn').classList.toggle('hot',UI.mode==='turn');
+  $('bEnd').disabled=!my; $('bEnd').classList.toggle('hot', my && S.actions===0);
+  $('hand').innerHTML=me.hand.map((id,i)=>{ const C=CARDS[id]; const ok=!me.ai&&cardPlayable(0,i); return '<div class="card '+C.type+(ok?' ok':'')+(canPlayCard(me)?'':' dim')+'" data-i="'+i+'"><b>'+C.name+'</b>'+TYPE_LABEL[C.type]+(ok?' · tap to play':'')+'</div>'; }).join('')
+    + (canPlayCard(me)?'':'');
+  const L=$('log'); L.innerHTML=S.log.slice(-60).map(e=>'<div style="color:'+(e.p>=0?lighten(S.players[e.p].color):'#ffe9a8')+'">'+esc(e.t)+'</div>').join(''); L.scrollTop=L.scrollHeight;
+  $('bSpeed').textContent=UI.speed===1?'▶':UI.speed===2?'⏩':'⏸';
+  if(S.phase==='event' && !modalOpen()) eventPrompt();
+  if(S.over && !modalOpen() && !UI.shownOver){ UI.shownOver=true; setTimeout(gameOverModal,700); }
+}
+function lighten(hex){ const n=parseInt(hex.slice(1),16); const f=x=>Math.min(255,Math.round(x+(255-x)*0.45)); return 'rgb('+f(n>>16)+','+f((n>>8)&255)+','+f(n&255)+')'; }
+LOGHOOK=null;
+// ---------- Modals ----------
+function modalOpen(){ return $('modal').classList.contains('on'); }
+function showModal(html){ $('mbox').innerHTML=html; $('modal').classList.add('on'); }
+function closeModal(){ $('modal').classList.remove('on'); }
+function helpHTML(){ return '<h1>How to play</h1>'+
+ '<p><b>Goal (Gold Grab):</b> most gold on your home island when the last chest is home or sunk.</p>'+
+ '<h2>Your turn: 2 actions</h2><ul>'+
+ '<li><b>Sail</b>: tap a blue hex. Up to 2 hexes, never backward; each step goes straight or one side left/right.</li>'+
+ '<li><b>Fire</b>: tap an enemy with a red ring (within 2 hexes). Both cannons roll a die; the target loses the faces.</li>'+
+ '<li><b>Load</b>: next to a treasure island, take its face-down chests (5 max). <b>Unload</b>: next to your home island; chests are opened and counted. Only one load/unload per turn.</li>'+
+ '<li><b>Turn</b>: face any direction (costs an action). Then <b>End</b>.</li></ul>'+
+ '<h2>Cards (hand of 3, one per round)</h2><ul><li><b>Shots</b> right before firing · <b>Crew</b> on your turn · <b>Events</b> at the end of someone else\'s turn (the game will ask you).</li></ul>'+
+ '<h2>Sinking</h2><ul><li>At 0 HP your ship sinks. The shooter grabs half your chests (rounded down) if it has room; the rest sink. After one full round you\'re back at home with full HP (no actions that turn).</li></ul>'+
+ '<p>Laptop: click, or keys <b>L</b> load · <b>U</b> unload · <b>T</b> turn · <b>E</b> end · <b>1–3</b> cards · <b>H</b> help · <b>F</b> AI speed.</p>'+
+ '<p style="font-size:12px;color:#555">Rules come from Paul\'s Aargh! Gold Grab (2015–2017), Cards.doc (2017) and the 2018 Dev Blog. v0.1 fills: hex grid, 4 players, chest values 1–5, load takes all that fit, Turn action, shots always land, Typhoon north fixed. See CORE_LOOP.md.</p>'+
+ '<div class="row"><button onclick="closeModal();refresh()">Got it</button></div>'; }
+function miniMap(){ const c=document.createElement('canvas'); const w=150,h=96; c.width=w*2; c.height=h*2; c.style.width=w+'px'; c.style.height=h+'px'; const x=c.getContext('2d'); x.scale(2,2);
+  x.fillStyle='#1c6a96'; x.fillRect(0,0,w,h); const R=w/(1.5*(COLS-1)+2); const pp=(cc,r)=>({x:R+R*1.5*cc, y:R*0.9+R*Math.sqrt(3)*(r+0.5*(cc&1))});
+  STORY.isles.forEach(hs=>hs.forEach(([cc,r])=>{ const p=pp(cc,r); x.beginPath(); x.arc(p.x,p.y,R*0.85,0,7); x.fillStyle='#e7cf8f'; x.fill(); }));
+  STORY.homes.forEach(([cc,r],i)=>{ const p=pp(cc,r); x.beginPath(); x.arc(p.x,p.y,R*0.95,0,7); x.fillStyle=COLORS[i]; x.fill(); x.fillStyle='#fff'; x.font='bold 8px sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText(LETTERS[i],p.x,p.y); });
+  return c; }
+function titleScreen(){
+  const saved=localStorage.getItem('ffa.name')||'Fisher A';
+  showModal('<h1>Fisher Family Adventures</h1><p style="margin:0 0 6px;color:#555">v'+VERSION+' prototype · the game is the referee</p>'+
+   '<div class="story"><div id="mm"></div><div><b>Story card: Family Gold Grab</b><p>Every Fisher for themself · 4 Fishers · 1 ship each.</p><p>12 face-down treasure chests sit on 8 islands. Haul them home. Most gold at your home island when the last chest is home or sunk wins.</p></div></div>'+
+   '<div class="locked">🔒 Coming later: a haunted-islands story with Great-great-uncle Ebenezer Fisher (from the 2018 Dev Blog). Not in v0.1.</div>'+
+   '<p style="margin-top:8px">Your Fisher\'s name: <input id="nm" maxlength="18" value="'+esc(saved)+'"> <span class="tag">placeholder names; the roster isn\'t written yet</span></p>'+
+   '<div class="row"><button id="go">Set sail</button><button class="alt" id="hh">How to play</button></div>');
+  $('mm').appendChild(miniMap());
+  $('go').onclick=()=>{ const n=($('nm').value||'Fisher A').trim().slice(0,18)||'Fisher A'; localStorage.setItem('ffa.name',n); closeModal(); start({names:[n]}); };
+  $('hh').onclick=()=>{ showModal(helpHTML()); const b=$('mbox').querySelector('button'); b.onclick=()=>titleScreen(); };
+}
+function cardModal(i){
+  const me=S.players[0], id=me.hand[i]; if(!id) return; const C=CARDS[id]; const ok=cardPlayable(0,i);
+  let why=''; if(!ok){ if(!canPlayCard(me)) why='You already played a card this round.'; else if(C.type==='event') why='Events are played at the end of another Fisher\'s turn; the game will ask you.'; else why='Not usable right now.'; }
+  showModal('<h2>'+C.name+' <span class="tag">'+TYPE_LABEL[C.type]+'</span></h2><p>'+C.text+'</p>'+(why?'<p style="color:#a33">'+why+'</p>':'')+
+   '<div class="row">'+(ok?'<button id="pl">Play</button>':'')+'<button class="alt" onclick="closeModal()">Close</button></div>');
+  if(ok) $('pl').onclick=()=>{ closeModal(); playCard(0,i); refresh(); };
+}
+function eventPrompt(){
+  const me=S.players[0]; const prev=curP();
+  const evs=me.hand.map((id,i)=>({id,i})).filter(x=>CARDS[x.id].type==='event');
+  showModal('<h2>'+esc(prev.name)+' ended their turn</h2><p>You may play one Event card now (counts as your card this round).</p>'+
+    evs.map(x=>{ const ok=cardPlayable(0,x.i); return '<p><b>'+CARDS[x.id].name+'</b> — '+CARDS[x.id].text+(ok?'':' <i style="color:#a33">(no legal target)</i>')+'</p>'; }).join('')+
+    '<div class="row">'+evs.map(x=>cardPlayable(0,x.i)?'<button data-ev="'+x.i+'">'+CARDS[x.id].name+'</button>':'').join('')+'<button class="alt" id="sk">Skip</button></div>');
+  $('sk').onclick=()=>{ closeModal(); resolveEventPrompt(-1); after(); };
+  $('mbox').querySelectorAll('[data-ev]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.ev; if(me.hand[i]==='mixup') mixupPick(i); else { closeModal(); resolveEventPrompt(i); after(); } });
+}
+function mixupPick(i, from){
+  const ships=S.players.filter(P=>!P.ship.sunk);
+  if(from==null){ showModal('<h2>Loading Mixup</h2><p>Take 1 chest from which ship?</p><div class="row">'+ships.filter(P=>P.ship.cargo.length).map(P=>'<button data-f="'+P.id+'" style="background:'+P.color+'">'+esc(P.name)+' ('+P.ship.cargo.length+')</button>').join('')+'<button class="alt" id="bk">Back</button></div>');
+    $('mbox').querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>mixupPick(i,+b.dataset.f)); $('bk').onclick=()=>eventPrompt(); return; }
+  showModal('<h2>Loading Mixup</h2><p>Give it to which ship?</p><div class="row">'+ships.filter(P=>mixupOK(from,P.id)).map(P=>'<button data-t="'+P.id+'" style="background:'+P.color+'">'+esc(P.name)+'</button>').join('')+'<button class="alt" id="bk">Back</button></div>');
+  $('mbox').querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{ closeModal(); resolveEventPrompt(i,{from,to:+b.dataset.t}); after(); }); $('bk').onclick=()=>mixupPick(i);
+}
+function gameOverModal(){
+  const rank=S.players.slice().sort((a,b)=>goldOf(b)-goldOf(a));
+  showModal('<h1>'+(S.winners.includes(0)?(S.winners.length>1?'Shared victory!':'You win!'):esc(S.players[S.winners[0]].name)+' wins')+'</h1>'+
+   rank.map((P,k)=>'<p><b style="color:'+P.color+'">'+(k+1)+'. '+esc(P.name)+'</b> — '+goldOf(P)+' gold ('+P.homeChests.length+' chests)</p>').join('')+
+   '<p style="color:#555">'+S.lost.length+' chest'+(S.lost.length===1?'':'s')+' went down with sunk ships. Rounds played: '+S.round+'.</p>'+
+   '<div class="row"><button id="again">Play again</button><button class="alt" onclick="closeModal()">Look at the board</button></div>');
+  $('again').onclick=()=>{ closeModal(); start({names:[S.players[0].name], allAI:S.players[0].ai}); };
+}
+
+// ---------- Driver ----------
+let TIMER=null;
+function delay(){ return UI.speed===2?160:UI.speed===0?1e9:520; }
+function kick(){ clearTimeout(TIMER); if(!S||S.over||S.phase!=='turn') return; const P=curP();
+  if(S.skip){ TIMER=setTimeout(()=>{ endTurn(); after(); }, Math.min(delay(),900)); return; }
+  if(P.ai && UI.speed!==0) TIMER=setTimeout(()=>{ if(S.phase!=='turn'||!curP().ai) return; if(!aiAct(S.cur)) endTurn(); after(); }, delay()); }
+function after(){ refresh(); kick(); }
+function start(opts){ UI.mode='normal'; UI.shownOver=false; FX=[]; newGame(opts||{}); after(); }
+
+cv.addEventListener('pointerdown', e=>{
+  if(!S||modalOpen()) return; const rect=cv.getBoundingClientRect(); const h=hexAt(e.clientX-rect.left, e.clientY-rect.top); if(!h) return;
+  const me=S.players[0]; if(me.ai||S.cur!==0||S.phase!=='turn'||S.skip||S.over) return; const [c,r]=h; const s=me.ship;
+  if(UI.mode==='turn'){ for(let d=0;d<6;d++){ const n=nb(s.c,s.r,d); if(n.c===c&&n.r===r){ doTurn(0,d); break; } } UI.mode='normal'; after(); return; }
+  const T=shipAt(c,r,0); if(T && fireTargets(0).includes(T.id)){ doFire(0,T.id); after(); return; }
+  if(doMove(0,c,r)){ after(); return; }
+  const id=S.isleAt[K(c,r)]; if(id!=null){ if(S.islands[id].home===0 && canUnloadAction(0)) doUnload(0); else if(S.islands[id].home<0 && canLoadAction(0) && islandNeighbors(s.c,s.r).includes(id)) doLoad(0); after(); }
+});
+$('bLoad').onclick=()=>{ doLoad(0); after(); };
+$('bUnload').onclick=()=>{ doUnload(0); after(); };
+$('bTurn').onclick=()=>{ UI.mode=UI.mode==='turn'?'normal':'turn'; refresh(); };
+$('bEnd').onclick=()=>{ UI.mode='normal'; if(S.cur===0&&!S.players[0].ai) endTurn(); after(); };
+$('bHelp').onclick=()=>showModal(helpHTML());
+$('bSpeed').onclick=()=>{ UI.speed=(UI.speed+1)%3; after(); };
+$('bNew').onclick=()=>{ if(confirm('Start a new game?')) start({names:[S.players[0].name]}); };
+$('hand').addEventListener('click', e=>{ const el=e.target.closest('.card'); if(el) cardModal(+el.dataset.i); });
+addEventListener('keydown', e=>{
+  if(e.target.tagName==='INPUT') return; const k=e.key.toLowerCase();
+  if(k==='escape'){ if(modalOpen()&&S&&S.phase!=='event') closeModal(); UI.mode='normal'; refresh(); return; }
+  if(modalOpen()) return;
+  if(k==='h'||k==='?') showModal(helpHTML()); else if(k==='l') $('bLoad').click(); else if(k==='u') $('bUnload').click();
+  else if(k==='t') $('bTurn').click(); else if(k==='e'||k==='enter') $('bEnd').click(); else if(k==='f') $('bSpeed').click();
+  else if(['1','2','3'].includes(k)) cardModal(+k-1);
+});
+addEventListener('resize', ()=>{ resize(); });
+resize(); requestAnimationFrame(loop);
+
+// ---------- Debug hook for tests ----------
+window.__ffa = {
+  version:VERSION, get S(){return S;},
+  state:()=>({round:S.round,tick:S.tick,cur:S.cur,phase:S.phase,over:S.over,winners:S.winners,actions:S.actions,chestsLeft:chestsLeft(),lost:S.lost.length,
+    players:S.players.map(P=>({name:P.name,ai:P.ai,hp:P.ship.hp,sunk:P.ship.sunk,c:P.ship.c,r:P.ship.r,f:P.ship.f,cargo:P.ship.cargo.length,gold:goldOf(P),hand:P.hand.slice()})),stats:S.stats}),
+  newGame:(o)=>{ clearTimeout(TIMER); UI.shownOver=true; const r=newGame(o); refresh(); return !!r; },
+  start, runToEnd:(n)=>{ clearTimeout(TIMER); const r=runToEnd(n); refresh(); return r; },
+  aiFullTurn:()=>{ aiFullTurn(); refresh(); }, legalMoves, fireTargets, doMove, doFire, doLoad, doUnload, doTurn, playCard, cardPlayable, endTurn:()=>{const r=endTurn(); refresh(); return r;},
+  resolveEventPrompt, setSpeed:(v)=>{UI.speed=v;},
+  setShip:(pid,c,r,f)=>{ const s=S.players[pid].ship; s.c=c; s.r=r; if(f!=null) s.f=f; s.anim=null; refresh(); },
+  giveCard:(pid,id)=>{ S.players[pid].hand[0]=id; refresh(); },
+  setCargo:(pid,vals)=>{ S.players[pid].ship.cargo=vals.slice(); refresh(); },
+  hexToPx:(c,r)=>{ const p=hp(c,r), b=cv.getBoundingClientRect(); return {x:b.left+p.x, y:b.top+p.y}; },
+  refresh, closeModal, typhoon, monkeys
+};
+if(Q.get('auto')==='1'){ start({allAI:true}); UI.speed=2; after(); }
+else if(Q.get('skip')==='1'){ start({}); }
+else titleScreen();
+</script>
+</body>
+</html>
