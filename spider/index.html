@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Spider Jockey">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Spider Jockey v0.3</title>
+<title>Spider Jockey v0.4</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#100c08;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -24,16 +24,18 @@ canvas{display:block;touch-action:none}
 #msg{top:34%;left:50%;transform:translate(-50%,-50%);font-size:26px;font-weight:bold;color:#ffd84a;opacity:0;transition:opacity .25s}
 #trick{top:20%;left:50%;transform:translateX(-50%);font-size:18px;font-weight:bold;color:#ffb040;text-align:center}
 #abHint{top:52px;left:8px;font-size:12px;opacity:.9}
+#boostHud{top:52px;left:50%;transform:translateX(-50%);font-size:16px;font-weight:800;color:#ffb040;display:none;letter-spacing:.02em}
+#boostHud.on{display:block}
 #topbtns{position:fixed;top:28px;right:8px;z-index:6;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:55%}
 #topbtns button{background:rgba(0,0,0,.45);color:#fff;border:1px solid #fff8;border-radius:6px;font-size:12px;padding:4px 8px}
 .btn{position:fixed;z-index:6;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:14px;border:3px solid rgba(255,255,255,.7);touch-action:none;text-align:center;line-height:1.1}
 .btn.on{filter:brightness(1.6);transform:scale(.94)}
-#bBoost{right:24px;bottom:22px;width:96px;height:96px;background:rgba(255,120,30,.45)}
+#bBoost{display:none!important}
 #bL{right:150px;bottom:70px;width:78px;height:78px;background:rgba(40,200,255,.4)}
 #bR{right:46px;bottom:140px;width:78px;height:78px;background:rgba(255,80,200,.4)}
-#bT{left:22px;bottom:150px;width:72px;height:72px;background:rgba(180,80,255,.45);font-size:13px}
+#bT{right:24px;bottom:22px;left:auto;width:96px;height:96px;background:rgba(180,80,255,.45);font-size:13px}
 #bT.off{opacity:.4}
-#bT.ready{opacity:1;box-shadow:0 0 12px #c9f}
+#bT.ready{opacity:1;box-shadow:0 0 14px #c9f}
 #stickBase,#stickKnob{position:fixed;z-index:6;border-radius:50%;pointer-events:none;display:none}
 #stickBase{width:120px;height:120px;margin:-60px 0 0 -60px;border:3px solid rgba(255,255,255,.5);background:rgba(255,255,255,.08)}
 #stickKnob{width:54px;height:54px;margin:-27px 0 0 -27px;background:rgba(255,255,255,.55)}
@@ -45,15 +47,14 @@ body:not(.desk) #cross,body.touched #cross{display:none!important}
 body.lay-hybrid #bT{display:none!important}
 body.lay-hybrid #bR{right:16px;bottom:16px;width:92px;height:92px}
 body.lay-hybrid #bL{right:126px;bottom:16px;width:92px;height:92px}
-body.lay-hybrid #bBoost{right:72px;bottom:126px;width:90px;height:90px}
-body.lay-hybrid #bAb{display:flex}
-#bAb{left:18px;bottom:22px;width:78px;height:78px;background:rgba(180,80,255,.45);font-size:12px;display:none}
+body.lay-hybrid #bAb{display:flex;right:72px;bottom:126px;left:auto;width:90px;height:90px}
+#bAb{right:24px;bottom:22px;left:auto;width:96px;height:96px;background:rgba(180,80,255,.45);font-size:12px;display:none}
 body.lay-classic #bAb{display:none}
 body.lay-gesture .btn,body.lay-gesture #bAb{display:none!important}
 .gz{position:fixed;top:66px;bottom:8px;z-index:4;pointer-events:none;border:2px dashed rgba(255,255,255,.45);border-radius:14px;display:none;align-items:center;justify-content:center;text-align:center;color:#fff;font-weight:bold;font-size:15px;text-shadow:0 0 3px #000;transition:opacity .6s;background:rgba(255,255,255,.04)}
 #gzL{left:calc(50% + 6px);right:calc(25% + 3px)}#gzR{left:calc(75% + 3px);right:6px}
 #gzUp{position:fixed;left:50%;right:0;top:74px;z-index:4;pointer-events:none;text-align:center;font-size:13px;font-weight:bold;color:#ffcf7a;display:none;text-shadow:0 0 3px #000}
-#gzAb{position:fixed;left:8px;bottom:8px;width:28%;height:22%;z-index:4;pointer-events:none;border:2px dashed rgba(200,140,255,.5);border-radius:14px;display:none;align-items:center;justify-content:center;color:#e6c;font-weight:bold;font-size:14px;text-shadow:0 0 3px #000}
+#gzAb{position:fixed;left:auto;right:8px;bottom:8px;width:22%;height:20%;z-index:4;pointer-events:none;border:2px dashed rgba(200,140,255,.5);border-radius:14px;display:none;align-items:center;justify-content:center;color:#e6c;font-weight:bold;font-size:14px;text-shadow:0 0 3px #000}
 body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp,body.lay-gesture.gzon #gzAb{display:flex}
 #ovl{position:fixed;inset:0;height:100dvh;z-index:15;background:rgba(0,0,0,.72);display:none;align-items:flex-start;justify-content:center;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 0;box-sizing:border-box;color:#fff;text-align:center}
 #ovl.show{display:flex}
@@ -94,14 +95,12 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp,body.lay-gesture.gzon #gzA
 #rotHint{position:fixed;left:50%;bottom:8px;transform:translateX(-50%);z-index:8;background:rgba(0,0,0,.55);color:#ffd84a;padding:4px 10px;border-radius:8px;font-size:12px;display:none;pointer-events:none}
 @media (orientation:portrait){
   #rotHint{display:block}
-  #bBoost{right:16px;bottom:16px;width:80px;height:80px}
   #bL{right:112px;bottom:16px;width:70px;height:70px}
   #bR{right:16px;bottom:104px;width:70px;height:70px}
   body.lay-hybrid #bR{right:12px;bottom:12px;width:78px;height:78px}
   body.lay-hybrid #bL{right:100px;bottom:12px;width:78px;height:78px}
-  body.lay-hybrid #bBoost{right:52px;bottom:100px;width:76px;height:76px}
-  body.lay-hybrid #bAb{left:12px;bottom:16px;width:68px;height:68px}
-  #bT,#bAb{left:12px;bottom:16px;width:68px;height:68px}
+  body.lay-hybrid #bAb{right:52px;bottom:100px;left:auto;width:76px;height:76px}
+  #bT,#bAb{right:16px;bottom:16px;left:auto;width:80px;height:80px}
   #topbtns{top:48px;max-width:48%}
   #score{font-size:16px}
   #ovl .card{width:94%;padding:10px 12px}
@@ -129,17 +128,18 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp,body.lay-gesture.gzon #gzA
 <script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {}));</script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 </head><body>
-<div id="ver" class="hud">Spider Jockey v0.3</div>
+<div id="ver" class="hud">Spider Jockey v0.4</div>
 <div id="score" class="hud">0 — 0</div><div id="rtime" class="hud"></div><div id="rcount" class="hud"></div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
 <div id="abHint" class="hud"></div>
+<div id="boostHud" class="hud"></div>
 <div id="topbtns"><button id="bPause">⏸</button><button id="bCtl">🎮 HYBRID</button><button id="bDiff">AI: NORMAL</button><button id="bLQ">LQ: on</button><button id="bFS">⛶</button></div>
 <div id="cross"></div>
 <div id="stickBase"></div><div id="stickKnob"></div><div id="stickHint" class="hud">drag left side to steer</div>
 <div id="bL" class="btn">◀ SILK</div><div id="bR" class="btn">SILK ▶</div><div id="bBoost" class="btn">BOOST</div><div id="bT" class="btn">ABILITY</div><div id="bAb" class="btn">ABILITY</div>
 <div id="gzL" class="gz">◀ SILK<br>tap / hold</div><div id="gzR" class="gz">SILK ▶<br>tap / hold</div>
-<div id="gzUp">flick ▲ = BOOST (keep holding)</div>
+<div id="gzUp">ABILITY lives on the right now — no boost button</div>
 <div id="gzAb">ABILITY</div>
 <div id="ovl"><div class="card"></div></div>
 <div id="wandaHost"><canvas id="wandaCv" width="160" height="180" aria-hidden="true"></canvas></div>
@@ -153,7 +153,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const angDiff = (a, b) => { let d = (b - a + Math.PI) % (Math.PI * 2); if (d < 0) d += Math.PI * 2; return d - Math.PI; };
 const TOUCH = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
 if (!TOUCH) document.body.classList.add('desk');
-const VERSION = 'Spider Jockey v0.3';
+const VERSION = 'Spider Jockey v0.4';
 const QS = new URLSearchParams(location.search);
 
 // ---------------- species + Wanda facts ----------------
@@ -236,7 +236,9 @@ const T = {
   TIP_R: 0.45, ROPE_K: 22, CARRY_L: 5.5, WHIP: 1.4, LOFT: 2.4, RIDER_R: 1.2,
   GRAV: 28, BALL_R: 1.25, BALL_BOUNCE: 0.55, BALL_ROLL: 0.45, BALL_AIR: 0.08, BALL_WALL: 0.65,
   GZ: 46, GW: 11, GH: 6.5, MAX_BALLS: 1, FIRST: 1.1, AFTER: 1.4, PTS_GOAL: 25, PTS_ASSIST: 8,
-  STUN: 0.4, WEB_HOLD: 1.15, KNOCK: 0.65
+  STUN: 0.4, WEB_HOLD: 1.15, KNOCK: 0.65,
+  CLIMB: 0.95, SLIDE_ACC: 24, BOOST_DUR: 7.5, BOOST_CAP: 2, BOOST_SPAWN: [7, 12],
+  STEER_SIGN: -1 // match Rocket Jockey 3D; v0.3 felt reversed on Paul's phone
 };
 const TEAMS = [{ name:'GREEN', css:'#7dff8a', hex:0x2ad04a }, { name:'RED', css:'#ff7a7a', hex:0xe03030 }];
 const DIFFS = {
@@ -332,6 +334,253 @@ function buildGoals() {
   }
 }
 buildGoals();
+
+// ---------------- playground (stairs, ramps, slides) ----------------
+const PLAY = [];
+const playGroup = new THREE.Group(); playGroup.name = 'playground'; scene.add(playGroup);
+function playMat(c, extra) { return new THREE.MeshLambertMaterial({ color: c, flatShading: true, ...(extra || {}) }); }
+function localXZ(x, z, p) {
+  // Inverse of worldDir: yaw 0 faces +Z, +yaw toward +X (same as rider heading).
+  const dx = x - p.ox, dz = z - p.oz, c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+  return { lx: c * dx - s * dz, lz: s * dx + c * dz };
+}
+function worldDir(lx, lz, p) {
+  const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+  return { x: lx * c + lz * s, z: -lx * s + lz * c };
+}
+function addPlayBox(w, h, d, c, x, y, z, yaw, parent) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), playMat(c));
+  m.position.set(x, y, z); m.rotation.y = yaw || 0; m.castShadow = m.receiveShadow = true; (parent || playGroup).add(m); return m;
+}
+function registerPlay(p) { PLAY.push(p); return p; }
+
+function buildPlayground() {
+  playGroup.clear(); PLAY.length = 0;
+  // Keep the mid circle (r≈10) and the goal mouths (|z| > 36, |x| < 12) clear.
+  // 1) SW stairs: climb west, away from center
+  (function () {
+    const p = registerPlay({ kind: 'stairs', ox: -16, oz: -18, yaw: -Math.PI / 2, length: 8, width: 6.2, height: 3.2, steps: 4, id: 'stairs-sw' });
+    const col = 0xf0c030, lip = 0xe07020;
+    for (let i = 0; i < p.steps; i++) {
+      const y = ((i + 1) / p.steps) * p.height, zLoc = (i + 0.5) / p.steps * p.length, d = p.length / p.steps;
+      const w = worldDir(0, zLoc, p);
+      addPlayBox(p.width, y, d - 0.08, i % 2 ? col : lip, p.ox + w.x, y / 2, p.oz + w.z, p.yaw);
+    }
+    const top = worldDir(0, p.length + 1.4, p);
+    addPlayBox(p.width, p.height, 2.8, 0xe8a020, p.ox + top.x, p.height / 2, p.oz + top.z, p.yaw);
+    registerPlay({ kind: 'platform', ox: p.ox + top.x, oz: p.oz + top.z, yaw: p.yaw, length: 2.8, width: p.width, height: p.height, id: 'plat-sw' });
+  })();
+  // 2) SE ramp: climb east
+  (function () {
+    const p = registerPlay({ kind: 'ramp', ox: 16, oz: -18, yaw: Math.PI / 2, length: 9, width: 6.2, height: 3.2, id: 'ramp-se' });
+    const slope = Math.atan2(p.height, p.length), len = Math.hypot(p.length, p.height);
+    const mid = worldDir(0, p.length / 2, p);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(p.width, 0.35, len), playMat(0x7adf3a));
+    m.position.set(p.ox + mid.x, p.height / 2, p.oz + mid.z);
+    m.rotation.order = 'YXZ'; m.rotation.y = p.yaw; m.rotation.x = -slope;
+    m.castShadow = m.receiveShadow = true; playGroup.add(m);
+    // side rails
+    for (const s of [-1, 1]) {
+      const r = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.7, len), playMat(0x2a6a18));
+      r.position.set(p.ox + mid.x, p.height / 2 + 0.4, p.oz + mid.z);
+      r.rotation.order = 'YXZ'; r.rotation.y = p.yaw; r.rotation.x = -slope;
+      const off = worldDir(s * (p.width / 2 - 0.15), 0, p); r.position.x += off.x; r.position.z += off.z;
+      r.castShadow = true; playGroup.add(r);
+    }
+    const top = worldDir(0, p.length + 1.3, p);
+    addPlayBox(p.width, p.height, 2.6, 0x5aaf28, p.ox + top.x, p.height / 2, p.oz + top.z, p.yaw);
+    registerPlay({ kind: 'platform', ox: p.ox + top.x, oz: p.oz + top.z, yaw: p.yaw, length: 2.6, width: p.width, height: p.height, id: 'plat-se' });
+  })();
+  // 3) NE slide: high at the east, down toward midfield
+  (function () {
+    const p = registerPlay({ kind: 'slide', ox: 25, oz: 18, yaw: -Math.PI / 2, length: 10, width: 4.6, height: 3.6, id: 'slide-ne' });
+    const plat = worldDir(0, -1.5, p);
+    addPlayBox(p.width + 0.8, p.height, 3.0, 0x3a88d0, p.ox + plat.x, p.height / 2, p.oz + plat.z, p.yaw);
+    registerPlay({ kind: 'platform', ox: p.ox + plat.x, oz: p.oz + plat.z, yaw: p.yaw, length: 3.0, width: p.width + 0.8, height: p.height, id: 'plat-ne' });
+    const slope = Math.atan2(p.height, p.length), len = Math.hypot(p.length, p.height);
+    const mid = worldDir(0, p.length / 2, p);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(p.width, 0.28, len), playMat(0x5ad4f0));
+    m.position.set(p.ox + mid.x, p.height / 2, p.oz + mid.z);
+    m.rotation.order = 'YXZ'; m.rotation.y = p.yaw; m.rotation.x = slope; // high at lz=0, low at lz=length
+    m.castShadow = m.receiveShadow = true; playGroup.add(m);
+    for (const s of [-1, 1]) {
+      const r = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, len), playMat(0xff6aa8));
+      r.position.set(p.ox + mid.x, p.height / 2 + 0.4, p.oz + mid.z);
+      r.rotation.order = 'YXZ'; r.rotation.y = p.yaw; r.rotation.x = slope;
+      const off = worldDir(s * (p.width / 2 - 0.1), 0, p); r.position.x += off.x; r.position.z += off.z;
+      r.castShadow = true; playGroup.add(r);
+    }
+  })();
+  // 4) NW ramp: climb north
+  (function () {
+    const p = registerPlay({ kind: 'ramp', ox: -22, oz: 14, yaw: 0, length: 9, width: 6.2, height: 3.2, id: 'ramp-nw' });
+    const slope = Math.atan2(p.height, p.length), len = Math.hypot(p.length, p.height);
+    const mid = worldDir(0, p.length / 2, p);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(p.width, 0.35, len), playMat(0xff8a3a));
+    m.position.set(p.ox + mid.x, p.height / 2, p.oz + mid.z);
+    m.rotation.order = 'YXZ'; m.rotation.y = p.yaw; m.rotation.x = -slope;
+    m.castShadow = m.receiveShadow = true; playGroup.add(m);
+    for (const s of [-1, 1]) {
+      const r = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.7, len), playMat(0xa04018));
+      r.position.set(p.ox + mid.x, p.height / 2 + 0.4, p.oz + mid.z);
+      r.rotation.order = 'YXZ'; r.rotation.y = p.yaw; r.rotation.x = -slope;
+      const off = worldDir(s * (p.width / 2 - 0.15), 0, p); r.position.x += off.x; r.position.z += off.z;
+      r.castShadow = true; playGroup.add(r);
+    }
+    const top = worldDir(0, p.length + 1.3, p);
+    addPlayBox(p.width, p.height, 2.6, 0xd06820, p.ox + top.x, p.height / 2, p.oz + top.z, p.yaw);
+    registerPlay({ kind: 'platform', ox: p.ox + top.x, oz: p.oz + top.z, yaw: p.yaw, length: 2.6, width: p.width, height: p.height, id: 'plat-nw' });
+  })();
+}
+
+function groundAt(x, z) {
+  let y = 0, kind = 'flat', sx = 0, sz = 0, id = null, piece = null;
+  for (const p of PLAY) {
+    const { lx, lz } = localXZ(x, z, p);
+    const halfL = p.length / 2, halfW = p.width / 2;
+    // platforms are centered on ox,oz; ramps/stairs/slides start at lz=0 and go to length
+    let on = false, gy = 0, t = 0;
+    if (p.kind === 'platform') {
+      if (Math.abs(lx) <= halfW && Math.abs(lz) <= halfL) { on = true; gy = p.height; }
+    } else {
+      if (Math.abs(lx) <= halfW && lz >= -0.15 && lz <= p.length + 0.15) {
+        on = true; t = clamp(lz / p.length, 0, 1);
+        if (p.kind === 'stairs') {
+          const steps = p.steps || 4;
+          const i = Math.min(steps, Math.max(1, Math.ceil(t * steps)));
+          gy = (i / steps) * p.height;
+        } else if (p.kind === 'ramp') gy = t * p.height;
+        else if (p.kind === 'slide') gy = (1 - t) * p.height;
+      }
+    }
+    if (on && gy >= y - 0.001) {
+      y = gy; kind = p.kind; id = p.id; piece = p;
+      if (p.kind === 'slide') {
+        const d = worldDir(0, 1, p); sx = d.x; sz = d.z; // down the slide (local +Z, height falls)
+      } else if (p.kind === 'ramp') {
+        const d = worldDir(0, 1, p); sx = d.x; sz = d.z;
+      } else { sx = 0; sz = 0; }
+    }
+  }
+  return { y, kind, sx, sz, id, piece };
+}
+
+function pushOutPlay(ent, rad, isBall) {
+  // If the body is inside a solid (under a platform/ramp), push it out horizontally.
+  for (const p of PLAY) {
+    const { lx, lz } = localXZ(ent.x, ent.z, p);
+    let inX, inZ, h = p.height;
+    if (p.kind === 'platform') { inX = Math.abs(lx) < p.width / 2 + rad; inZ = Math.abs(lz) < p.length / 2 + rad; }
+    else { inX = Math.abs(lx) < p.width / 2 + rad; inZ = lz > -rad && lz < p.length + rad; }
+    if (!inX || !inZ) continue;
+    const g = groundAt(ent.x, ent.z);
+    const floor = isBall ? T.BALL_R : 0;
+    if (ent.y >= g.y - 0.2 + (isBall ? T.BALL_R : 0)) continue; // on or above the surface
+    // too high to climb? push out
+    const climb = isBall ? 0.55 : T.CLIMB;
+    if (g.y - (ent.y - (isBall ? T.BALL_R : 0)) <= climb && !isBall) continue;
+    // push to nearest edge in local space
+    let nx = 0, nz = 0;
+    if (p.kind === 'platform') {
+      const ex = p.width / 2 + rad - Math.abs(lx), ez = p.length / 2 + rad - Math.abs(lz);
+      if (ex < ez) nx = Math.sign(lx || 1);
+      else nz = Math.sign(lz || 1);
+    } else {
+      const left = p.width / 2 + rad - Math.abs(lx), back = lz + rad, fwd = p.length + rad - lz;
+      const m = Math.min(left, back, fwd);
+      if (m === left) nx = Math.sign(lx || 1);
+      else if (m === back) nz = -1;
+      else nz = 1;
+    }
+    const w = worldDir(nx, nz, p);
+    ent.x += w.x * 0.35; ent.z += w.z * 0.35;
+    const along = (ent.vx || 0) * w.x + (ent.vz || 0) * w.z;
+    if (along < 0) { ent.vx -= w.x * along * 1.2; ent.vz -= w.z * along * 1.2; }
+  }
+}
+
+// ---------------- boost pickups ----------------
+const boosts = []; // {x,z,y,mesh,t}
+let boostSpawnT = 2.5;
+function makeBoostMesh() {
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.7, 0), new THREE.MeshLambertMaterial({ color: 0xff9020, emissive: 0xcc5500, flatShading: true }));
+  core.name = 'core'; g.add(core);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.1, 6, 16), new THREE.MeshBasicMaterial({ color: 0xffe080 }));
+  ring.rotation.x = Math.PI / 2; g.add(ring);
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.85, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffc070, transparent: true, opacity: 0.28 }));
+  g.add(glow);
+  return g;
+}
+function clearBoosts() { for (const b of boosts) scene.remove(b.mesh); boosts.length = 0; }
+function isBoostSpawnClear(x, z) {
+  if (Math.hypot(x, z) < 12) return false;
+  if (Math.abs(z) > T.GZ - 10 && Math.abs(x) < T.GW / 2 + 6) return false;
+  if (Math.abs(x) > A - 8 || Math.abs(z) > A - 8) return false;
+  if (groundAt(x, z).y > 0.35) return false;
+  for (const r of riders) if (Math.hypot(r.x - x, r.z - z) < 7) return false;
+  for (const b of boosts) if (Math.hypot(b.x - x, b.z - z) < 10) return false;
+  return true;
+}
+function spawnBoost(x, z) {
+  if (boosts.length >= T.BOOST_CAP) return null;
+  if (x == null || z == null) {
+    let ok = false;
+    for (let i = 0; i < 24; i++) {
+      x = rand(-A + 10, A - 10); z = rand(-A + 10, A - 10);
+      if (isBoostSpawnClear(x, z)) { ok = true; break; }
+    }
+    if (!ok) return null;
+  }
+  const mesh = makeBoostMesh();
+  const y = groundAt(x, z).y + 1.15;
+  mesh.position.set(x, y, z); scene.add(mesh);
+  const b = { x, z, y, mesh, spin: rand(0, 6) };
+  boosts.push(b); return b;
+}
+function grantBoost(r) {
+  if (!r) return;
+  r.pickupBoostT = T.BOOST_DUR;
+  flash((r.name === 'YOU' ? 'BOOST!' : r.name + ' BOOST!'), '#ffb040');
+  beep(660, 0.16, 'square', 0.06); beep(880, 0.2, 'triangle', 0.04);
+}
+function takeBoost(b, r) {
+  const ix = boosts.indexOf(b); if (ix < 0) return;
+  scene.remove(b.mesh); boosts.splice(ix, 1);
+  grantBoost(r);
+  boostSpawnT = Math.min(boostSpawnT, rand(5, 9));
+}
+function stepBoosts(dt) {
+  boostSpawnT -= dt;
+  if (boostSpawnT <= 0) {
+    if (boosts.length < T.BOOST_CAP) spawnBoost();
+    boostSpawnT = rand(T.BOOST_SPAWN[0], T.BOOST_SPAWN[1]);
+  }
+  for (const b of [...boosts]) {
+    b.spin += dt * 2.4;
+    if (b.mesh) {
+      b.mesh.rotation.y = b.spin;
+      b.mesh.position.y = b.y + Math.sin(b.spin * 1.6) * 0.22;
+    }
+    for (const r of riders) {
+      if (r.hidden) continue;
+      if (Math.hypot(r.x - b.x, r.z - b.z) < r.r + 1.0 && Math.abs((r.y + 0.7) - b.y) < 2.4) takeBoost(b, r);
+    }
+  }
+  for (const r of riders) {
+    if (r.pickupBoostT > 0) r.pickupBoostT = Math.max(0, r.pickupBoostT - dt);
+  }
+  const you = player && player.pickupBoostT > 0;
+  const el = $('boostHud');
+  if (el) {
+    el.classList.toggle('on', !!you);
+    if (you) el.textContent = '⚡ BOOST ' + player.pickupBoostT.toFixed(1) + 's';
+  }
+}
+
+buildPlayground();
+
+
 
 // ---------------- riders / mounts ----------------
 const riders = [];
@@ -589,7 +838,7 @@ function addRider(name, team, spec, x, z, h) {
     throttle: 0, steer: 0, steerVis: 0, boost: false, gaitT: Math.random() * 10,
     cool: 0, sprintT: 0, stun: 0, slowT: 0, air: false, inv: 0,
     silks: [newSilk(), newSilk()], pts: 0, ko: 0, lastTouch: 0,
-    hidden: false, camoT: 0, burrowT: 0, dashT: 0, lungeT: 0, knockT: 0, _burrowY: 0, cocoons: [],
+    hidden: false, camoT: 0, burrowT: 0, dashT: 0, lungeT: 0, knockT: 0, pickupBoostT: 0, slideCoastT: 0, _burrowY: 0, _groundY: 0, cocoons: [],
     mount: null, mountSource: 'proc', saddle: null, spinneret: null, jockey: null,
     brain: { cool: 0.2, fire: [0, 0], ab: 0, tgt: null, why: 'idle' },
     mass: SPECIES[spec].mass, r: SPECIES[spec].r
@@ -721,7 +970,7 @@ function makeBallMesh() {
 }
 function spawnBall(x, z, vx, vz) {
   if (balls.length >= T.MAX_BALLS) return null;
-  const b = { x: x ?? 0, y: T.BALL_R, z: z ?? 0, vx: vx || 0, vy: 0, vz: vz || 0, last: null, lastT: 99, mesh: makeBallMesh(), id: ++stats.spawned };
+  const b = { x: x ?? 0, y: T.BALL_R, z: z ?? 0, vx: vx || 0, vy: 0, vz: vz || 0, last: null, lastT: 99, stuckT: 0, mesh: makeBallMesh(), id: ++stats.spawned };
   balls.push(b); return b;
 }
 function clearBalls() { for (const b of balls) scene.remove(b.mesh); balls.length = 0; }
@@ -749,7 +998,24 @@ function stepBall(b, dt) {
   b.vx *= (1 - T.BALL_ROLL * dt); b.vz *= (1 - T.BALL_ROLL * dt); b.vy -= T.GRAV * dt;
   if (b.y > T.BALL_R + 0.02) { b.vx *= (1 - T.BALL_AIR * dt); b.vz *= (1 - T.BALL_AIR * dt); }
   b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; b.lastT += dt;
-  if (b.y < T.BALL_R) { b.y = T.BALL_R; if (b.vy < 0) b.vy *= -T.BALL_BOUNCE; if (Math.abs(b.vy) < 1) b.vy = 0; }
+  const bg = groundAt(b.x, b.z);
+  const floor = bg.y + T.BALL_R;
+  if (b.y < floor) {
+    b.y = floor;
+    if (b.vy < 0) b.vy *= -T.BALL_BOUNCE;
+    if (Math.abs(b.vy) < 1) b.vy = 0;
+    if (bg.kind === 'slide') { b.vx += bg.sx * 10 * dt; b.vz += bg.sz * 10 * dt; }
+    if (bg.kind === 'ramp') { b.vx += bg.sx * 3 * dt; b.vz += bg.sz * 3 * dt; }
+  }
+  pushOutPlay(b, T.BALL_R, true);
+  const spdB = Math.hypot(b.vx, b.vz);
+  if (bg.y > 0.3 && spdB < 1.35 && Math.abs(b.vy) < 2.5) b.stuckT = (b.stuckT || 0) + dt; else b.stuckT = 0;
+  if ((b.stuckT || 0) > 1.0) {
+    const awayX = -b.x, awayZ = -b.z, ad = Math.hypot(awayX, awayZ) || 1;
+    const ex = bg.sx || (awayX / ad), ez = bg.sz || (awayZ / ad);
+    b.vx = ex * 10; b.vz = ez * 10; b.vy = 7; b.stuckT = 0;
+    b.x += b.vx * 0.1; b.z += b.vz * 0.1;
+  }
   if (Math.abs(b.x) > A - T.BALL_R) { b.x = clamp(b.x, -A + T.BALL_R, A - T.BALL_R); b.vx *= -T.BALL_WALL; }
   if (Math.abs(b.z) > A - T.BALL_R) {
     if (Math.abs(b.x) < T.GW / 2 && b.y < T.GH) { /* open mouth — may score */ }
@@ -983,31 +1249,59 @@ function stepRider(r, dt) {
   }
   r.inWeb = false;
   r.knockT = Math.max(0, (r.knockT || 0) - dt);
+  r.slideCoastT = Math.max(0, (r.slideCoastT || 0) - dt);
 
   let throttle = (r.stun > 0 || r.hidden) ? 0 : r.throttle;
   let steer = r.stun > 0 ? 0 : r.steer;
   r.steerVis = lerp(r.steerVis, steer, 1 - Math.exp(-10 * dt));
-  r.h += steer * S.turn * dt;
+  r.h += T.STEER_SIGN * steer * S.turn * dt;
 
   const slow = r.slowT > 0 ? SPECIES.widow.slowMul : 1;
-  let maxSpd = (r.boost && throttle > 0 ? S.boost : S.base) * (r.sprintT > 0 ? S.sprintMul || 1.65 : 1) * slow;
+  let maxSpd = (r.pickupBoostT > 0 && throttle > 0 ? S.boost : S.base) * (r.sprintT > 0 ? S.sprintMul || 1.65 : 1) * slow;
   if (r.ai) maxSpd *= DIFFS[diff].spd;
   const want = throttle * maxSpd; // throttle in [-0.5, 1]
   const f = fwd(r);
+  const g0 = groundAt(r.x, r.z);
+  const onSlide = g0.kind === 'slide' && r.y <= g0.y + 0.45;
   if (r.knockT > 0) {
     // Short window where steering and throttle do not cancel a kick/shove.
     const drag = 1.6, spdK = Math.hypot(r.vx, r.vz);
     if (spdK > 0.05) { const k = Math.max(0, 1 - drag * dt / spdK); r.vx *= k; r.vz *= k; }
   } else {
+    const along0 = onSlide ? (r.vx * g0.sx + r.vz * g0.sz) : 0;
     const tvx = f.x * want, tvz = f.z * want;
-    const acc = (Math.abs(want) < r.spd ? T.BRAKE : T.ACCEL);
+    let acc = (Math.abs(want) < r.spd ? T.BRAKE : T.ACCEL);
+    if ((r.slideCoastT || 0) > 0 && !onSlide && acc === T.BRAKE) acc = T.BRAKE * 0.18;
     r.vx = lerp(r.vx, tvx, 1 - Math.exp(-acc * dt / Math.max(0.4, S.mass)));
     r.vz = lerp(r.vz, tvz, 1 - Math.exp(-acc * dt / Math.max(0.4, S.mass)));
+    if (onSlide) {
+      // Walk-brake must not cancel downhill speed; throttle can only add to it.
+      const along1 = r.vx * g0.sx + r.vz * g0.sz;
+      if (along1 < along0) { r.vx += g0.sx * (along0 - along1); r.vz += g0.sz * (along0 - along1); }
+    }
   }
-
-  if (r.y > 0.02 || r.vy > 0) { r.vy -= T.GRAV * dt; r.air = true; }
+  if (r.y > g0.y + 0.05 || r.vy > 0) { r.vy -= T.GRAV * dt; r.air = true; }
+  // slide: extra downhill momentum
+  if (onSlide) {
+    r.slideCoastT = 0.7;
+    r.vx += g0.sx * T.SLIDE_ACC * dt; r.vz += g0.sz * T.SLIDE_ACC * dt;
+    const cap = Math.max(S.boost || 16, 14) * 1.15;
+    const along = r.vx * g0.sx + r.vz * g0.sz;
+    if (along > cap) { r.vx -= g0.sx * (along - cap); r.vz -= g0.sz * (along - cap); }
+  }
   r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt;
-  if (r.y <= 0) { r.y = 0; if (r.vy < 0) r.vy = 0; r.air = false; }
+  const g1 = groundAt(r.x, r.z);
+  if (r.vy <= 0 && r.y <= g1.y + 0.2) {
+    const climb = g1.y - (r._groundY != null ? r._groundY : r.y);
+    if (climb > T.CLIMB && g1.kind !== 'slide') {
+      // too tall: step back and treat as a wall
+      r.x -= r.vx * dt; r.z -= r.vz * dt; r.vx *= 0.2; r.vz *= 0.2;
+    } else {
+      r.y = g1.y; if (r.vy < 0) r.vy = 0; r.air = false;
+    }
+  }
+  r._groundY = groundAt(r.x, r.z).y;
+  pushOutPlay(r, r.r * 0.7, false);
   const [nx, nz] = wallPush(r.x, r.z, r.r * 0.85);
   if (nx !== r.x) { r.x = nx; r.vx *= -0.2; }
   if (nz !== r.z) { r.z = nz; r.vz *= -0.2; }
@@ -1064,6 +1358,17 @@ function aiThink(r, dt) {
   } else {
     tgt = { x: 0, z: (r.team === 0 ? -8 : 8), kind: 'mid' }; why = 'wait';
   }
+  // sometimes go for a boost pickup
+  if (boosts.length && (r.pickupBoostT || 0) <= 0 && Math.random() < 0.55) {
+    let best = null, bestD = 18;
+    for (const b of boosts) {
+      const d = Math.hypot(b.x - r.x, b.z - r.z);
+      if (d < bestD) { best = b; bestD = d; }
+    }
+    if (best && (bestD < 12 || (why !== 'carry' && bestD < 18))) {
+      tgt = { x: best.x, z: best.z, kind: 'boost' }; why = 'boost';
+    }
+  }
   r.brain.tgt = tgt; r.brain.why = why;
   aiDrive(r, tgt); aiActs(r, D);
 }
@@ -1071,11 +1376,18 @@ function aiDrive(r, tgt) {
   if (!tgt) { r.throttle = 0; r.steer = 0; return; }
   const dx = tgt.x - r.x, dz = tgt.z - r.z, dist = Math.hypot(dx, dz) || 1;
   const want = Math.atan2(dx, dz), ad = angDiff(r.h, want);
-  r.steer = clamp(ad / 0.6, -1, 1);
+  r.steer = clamp(-ad / 0.6, -1, 1); // STEER_SIGN is -1, same as Rocket Jockey 3D
   r.throttle = dist < 2.5 && tgt.kind !== 'goal' ? (tgt.kind === 'ball' ? 0.4 : 0.15) : 1;
   if (Math.abs(ad) > 1.1) r.throttle *= 0.4;
-  r.boost = dist > 14 && Math.abs(ad) < 0.5;
-  if (tgt.kind === 'goal' && dist < 10 && Math.abs(ad) < 0.35) r.boost = true;
+  // If the straight line would climb a slide (the wrong way), veer around it.
+  if (tgt) {
+    const midX = (r.x + tgt.x) / 2, midZ = (r.z + tgt.z) / 2, g = groundAt(midX, midZ);
+    if (g.kind === 'slide') {
+      const side = Math.sign((tgt.x - r.x) * g.sz - (tgt.z - r.z) * g.sx) || 1;
+      r.steer = clamp(r.steer + side * 0.7, -1, 1);
+    }
+  }
+  r.boost = false;
 }
 function aiActs(r, D) {
   const ball = balls[0];
@@ -1188,7 +1500,7 @@ function bindBtn(id, key) {
 const btnEnd = e => { const live = new Set([...e.touches].map(t => t.identifier));
   for (const b of btnIds) { for (const t of e.changedTouches) b.ids.delete(t.identifier); for (const i of [...b.ids]) if (!live.has(i)) b.ids.delete(i); if (!b.ids.size) b.set(false); } };
 document.addEventListener('touchend', btnEnd, true); document.addEventListener('touchcancel', btnEnd, true);
-bindBtn('bBoost', 'boostT'); bindBtn('bL', 'cabL'); bindBtn('bR', 'cabR'); bindBtn('bT', 'abT'); bindBtn('bAb', 'abT');
+bindBtn('bL', 'cabL'); bindBtn('bR', 'cabR'); bindBtn('bT', 'abT'); bindBtn('bAb', 'abT');
 
 // stick (HYBRID / GESTURE / CLASSIC left-half drag)
 let stickId = null, stickX0 = 0, stickY0 = 0, classicId = null, classicX0 = 0;
@@ -1207,7 +1519,7 @@ function isLeftStickZone(x) { return x < innerWidth * 0.5; }
 const gT = new Map(); const gHold = [0, 0]; let gBoostN = 0, gzT = 0;
 const GZ_FLICK = 42, GZ_FLICK_T = 260;
 function gestStart(t) {
-  if (t.clientX < innerWidth * 0.32 && t.clientY > innerHeight * 0.7) { inp.gAb = true; abQ = true; gT.set(t.identifier, { kind: 'ab' }); return; }
+  if (t.clientX > innerWidth * 0.72 && t.clientY > innerHeight * 0.72) { inp.gAb = true; abQ = true; gT.set(t.identifier, { kind: 'ab' }); return; }
   const side = t.clientX < innerWidth * 0.75 ? 0 : 1;
   const g = { kind: 'silk', x0: t.clientX, y0: t.clientY, t0: performance.now(), side, fired: false, boost: false };
   g.fired = player && player.silks[side].st === 'none';
@@ -1217,7 +1529,7 @@ function gestStart(t) {
 function gestMove(t) {
   const g = gT.get(t.identifier); if (!g || g.kind !== 'silk') return;
   const dy = g.y0 - t.clientY, dt = performance.now() - g.t0;
-  if (!g.boost && dy > GZ_FLICK && dt < GZ_FLICK_T) { g.boost = true; gBoostN++; syncG(); }
+  /* boost is a pickup; no flick-up boost */
 }
 function gestEnd(t) {
   const g = gT.get(t.identifier); if (!g) return; gT.delete(t.identifier);
@@ -1288,7 +1600,7 @@ function collectPlayerInput() {
   else if (Math.abs(steer) > 0.15 && TOUCH && LAY === 'CLASSIC') throttle = 0.7; // classic: dragging also walks
   // desktop default: if steering with no throttle, turn in place; W to walk. Also allow always-creep? no.
   player.steer = steer; player.throttle = throttle;
-  player.boost = !!(keys.ShiftLeft || keys.ShiftRight || inp.boostT || inp.gBoost);
+  player.boost = false; // boost is a pickup now
   const silkL = !!(keys.KeyQ || inp.cabL || inp.mouseL || inp.gL);
   const silkR = !!(keys.KeyE || inp.cabR || inp.mouseR || inp.gR);
   for (const [i, down] of [[0, silkL], [1, silkR]]) {
@@ -1557,9 +1869,9 @@ function fmtT(t) { t = Math.max(0, t); const m = Math.floor(t / 60), s = Math.fl
 function newRound(keepSpecies) {
   const spec = (player && keepSpecies) ? player.spec : pickChoice.spec;
   spawnRiders(spec);
-  clearBalls(); clearWebs();
+  clearBalls(); clearWebs(); clearBoosts(); boostSpawnT = 2.2; spawnBoost();
   teamGoals = [0, 0]; stats.goals = [0, 0]; stats.own = 0; dispCool = T.FIRST;
-  for (const r of riders) { r.pts = 0; r.cool = 0; r.stun = 0; r.slowT = 0; r.sprintT = 0; r.knockT = 0; }
+  for (const r of riders) { r.pts = 0; r.cool = 0; r.stun = 0; r.slowT = 0; r.sprintT = 0; r.knockT = 0; r.pickupBoostT = 0; }
   const L = RLEN === 'free' ? 0 : (+RLEN) * 60;
   RND = { st: 'count', t: 0, left: L || 0, len: L, count: 3 };
   screen = 'play'; updScore();
@@ -1604,7 +1916,7 @@ function showPick() {
     const S = SPECIES[id], sel = pickChoice.spec === id ? ' sel' : '';
     return `<button class="pick${sel}" data-s="${id}"><b>${S.name}</b><div class="ab">${S.abilityName}</div><div class="bl">${S.blurb}</div></button>`;
   }).join('');
-  openOvl('pick', `<h2>Spider Jockey v0.3</h2>
+  openOvl('pick', `<h2>Spider Jockey v0.4</h2>
     <div class="hostrow"><div id="wandaSlot" class="wanda-slot host"></div><div><b>Wanda</b><div class="sub">Your host — not a mount. She’ll be back with a spider fact after each round.</div></div></div>
     <p class="sub">Silkball is the Rocketball port: 2v2, walk your mount, snag the ball with silk, score. <a href="../3d/" target="_blank" rel="noopener">RJ 3D v0.9.5 (shelved)</a></p>
     <div class="sub">PICK YOUR MOUNT — nine species, each with one ability</div>
@@ -1624,7 +1936,7 @@ function showPause() {
     <div class="sub">LAYOUT</div><div class="lays">${LAYOUTS.map(l => `<button data-l="${l}" class="${l === LAY ? 'sel' : ''}">${l}</button>`).join('')}</div>
     <div class="sub">ROUND LENGTH (next round)${RND ? ' · this round ' + (RND.len ? fmtT(RND.left) : 'free ' + fmtT(RND.t)) : ''}</div>
     <div class="lays rrow">${RLENS.map(v => `<button data-r="${v}" class="${v === RLEN ? 'sel' : ''}">${v === 'free' ? 'Free play' : v + ' min'}</button>`).join('')}</div>
-    <ul><li>WASD / arrows or the left stick: turn and walk. Shift or BOOST to sprint.</li><li>Q / E, mouse buttons, or SILK: fire, hold to keep a snag, tap again to let go.</li><li>Space / F or ABILITY: your mount’s one trick.</li></ul>
+    <ul><li>WASD / arrows or the left stick: turn and walk. A / swipe left turns you left, the same way as in Rocket Jockey 3D.</li><li>Drive over a glowing BOOST pickup for a 7.5 s speed burst.</li><li>Q / E, mouse buttons, or SILK: fire, hold to keep a snag, tap again to let go.</li><li>Space / F or the right-side ABILITY button: your mount’s one trick.</li></ul>
     <div class="btns"><button class="go" id="pzGo">RESUME</button><button class="go alt" id="pzEnd">END ROUND</button><button class="go alt" id="pzHelp">❓ CONTROLS</button><button class="go alt" id="pzPick">MOUNTS</button></div>`);
   for (const b of document.querySelectorAll('#ovl [data-l]')) b.addEventListener('click', () => setLayout(b.dataset.l));
   for (const b of document.querySelectorAll('#ovl [data-r]')) b.addEventListener('click', () => { RLEN = b.dataset.r; localStorage.setItem('sj_rlen', RLEN); showPause(); });
@@ -1637,16 +1949,16 @@ function showPause() {
 function showHelp(back) {
   helpBack = back || null;
   const touch = {
-    CLASSIC: ['Left half: drag sideways to steer (and walk). ABILITY button on the left.', 'Right: BOOST, ◀ SILK / SILK ▶ (hold to keep a snag, tap again to let go).'],
-    HYBRID: ['Left thumb: a stick appears where you touch. ◀ ▶ steer, push ▲ to walk, ▼ to back up.', 'Right thumb: ◀ SILK / SILK ▶ and BOOST. Left-side ABILITY button uses your mount’s trick.'],
-    GESTURE: ['Left thumb: the same stick (steer + walk).', 'Right half: two invisible silk zones. Hold to keep a snag, touch again to let go. Flick up ▲ = BOOST. Lower-left dashed zone = ABILITY.']
+    CLASSIC: ['Left half: drag sideways to steer (and walk).', 'Right: ABILITY (where BOOST used to be), then ◀ SILK / SILK ▶ (hold to keep a snag, tap again to let go). Drive over a BOOST pickup to sprint.'],
+    HYBRID: ['Left thumb: a stick appears where you touch. ◀ ▶ steer, push ▲ to walk, ▼ to back up.', 'Right thumb: ABILITY sits above the silk buttons, where BOOST used to be. ◀ SILK / SILK ▶ still on the right. Drive over a BOOST pickup to sprint.'],
+    GESTURE: ['Left thumb: the same stick (steer + walk).', 'Right half: two invisible silk zones. Hold to keep a snag, touch again to let go. Lower-right dashed zone = ABILITY. Drive over a BOOST pickup to sprint.']
   };
   openOvl('help', `<h2>Controls</h2>
     <div class="lays">${LAYOUTS.map(l => `<button data-hl="${l}" class="${l === LAY ? 'sel' : ''}">${l}</button>`).join('')}</div>
     <table class="hk"><tr><th>Walk / turn</th><td>W A S D or arrow keys, or the left stick</td></tr>
-    <tr><th>Sprint</th><td>Shift, or BOOST</td></tr>
+    <tr><th>Sprint</th><td>Drive over a glowing BOOST pickup. It lasts about 7.5 seconds.</td></tr>
     <tr><th>Silk</th><td>Q / E, or left / right mouse, or the SILK buttons. Hold to keep a snag on the ball or a rival. Tap again (or release a held snag) to let go and fling.</td></tr>
-    <tr><th>Ability</th><td>Space or F, or the ABILITY button — hop, sprint, hair-kick, slow bite, or web trap, depending on your mount.</td></tr>
+    <tr><th>Ability</th><td>Space or F, or the ABILITY button on the right — hop, sprint, hair-kick, slow bite, or web trap, depending on your mount.</td></tr>
     <tr><th>Pause / help</th><td>P or Esc to pause, H for this card.</td></tr></table>
     <div class="sub">Touch — ${LAY}</div>
     <ul class="hul">${touch[LAY].map(t => `<li>${t}</li>`).join('')}</ul>
@@ -1684,7 +1996,7 @@ function sim(dt) {
   for (const r of riders) { if (r.ai) aiThink(r, dt); stepRider(r, dt); }
   separateRiders(dt);
   for (const b of [...balls]) { for (const r of riders) bumpBall(r, b); stepBall(b, dt); }
-  stepWebs(dt); stepBursts(dt); stepCocoons(dt); stepCamera(dt); updAbHint();
+  stepWebs(dt); stepBursts(dt); stepCocoons(dt); stepBoosts(dt); stepCamera(dt); updAbHint();
   if (msgT > 0) { msgT -= dt; if (msgT <= 0) $('msg').style.opacity = 0; }
 }
 
@@ -1707,7 +2019,7 @@ function applyTestInputs(o) {
   if (!o || !player) return;
   if (o.steer != null) player.steer = o.steer;
   if (o.throttle != null) player.throttle = o.throttle;
-  if (o.boost != null) player.boost = !!o.boost;
+  if (o.boost) { player.pickupBoostT = Math.max(player.pickupBoostT || 0, T.BOOST_DUR); player.boost = false; }
   if (o.heading != null) player.h = o.heading;
   if (o.silkL) retractOrFire(player, 0);
   if (o.silkR) retractOrFire(player, 1);
@@ -1717,7 +2029,7 @@ function applyTestInputs(o) {
 }
 
 function hookState() {
-  const pack = r => r && ({ name: r.name, spec: r.spec, team: r.team, x: r.x, y: r.y, z: r.z, h: r.h, vx: r.vx, vy: r.vy, vz: r.vz, spd: r.spd, cool: r.cool, stun: r.stun, slowT: r.slowT, sprintT: r.sprintT, air: !!r.air, hidden: !!r.hidden, camoT: r.camoT, burrowT: r.burrowT, dashT: r.dashT, lungeT: r.lungeT, cocoons: (r.cocoons || []).length, knockT: r.knockT || 0, mount: r.mountSource, silk: r.silks.map(c => ({ st: c.st, kind: c.kind, x: c.x, y: c.y, z: c.z })), pts: r.pts, brain: r.ai ? r.brain.why : null });
+  const pack = r => r && ({ name: r.name, spec: r.spec, team: r.team, x: r.x, y: r.y, z: r.z, h: r.h, vx: r.vx, vy: r.vy, vz: r.vz, spd: r.spd, cool: r.cool, stun: r.stun, slowT: r.slowT, sprintT: r.sprintT, air: !!r.air, hidden: !!r.hidden, camoT: r.camoT, burrowT: r.burrowT, dashT: r.dashT, lungeT: r.lungeT, cocoons: (r.cocoons || []).length, knockT: r.knockT || 0, pboost: r.pickupBoostT || 0, groundY: r._groundY || 0, mount: r.mountSource, silk: r.silks.map(c => ({ st: c.st, kind: c.kind, x: c.x, y: c.y, z: c.z })), pts: r.pts, brain: r.ai ? r.brain.why : null });
   return {
     version: VERSION, frames, t: simTime, screen, ovl: ovlMode, mode: 'silkball',
     species: player && player.spec, score: teamGoals.slice(),
@@ -1725,6 +2037,8 @@ function hookState() {
     riders: riders.map(pack),
     balls: balls.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, last: b.last && b.last.name })),
     webs: webs.map(w => ({ x: w.x, z: w.z, r: w.r, life: w.life, team: w.team, kind: w.kind })),
+    boosts: boosts.map(b => ({ x: b.x, z: b.z, y: b.y })),
+    playground: PLAY.map(q => ({ kind: q.kind, id: q.id, ox: q.ox, oz: q.oz, h: q.height })),
     webPatch: WEB_PATCH, loading: loadsOpen,
     wanda: { open: ovlMode === 'wanda', intro: ovlMode === 'intro', fact: lastFact && lastFact.text, id: lastFact && lastFact.id, ready: wandaReady, source: wandaSource, view: wandaView, host: true },
     rnd: RND && { st: RND.st, t: RND.t, left: RND.left, len: RND.len, why: RND.why },
@@ -1754,7 +2068,7 @@ function hookStep(dt, inputs, opts) {
           for (const r of riders) { if (r.ai) aiThink(r, dt); stepRider(r, dt); }
           separateRiders(dt);
           for (const b of [...balls]) { for (const q of riders) bumpBall(q, b); stepBall(b, dt); }
-          stepWebs(dt); stepBursts(dt); stepCocoons(dt);
+          stepWebs(dt); stepBursts(dt); stepCocoons(dt); stepBoosts(dt);
         }
       }
     }
@@ -1795,6 +2109,18 @@ const hook = {
   wandaSource: () => wandaSource,
   wandaView: () => wandaView,
   webPatch: () => WEB_PATCH,
+  groundAt: (x, z) => groundAt(x, z),
+  playground: () => PLAY.map(q => ({ kind: q.kind, id: q.id, ox: q.ox, oz: q.oz, width: q.width, length: q.length, height: q.height })),
+  boosts: () => boosts.map(b => ({ x: b.x, z: b.z, y: b.y })),
+  spawnBoost: (x, z) => spawnBoost(x, z),
+  clearBoosts, grantBoost: (name) => grantBoost(name ? riders.find(q => q.name === name) : player),
+  steerSign: () => T.STEER_SIGN,
+  hud: () => {
+    const ab = $('bAb'), t = $('bT'), boost = $('bBoost');
+    const vis = el => { if (!el) return null; const cs = getComputedStyle(el), r = el.getBoundingClientRect(); return { display: cs.display, right: cs.right, left: cs.left, bottom: cs.bottom, x: r.x, y: r.y, w: r.width, h: r.height, cx: r.left + r.width / 2 }; };
+    const abOn = ab && getComputedStyle(ab).display !== 'none';
+    return { ability: vis(abOn ? ab : t), abilityT: vis(t), abilityAb: vis(ab), boost: vis(boost), lay: LAY };
+  },
   propsReady: () => PROP_IDS.filter(n => !!props[n]),
   layout: () => LAY, setLayout, diff: () => diff,
   facts: () => WANDA_FACTS.map(f => f.id), lastFact: () => lastFact,
