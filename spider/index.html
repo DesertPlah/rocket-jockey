@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Spider Jockey">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Spider Jockey v0.1</title>
+<title>Spider Jockey v0.2</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#100c08;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
 canvas{display:block;touch-action:none}
@@ -70,7 +70,7 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp,body.lay-gesture.gzon #gzA
 #ovl .btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px}
 #ovl .btns .go{min-width:120px;padding:8px 10px}
 #ovl .picks{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:8px 0}
-#ovl .pick{width:148px;text-align:left;padding:8px 10px;border-radius:12px;border:2px solid #fff5;background:rgba(255,255,255,.07);color:#fff;cursor:pointer}
+#ovl .pick{width:132px;text-align:left;padding:6px 8px;border-radius:12px;border:2px solid #fff5;background:rgba(255,255,255,.07);color:#fff;cursor:pointer}
 #ovl .pick.sel{border-color:#ffd84a;background:#3a2a10;box-shadow:0 0 0 1px #ffd84a88}
 #ovl .pick b{display:block;color:#ffd84a;font-size:14px}
 #ovl .pick .ab{color:#c9a0ff;font-size:12px;font-weight:bold}
@@ -108,8 +108,8 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp,body.lay-gesture.gzon #gzA
   #ovl .go{padding:6px 10px;margin-top:3px}
   #ovl :is(.lays,.mrow) button{padding:5px 8px}
   #ovl .sub{margin:1px 0;font-size:11px}
-  #ovl .picks{margin:4px 0;gap:6px}
-  #ovl .pick{padding:5px 8px;width:140px}
+  #ovl .picks{margin:4px 0;gap:4px}
+  #ovl .pick{padding:4px 6px;width:118px}
   #ovl .pick .bl{display:none}
   #ovl .pick b{font-size:13px}
   #ovl .wanda .fact{font-size:13px}
@@ -119,7 +119,7 @@ body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp,body.lay-gesture.gzon #gzA
 <script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {}));</script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 </head><body>
-<div id="ver" class="hud">Spider Jockey v0.1</div>
+<div id="ver" class="hud">Spider Jockey v0.2</div>
 <div id="score" class="hud">0 — 0</div><div id="rtime" class="hud"></div><div id="rcount" class="hud"></div>
 <div id="fps" class="hud">-- fps</div>
 <div id="msg" class="hud"></div><div id="trick" class="hud"></div>
@@ -142,7 +142,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const angDiff = (a, b) => { let d = (b - a + Math.PI) % (Math.PI * 2); if (d < 0) d += Math.PI * 2; return d - Math.PI; };
 const TOUCH = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
 if (!TOUCH) document.body.classList.add('desk');
-const VERSION = 'Spider Jockey v0.1';
+const VERSION = 'Spider Jockey v0.2';
 const QS = new URLSearchParams(location.search);
 
 // ---------------- species + Wanda facts ----------------
@@ -166,7 +166,23 @@ const SPECIES = {
   orb: { id:'orb', name:'Orb weaver', short:'Orb weaver', ability:'web', abilityName:'WEB TRAP',
     blurb:'A silk architect. Drop a web that snares anyone who walks in.',
     aliases:['orb','orb-weaver','orbweaver','argiope'], color:0x1a1a14, belly:0xf0d030, mark:0xf0d030,
-    scale:1.02, mass:1.0, base:12, boost:18, turn:2.05, cool:7.0, webR:4.2, webLife:14, webSlow:0.12, webMax:2, r:1.9 }
+    scale:1.02, mass:1.0, base:12, boost:18, turn:2.05, cool:7.0, webR:4.2, webLife:14, webSlow:0.12, webMax:2, r:1.9 },
+  trapdoor: { id:'trapdoor', name:'Trapdoor spider', short:'Trapdoor', ability:'burrow', abilityName:'AMBUSH',
+    blurb:'Burrow and stay still to vanish, then lunge forward fast.',
+    aliases:['trapdoor','trapdoor-spider'], color:0x4a3060, belly:0xc4a06a, mark:0x2a1838,
+    scale:1.0, mass:1.15, base:12, boost:18, turn:2.0, cool:6.5, burrowMax:2.2, lungeF:30, r:1.85 },
+  crab: { id:'crab', name:'Crab spider', short:'Crab', ability:'camo', abilityName:'CAMOUFLAGE',
+    blurb:'Blend in. For a few seconds the AI has a hard time targeting you.',
+    aliases:['crab','crab-spider'], color:0xe8d878, belly:0xf0b0c0, mark:0xd0a050,
+    scale:1.0, mass:0.95, base:13, boost:19.5, turn:2.3, cool:6.0, camoT:3.2, r:1.95 },
+  huntsman: { id:'huntsman', name:'Huntsman', short:'Huntsman', ability:'dash', abilityName:'SIDE DASH',
+    blurb:'A fast sideways scuttle. Steer to choose the side.',
+    aliases:['huntsman'], color:0x4a7a38, belly:0xd8d040, mark:0x2a4a20,
+    scale:1.05, mass:0.9, base:15.5, boost:23, turn:2.7, cool:4.0, dashF:26, dashT:0.22, r:2.05 },
+  goliath: { id:'goliath', name:'Goliath birdeater', short:'Goliath', ability:'shove', abilityName:'SHOVE',
+    blurb:'A heavy shoulder check with a big knockback. Slow, but it hits hard.',
+    aliases:['goliath','goliath-birdeater','birdeater'], color:0x5a3a22, belly:0x8a5a30, mark:0xb87333,
+    scale:1.2, mass:2.0, base:8.5, boost:13.5, turn:1.45, cool:4.5, shoveR:5.8, shoveF:30, tough:0.4, r:2.35 }
 };
 const SPEC_IDS = Object.keys(SPECIES);
 const SPEC_ALIASES = {};
@@ -190,7 +206,9 @@ const WANDA_FACTS = [
   { id:'hemocyanin', text:'A spider’s blood is pale blue because it uses hemocyanin, a copper-based protein, to carry oxygen.' },
   { id:'kinds-of-silk', text:'Silk leaves the spinnerets as a liquid and hardens as it is drawn. Different glands make dragline, capture, and wrapping silk.' },
   { id:'crab-color', text:'Some crab spiders can change color over several days to match the flowers they hunt on.' },
-  { id:'shy', text:'Only a few spider species are dangerous to people. Almost all would rather flee than bite.' }
+  { id:'shy', text:'Only a few spider species are dangerous to people. Almost all would rather flee than bite.' },
+  { id:'trapdoor', text:'Trapdoor spiders hide behind a silk-hinged lid and rush out when prey trips the silk lines around the burrow.' },
+  { id:'huntsman', text:'Huntsman spiders are laterigrade — their legs splay to the sides — so they often run sideways. The giant huntsman can have a leg span of about 30 cm (12 in).' }
 ];
 let wandaUsed = [];
 function nextWandaFact() {
@@ -310,21 +328,32 @@ let player = null, gold = null, red = null, violet = null;
 let GLTFLoaderCls = null;
 const modelCache = new Map(); // species id -> {scene clone template} or 'missing'
 const MODEL_PATHS = id => {
-  const aliases = SPECIES[id].aliases;
+  const aliases = (SPECIES[id] && SPECIES[id].aliases) || [id];
   const paths = [];
+  // Prefer the primary id in models/ (shipped next to the page) so a hit skips alias 404s.
   for (const a of aliases) {
     paths.push(`models/${a}.glb`);
     paths.push(`../models/spider-jockey/${a}.glb`);
-    paths.push(`../models/${a}.glb`);
   }
   return paths;
 };
+const PROP_IDS = ['saddle', 'silk_glob', 'web_patch_disc', 'web_patch', 'cocoon'];
+const WEB_PATCH = 'web_patch_disc'; // textured disc reads clearly from the chase camera; web_patch is the ribbon fallback
+const props = {}; // name -> parsed gltf
+let loadsOpen = 0;
 
 function makeJockey(name, team, col) {
+  // Seated rider: hips at the origin, matching Modellie's saddle seat empty.
   const g = new THREE.Group(); g.name = 'rider';
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.55, 4, 8), M(col)); body.position.y = 0.55; body.castShadow = true; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), M(0xf0d0b0)); head.position.y = 1.05; g.add(head);
-  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), M(col)); helm.position.y = 1.12; g.add(helm);
+  const cloth = M(col), skin = M(0xf0d0b0);
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.7, 6), cloth);
+  torso.position.y = 0.42; torso.castShadow = true; g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), skin); head.position.set(0, 0.92, 0.05); g.add(head);
+  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), cloth); helm.position.set(0, 0.98, 0.05); g.add(helm);
+  for (const side of [1, -1]) {
+    const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.5, 5), cloth);
+    thigh.position.set(side * 0.26, -0.02, 0.22); thigh.rotation.x = 1.15; thigh.castShadow = true; g.add(thigh);
+  }
   return g;
 }
 
@@ -378,8 +407,8 @@ function makeProceduralSpider(spec) {
 function storeLegRest(mount) {
   const rest = {};
   mount.traverse(o => {
-    if (/^leg_[LR][1-4]_(upper|lower)$/.test(o.name)) {
-      rest[o.name] = { rx: o.rotation.x, ry: o.rotation.y, rz: o.rotation.z };
+    if (/^leg_[LR][1-4]_(upper|lower)$/.test(o.name) || o.name === 'abdomen' || o.name === 'body' || o.name === 'palp_L' || o.name === 'palp_R') {
+      rest[o.name] = { rx: o.rotation.x, ry: o.rotation.y, rz: o.rotation.z, y: o.position.y };
     }
   });
   mount.userData.legRest = rest;
@@ -392,10 +421,12 @@ function poseLegs(r, dt) {
   const mount = r.mount; if (!mount) return;
   const rest = mount.userData.legRest || storeLegRest(mount);
   const spd = Math.hypot(r.vx, r.vz);
-  const walking = spd > 0.4 && r.y < 0.2;
+  const walking = spd > 0.4 && r.y < 0.2 && !r.hidden;
   if (walking) r.gaitT = (r.gaitT || 0) + dt * (5.5 + spd * 0.35);
+  else if (!walking) r.gaitT = (r.gaitT || 0) + dt * 0.6;
   const stride = walking ? clamp(spd / 10, 0.25, 1) : (r.y > 0.2 ? 0.15 : 0.08);
   const tuck = r.y > 0.2 ? 0.35 : 0;
+  const glbStyle = !!(mount.getObjectByName('leg_L1_hip') || r.mountSource === 'glb');
   // Alternating tetrapod: A = L1 R2 L3 R4, B = R1 L2 R3 L4
   const groupOf = n => (n === 'L1' || n === 'R2' || n === 'L3' || n === 'R4') ? 0 : Math.PI;
   for (const side of ['L', 'R']) for (let i = 1; i <= 4; i++) {
@@ -403,15 +434,65 @@ function poseLegs(r, dt) {
     const u = findLeg(mount, `leg_${tag}_upper`), l = findLeg(mount, `leg_${tag}_lower`);
     if (!u || !l) continue;
     const ur = rest[u.name] || { rx:0, ry:0, rz:0 }, lr = rest[l.name] || { rx:0, ry:0, rz:0 };
-    const phase = r.gaitT + groupOf(tag);
-    const swing = Math.sin(phase) * 0.32 * stride;
-    const lift = Math.max(0, Math.sin(phase + Math.PI * 0.5)) * 0.28 * stride;
-    const idle = !walking ? Math.sin((r.gaitT || 0) * 0.8 + i) * 0.03 : 0;
-    u.rotation.x = ur.rx + swing * 0.25 + idle;
-    u.rotation.y = ur.ry + swing * (side === 'L' ? 1 : -1) * 0.15;
-    u.rotation.z = ur.rz - lift - tuck;
-    l.rotation.z = lr.rz + lift * 0.7 + tuck * 0.5;
+    const phase = (r.gaitT || 0) + groupOf(tag);
+    const fwd = Math.sin(phase), liftAmt = Math.max(0, Math.cos(phase));
+    const sideSign = side === 'L' ? 1 : -1;
+    if (glbStyle) {
+      // Modellie convention: +rotation.z raises a segment; hip yaw is static; animate relative to rest.
+      const lift = liftAmt * 0.30 * (walking ? stride : 0.25) + tuck * 0.35;
+      u.rotation.x = ur.rx;
+      u.rotation.y = ur.ry + -sideSign * 0.24 * fwd * stride;
+      u.rotation.z = ur.rz + lift;
+      l.rotation.z = lr.rz - lift;
+    } else {
+      const swing = fwd * 0.32 * stride;
+      const lift = liftAmt * 0.28 * stride;
+      const idle = !walking ? Math.sin((r.gaitT || 0) * 0.8 + i) * 0.03 : 0;
+      u.rotation.x = ur.rx + swing * 0.25 + idle;
+      u.rotation.y = ur.ry + swing * sideSign * 0.15;
+      u.rotation.z = ur.rz - lift - tuck;
+      l.rotation.z = lr.rz + lift * 0.7 + tuck * 0.5;
+    }
   }
+  const abd = mount.getObjectByName('abdomen'), ar = rest.abdomen;
+  if (abd && ar) {
+    const t = r.gaitT || 0;
+    abd.rotation.x = ar.rx + 0.05 * Math.sin(t * 2);
+    abd.rotation.y = ar.ry + 0.04 * Math.sin(t);
+    abd.rotation.z = ar.rz;
+  }
+  const body = mount.getObjectByName('body'), br = rest.body;
+  if (body && br && walking) {
+    body.position.y = br.y + 0.05 * Math.abs(Math.sin(r.gaitT || 0));
+    body.rotation.z = 0.02 * Math.sin(r.gaitT || 0);
+  } else if (body && br) { body.position.y = br.y; body.rotation.z = 0; }
+  for (const pn of ['palp_L', 'palp_R']) {
+    const pl = mount.getObjectByName(pn), pr = rest[pn];
+    if (pl && pr) pl.rotation.x = pr.rx + 0.15 * Math.sin((r.gaitT || 0) * 2 + (pn === 'palp_R' ? 1.5 : 0));
+  }
+}
+
+function tintTeamMaterial(root, hex) {
+  root.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach((m, i) => {
+      if (m && m.name === 'team') {
+        const c = m.clone(); c.name = 'team'; c.color = new THREE.Color(hex);
+        if (Array.isArray(o.material)) o.material[i] = c; else o.material = c;
+      }
+    });
+  });
+}
+
+function attachSaddleProp(r) {
+  if (!props.saddle || !r.saddle) return;
+  const old = r.saddle.getObjectByName('saddle_prop'); if (old) r.saddle.remove(old);
+  const prop = props.saddle.scene.clone(true);
+  prop.name = 'saddle_prop';
+  tintTeamMaterial(prop, TEAMS[r.team].hex);
+  prop.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+  r.saddle.add(prop);
 }
 
 function bindMount(r, group, source) {
@@ -422,26 +503,46 @@ function bindMount(r, group, source) {
   r.spinneret = group.getObjectByName('spinneret') || null;
   r.head = group.getObjectByName('head') || null;
   scene.add(group);
+  if (source === 'glb') attachSaddleProp(r);
   if (!r.jockey) r.jockey = makeJockey(r.name, r.team, TEAMS[r.team].hex);
   r.saddle.add(r.jockey);
+  if (r.camoT > 0) applyCamo(r, true);
   syncMount(r);
+}
+
+async function tryLoadUrl(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('missing');
+  const buf = await r.arrayBuffer();
+  const base = url.slice(0, url.lastIndexOf('/') + 1);
+  const loader = new GLTFLoaderCls();
+  return await new Promise((res, rej) => loader.parse(buf, base, res, rej));
 }
 
 async function tryLoadGLB(id) {
   if (modelCache.has(id)) return modelCache.get(id);
   if (!GLTFLoaderCls) return 'missing'; // don't cache: loader may arrive a moment later
-  const loader = new GLTFLoaderCls();
-  for (const url of MODEL_PATHS(id)) {
-    try {
-      const r = await fetch(url); // probe first so a miss is not a loader console error
-      if (!r.ok) continue;
-      const buf = await r.arrayBuffer();
-      const base = url.slice(0, url.lastIndexOf('/') + 1);
-      const gltf = await new Promise((res, rej) => loader.parse(buf, base, res, rej));
-      modelCache.set(id, gltf); return gltf;
-    } catch (_) { /* try next path */ }
-  }
-  modelCache.set(id, 'missing'); return 'missing';
+  loadsOpen++;
+  try {
+    for (const url of MODEL_PATHS(id)) {
+      try { const gltf = await tryLoadUrl(url); modelCache.set(id, gltf); return gltf; }
+      catch (_) { /* try next path */ }
+    }
+    modelCache.set(id, 'missing'); return 'missing';
+  } finally { loadsOpen--; }
+}
+
+async function tryLoadProp(name) {
+  if (props[name]) return props[name];
+  if (!GLTFLoaderCls) return null;
+  loadsOpen++;
+  try {
+    for (const url of [`models/${name}.glb`, `../models/spider-jockey/${name}.glb`]) {
+      try { const gltf = await tryLoadUrl(url); props[name] = gltf; return gltf; }
+      catch (_) {}
+    }
+    return null;
+  } finally { loadsOpen--; }
 }
 
 async function ensureMount(r, spec) {
@@ -456,9 +557,14 @@ async function ensureMount(r, spec) {
   }
 }
 
+async function loadAllProps() {
+  await Promise.all(PROP_IDS.map(tryLoadProp));
+  for (const r of riders) if (r.mountSource === 'glb') attachSaddleProp(r);
+}
+
 function syncMount(r) {
   if (!r.mount) return;
-  r.mount.position.set(r.x, r.y, r.z);
+  r.mount.position.set(r.x, r.y + (r._burrowY || 0), r.z);
   r.mount.rotation.order = 'YXZ';
   r.mount.rotation.y = r.h;
   const bank = clamp(-r.steerVis * 0.25, -0.25, 0.25);
@@ -472,6 +578,7 @@ function addRider(name, team, spec, x, z, h) {
     throttle: 0, steer: 0, steerVis: 0, boost: false, gaitT: Math.random() * 10,
     cool: 0, sprintT: 0, stun: 0, slowT: 0, air: false, inv: 0,
     silks: [newSilk(), newSilk()], pts: 0, ko: 0, lastTouch: 0,
+    hidden: false, camoT: 0, burrowT: 0, dashT: 0, lungeT: 0, _burrowY: 0, cocoons: [],
     mount: null, mountSource: 'proc', saddle: null, spinneret: null, jockey: null,
     brain: { cool: 0.2, fire: [0, 0], ab: 0, tgt: null, why: 'idle' },
     mass: SPECIES[spec].mass, r: SPECIES[spec].r
@@ -481,12 +588,20 @@ function addRider(name, team, spec, x, z, h) {
   ensureMount(r, spec); // swap in a .glb later if one appears; never blocks play
   return r;
 }
+function ensureSilkTip(c) {
+  if (c.tip) return c.tip;
+  let tip;
+  if (props.silk_glob) { tip = props.silk_glob.scene.clone(true); tip.traverse(o => { if (o.isMesh) o.castShadow = true; }); }
+  else { tip = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 6), new THREE.MeshLambertMaterial({ color: 0xf4efe0, emissive: 0x555544 })); }
+  tip.visible = false; scene.add(tip); c.tip = tip; return tip;
+}
+function disposeSilk(c) { scene.remove(c.line); if (c.tip) scene.remove(c.tip); }
 function newSilk() {
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(9); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xf4efe0, transparent: true, opacity: 0.92 }));
   line.visible = false; scene.add(line);
-  return { st: 'none', t: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, tgt: null, kind: null, line, len: 0, held: false };
+  return { st: 'none', t: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, tgt: null, kind: null, line, tip: null, len: 0, held: false };
 }
 
 function spinneretPos(r, out) {
@@ -532,7 +647,8 @@ function updateSilk(r, dt) {
   const origin = spinneretPos(r, _v2);
   for (let i = 0; i < 2; i++) {
     const c = r.silks[i];
-    if (c.st === 'none') { c.line.visible = false; continue; }
+    if (c.st === 'none') { c.line.visible = false; if (c.tip) c.tip.visible = false; continue; }
+    ensureSilkTip(c);
     c.t += dt;
     if (c.st === 'fly') {
       c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt; c.vy -= 6 * dt;
@@ -574,6 +690,11 @@ function updateSilk(r, dt) {
     arr[3] = (origin.x + c.x) * 0.5; arr[4] = midY; arr[5] = (origin.z + c.z) * 0.5;
     arr[6] = c.x; arr[7] = c.y; arr[8] = c.z;
     c.line.geometry.attributes.position.needsUpdate = true; c.line.geometry.computeBoundingSphere(); c.line.visible = true;
+    if (c.tip) {
+      c.tip.position.set(c.x, c.y, c.z); c.tip.visible = true;
+      const dir = _v3.set(c.x - origin.x, c.y - origin.y, c.z - origin.z);
+      if (dir.lengthSq() > 1e-4) { dir.normalize(); c.tip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir); }
+    }
   }
 }
 
@@ -647,8 +768,52 @@ function bumpBall(r, b) {
 }
 
 // ---------------- abilities + webs ----------------
-function canAbility(r) { return r.cool <= 0 && r.stun <= 0 && screen === 'play' && RND && RND.st === 'live'; }
+function canAbility(r) { return r.cool <= 0 && r.stun <= 0 && !r.hidden && screen === 'play' && RND && RND.st === 'live'; }
+function isStealthed(q) { return !!(q && (q.hidden || q.camoT > 0)); }
+function applyCamo(r, on) {
+  if (!r.mount) return;
+  const sand = new THREE.Color(0xb08a4a);
+  r.mount.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      if (!m || !m.color) continue;
+      if (!m.userData._col) m.userData._col = m.color.clone();
+      if (on) { m.color.copy(m.userData._col).lerp(sand, 0.78); m.transparent = true; m.opacity = 0.55; }
+      else { m.color.copy(m.userData._col); m.opacity = 1; m.transparent = m.opacity < 1; }
+    }
+  });
+}
+function wrapCocoon(victim) {
+  if (!props.cocoon || !victim) return;
+  const c = props.cocoon.scene.clone(true);
+  c.name = 'cocoon';
+  c.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.85; } });
+  c.position.set(0, 0, 0);
+  (victim.mount || scene).add(c);
+  const rec = { mesh: c, t: 1.4, owner: victim };
+  (victim.cocoons || (victim.cocoons = [])).push(rec);
+}
+function stepCocoons(dt) {
+  for (const r of riders) {
+    if (!r.cocoons) continue;
+    for (const c of [...r.cocoons]) {
+      c.t -= dt;
+      c.mesh.traverse(o => { if (o.isMesh && o.material) o.material.opacity = Math.max(0, 0.85 * (c.t / 1.4)); });
+      if (c.t <= 0) { if (c.mesh.parent) c.mesh.parent.remove(c.mesh); r.cocoons.splice(r.cocoons.indexOf(c), 1); }
+    }
+  }
+}
+function doLunge(r) {
+  const S = SPECIES[r.spec] || {};
+  r.hidden = false; r.burrowT = 0; r._burrowY = 0; r.lungeT = 0.35;
+  const f = fwd(r), F = S.lungeF || 30;
+  r.vx += f.x * F; r.vz += f.z * F; r.y = Math.max(r.y, 0.05); r.vy += 3;
+  flash('LUNGE!', '#c9a0ff'); beep(200, 0.12, 'square', 0.05); noise(0.1, 0.04);
+  return 'lunge';
+}
 function fireAbility(r) {
+  if (r.hidden && SPECIES[r.spec] && SPECIES[r.spec].ability === 'burrow') return doLunge(r);
   if (!canAbility(r) && !(window.__sjForceAb)) return false;
   const S = SPECIES[r.spec]; r.cool = S.cool;
   if (S.ability === 'hop') {
@@ -678,13 +843,45 @@ function fireAbility(r) {
     for (const q of riders) if (q !== r && q.team !== r.team) {
       const d = Math.hypot(q.x - r.x, q.z - r.z); if (d < bestD) { best = q; bestD = d; }
     }
-    if (best) { best.slowT = S.slowT; best.stun = Math.max(best.stun, 0.15); stats.bites++; beep(140, 0.2, 'sawtooth', 0.06); flash('BITE!', '#c04060'); return 'bite'; }
+    if (best) { best.slowT = S.slowT; best.stun = Math.max(best.stun, 0.15); wrapCocoon(best); stats.bites++; beep(140, 0.2, 'sawtooth', 0.06); flash('BITE!', '#c04060'); return 'bite'; }
     flash('Too far to bite', '#ccc'); r.cool = S.cool * 0.35; return 'bite-miss';
   }
   if (S.ability === 'web') {
     const mine = webs.filter(w => w.owner === r).length;
     if (mine >= S.webMax) { const old = webs.find(w => w.owner === r); if (old) removeWeb(old); }
     dropWeb(r); stats.webs++; beep(500, 0.12, 'triangle', 0.05); flash('WEB TRAP!', '#e8d878'); return 'web';
+  }
+  if (S.ability === 'burrow') {
+    r.hidden = true; r.burrowT = S.burrowMax; r._burrowY = -0.9; r.throttle = 0; r.vx *= 0.2; r.vz *= 0.2;
+    flash('AMBUSH!', '#b080e0'); beep(180, 0.15, 'sine', 0.05); return 'burrow';
+  }
+  if (S.ability === 'camo') {
+    r.camoT = S.camoT; applyCamo(r, true);
+    flash('CAMOUFLAGE!', '#e8d878'); beep(520, 0.12, 'triangle', 0.04); return 'camo';
+  }
+  if (S.ability === 'dash') {
+    const side = r.steer !== 0 ? Math.sign(r.steer) : 1;
+    // perpendicular to heading (sin h, cos h): right = (cos h, -sin h)
+    r.vx += Math.cos(r.h) * side * S.dashF; r.vz += -Math.sin(r.h) * side * S.dashF;
+    r.dashT = S.dashT; r.inv = S.dashT;
+    flash('SIDE DASH!', '#9dff7a'); beep(900, 0.1, 'square', 0.04); return 'dash';
+  }
+  if (S.ability === 'shove') {
+    flash('SHOVE!', '#c48a40'); noise(0.2, 0.07);
+    const f = fwd(r);
+    r.vx += f.x * 6; r.vz += f.z * 6;
+    for (const q of riders) if (q !== r) {
+      const dx = q.x - r.x, dz = q.z - r.z, d = Math.hypot(dx, dz);
+      if (d < S.shoveR && dx * f.x + dz * f.z > 0.1 * d) {
+        const p = (1 - d / S.shoveR) * S.shoveF * (q.mass ? 1 / q.mass : 1) * (SPECIES[q.spec].tough || 1);
+        q.vx += (d ? dx / d : f.x) * p; q.vz += (d ? dz / d : f.z) * p; q.vy += 4; q.stun = T.STUN + 0.15; q.y = Math.max(q.y, 0.08);
+      }
+    }
+    for (const b of balls) {
+      const dx = b.x - r.x, dz = b.z - r.z, d = Math.hypot(dx, dz); const f2 = f;
+      if (d < S.shoveR + 1 && dx * f2.x + dz * f2.z > 0) { b.vx += (d ? dx / d : f2.x) * S.shoveF * 0.55; b.vz += (d ? dz / d : f2.z) * S.shoveF * 0.55; b.vy += 4; b.last = r; b.lastT = 0; }
+    }
+    return 'shove';
   }
   return false;
 }
@@ -699,23 +896,32 @@ function spawnKickBurst(r) {
   scene.add(g); bursts.push({ mesh: g, t: 0.45 });
 }
 function dropWeb(r) {
-  const S = SPECIES.orb, g = new THREE.Group(); g.position.set(r.x, 0.04, r.z);
-  const mat = new THREE.LineBasicMaterial({ color: 0xf0e8c0, transparent: true, opacity: 0.85 });
-  for (let i = 0; i < 8; i++) {
-    const a = i * Math.PI / 4, geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(Math.sin(a) * S.webR, 0, Math.cos(a) * S.webR)]);
-    g.add(new THREE.Line(geo, mat));
+  const S = SPECIES.orb, g = new THREE.Group(); g.position.set(r.x, 0.02, r.z);
+  const gltf = props[WEB_PATCH] || props.web_patch || props.web_patch_disc;
+  if (gltf) {
+    const mesh = gltf.scene.clone(true);
+    // Prop radius is 2 m; scale to the trap radius.
+    const sc = S.webR / 2; mesh.scale.set(sc, 1, sc);
+    g.add(mesh); g.userData.kind = WEB_PATCH;
+  } else {
+    const mat = new THREE.LineBasicMaterial({ color: 0xf0e8c0, transparent: true, opacity: 0.85 });
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4, geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(Math.sin(a) * S.webR, 0, Math.cos(a) * S.webR)]);
+      g.add(new THREE.Line(geo, mat));
+    }
+    for (const rad of [0.35, 0.62, 0.9]) {
+      const pts = []; for (let i = 0; i <= 24; i++) { const a = i / 24 * Math.PI * 2; pts.push(new THREE.Vector3(Math.sin(a) * S.webR * rad, 0, Math.cos(a) * S.webR * rad)); }
+      g.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    }
+    g.userData.kind = 'lines';
   }
-  for (const rad of [0.35, 0.62, 0.9]) {
-    const pts = []; for (let i = 0; i <= 24; i++) { const a = i / 24 * Math.PI * 2; pts.push(new THREE.Vector3(Math.sin(a) * S.webR * rad, 0, Math.cos(a) * S.webR * rad)); }
-    g.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), mat));
-  }
-  scene.add(g); webs.push({ x: r.x, z: r.z, r: S.webR, life: S.webLife, owner: r, team: r.team, mesh: g, hold: new Map() });
+  scene.add(g); webs.push({ x: r.x, z: r.z, r: S.webR, life: S.webLife, owner: r, team: r.team, mesh: g, kind: g.userData.kind, hold: new Map() });
 }
 function removeWeb(w) { scene.remove(w.mesh); const i = webs.indexOf(w); if (i >= 0) webs.splice(i, 1); }
 function stepWebs(dt) {
   for (const w of [...webs]) {
     w.life -= dt; if (w.life <= 0) { removeWeb(w); continue; }
-    w.mesh.rotateY(dt * 0.15);
+    if (w.kind !== 'web_patch_disc') w.mesh.rotateY(dt * 0.15);
     for (const r of riders) {
       if (r === w.owner || r.team === w.team) continue;
       const d = Math.hypot(r.x - w.x, r.z - w.z);
@@ -756,9 +962,17 @@ function stepRider(r, dt) {
   r.slowT = Math.max(0, r.slowT - dt);
   r.sprintT = Math.max(0, r.sprintT - dt);
   r.inv = Math.max(0, r.inv - dt);
+  r.dashT = Math.max(0, r.dashT - dt);
+  r.lungeT = Math.max(0, r.lungeT - dt);
+  if (r.camoT > 0) { r.camoT = Math.max(0, r.camoT - dt); if (r.camoT <= 0) applyCamo(r, false); }
+  if (r.burrowT > 0) {
+    r.burrowT = Math.max(0, r.burrowT - dt);
+    const hidFor = (SPECIES[r.spec].burrowMax || 2.2) - r.burrowT;
+    if (r.hidden && (r.burrowT <= 0 || ((r.throttle > 0.45 || r.boost) && hidFor > 0.4))) doLunge(r);
+  }
   r.inWeb = false;
 
-  let throttle = r.stun > 0 ? 0 : r.throttle;
+  let throttle = (r.stun > 0 || r.hidden) ? 0 : r.throttle;
   let steer = r.stun > 0 ? 0 : r.steer;
   r.steerVis = lerp(r.steerVis, steer, 1 - Math.exp(-10 * dt));
   r.h += steer * S.turn * dt;
@@ -782,6 +996,12 @@ function stepRider(r, dt) {
   if (nz !== r.z) { r.z = nz; r.vz *= -0.2; }
   r.spd = Math.hypot(r.vx, r.vz);
   r.mass = S.mass; r.r = S.r;
+  if (r.lungeT > 0) {
+    for (const q of riders) if (q !== r && q.team !== r.team) {
+      const d = Math.hypot(q.x - r.x, q.z - r.z);
+      if (d < r.r + q.r + 0.4) { const nx = (q.x - r.x) / (d || 1), nz = (q.z - r.z) / (d || 1); q.vx += nx * 10; q.vz += nz * 10; q.stun = Math.max(q.stun, 0.25); }
+    }
+  }
   poseLegs(r, dt);
   syncMount(r);
   updateSilk(r, dt);
@@ -823,7 +1043,7 @@ function aiThink(r, dt) {
     if (heldByMe) { tgt = { x: 0, z: attackZ, kind: 'goal' }; why = 'carry'; }
     else if (isMate && Math.hypot(bx, bz - defendZ) < 18 && Math.abs(bz - defendZ) < Math.abs(bz - attackZ)) { tgt = { x: bx, z: bz, kind: 'ball' }; why = 'defend'; }
     else { tgt = { x: bx + rand(-D.err, D.err), z: bz + rand(-D.err, D.err), kind: 'ball' }; why = 'chase'; }
-    if (heldByFoe && !heldByMe) { const foe = riders.find(q => q.team !== r.team && q.silks.some(c => c.tgt === ball)); if (foe) { tgt = { x: foe.x, z: foe.z, kind: 'foe', who: foe }; why = 'stop'; } }
+    if (heldByFoe && !heldByMe) { const foe = riders.find(q => q.team !== r.team && !isStealthed(q) && q.silks.some(c => c.tgt === ball)); if (foe) { tgt = { x: foe.x, z: foe.z, kind: 'foe', who: foe }; why = 'stop'; } }
   } else {
     tgt = { x: 0, z: (r.team === 0 ? -8 : 8), kind: 'mid' }; why = 'wait';
   }
@@ -861,11 +1081,15 @@ function aiActs(r, D) {
       if (fireSilk(r, i)) r.brain.fire[i] = rand(D.fireCool[0], D.fireCool[1]);
     }
     // also try to silk a nearby foe who has the ball
-    const foe = riders.find(q => q.team !== r.team && Math.hypot(q.x - r.x, q.z - r.z) < 16 && q.silks.some(s => s.kind === 'ball'));
+    const foe = riders.find(q => q.team !== r.team && !isStealthed(q) && Math.hypot(q.x - r.x, q.z - r.z) < 16 && q.silks.some(s => s.kind === 'ball'));
     if (foe) {
       const fd = Math.hypot(foe.x - r.x, foe.z - r.z), fa = Math.abs(angDiff(r.h, Math.atan2(foe.x - r.x, foe.z - r.z)));
       if (fd < 14 && fa < 0.3 && fireSilk(r, i)) r.brain.fire[i] = rand(D.fireCool[0], D.fireCool[1]);
     }
+  }
+  if (r.hidden && SPECIES[r.spec].ability === 'burrow') {
+    const ready = r.burrowT < (SPECIES[r.spec].burrowMax - 0.55);
+    if (ready && (r.brain.why === 'chase' || r.brain.why === 'stop' || r.burrowT < 0.4)) doLunge(r);
   }
   // ability
   if (r.brain.ab <= 0 && canAbility(r) && Math.random() < D.ab * 0.08 + (D.ab * 0.25 * dtSafe())) {
@@ -873,12 +1097,20 @@ function aiActs(r, D) {
     let use = false;
     if (S.ability === 'hop' && ((ball && Math.hypot(ball.x - r.x, ball.z - r.z) < 12) || r.brain.why === 'chase')) use = true;
     if (S.ability === 'speed' && r.brain.why === 'chase') use = true;
+    if (S.ability === 'burrow' && (r.brain.why === 'chase' || r.brain.why === 'stop' || r.brain.why === 'defend')) use = true;
+    if (S.ability === 'camo' && (r.brain.why === 'stop' || r.brain.why === 'defend' || r.brain.why === 'chase')) use = true;
+    if (S.ability === 'dash' && (r.brain.why === 'chase' || r.brain.why === 'defend')) use = true;
+    if (S.ability === 'shove') {
+      const near = riders.some(q => q !== r && q.team !== r.team && !isStealthed(q) && Math.hypot(q.x - r.x, q.z - r.z) < S.shoveR)
+        || (ball && Math.hypot(ball.x - r.x, ball.z - r.z) < S.shoveR);
+      use = near;
+    }
     if (S.ability === 'kick') {
       const near = riders.some(q => q !== r && q.team !== r.team && Math.hypot(q.x - r.x, q.z - r.z) < S.kickR)
         || (ball && Math.hypot(ball.x - r.x, ball.z - r.z) < S.kickR);
       use = near;
     }
-    if (S.ability === 'bite') use = riders.some(q => q.team !== r.team && Math.hypot(q.x - r.x, q.z - r.z) < S.biteR);
+    if (S.ability === 'bite') use = riders.some(q => q.team !== r.team && !isStealthed(q) && Math.hypot(q.x - r.x, q.z - r.z) < S.biteR);
     if (S.ability === 'web' && (r.brain.why === 'defend' || (ball && Math.hypot(ball.x - r.x, ball.z - r.z) < 10))) use = true;
     if (use) { fireAbility(r); r.brain.ab = 1.2; }
   }
@@ -1066,7 +1298,7 @@ function openOvl(mode, html, wide) {
 function assignAISpecies(youSpec) {
   const leftover = SPEC_IDS.filter(id => id !== youSpec);
   // prefer flavorful defaults, then fill
-  const prefer = { GOLD: 'wolf', RED: 'tarantula', VIOLET: 'widow' };
+  const prefer = { GOLD: 'wolf', RED: 'tarantula', VIOLET: 'widow' }; // leftovers include the four new mounts
   const used = new Set([youSpec]), out = {};
   for (const n of ['GOLD', 'RED', 'VIOLET']) {
     const p = prefer[n];
@@ -1078,7 +1310,8 @@ function assignAISpecies(youSpec) {
 
 function spawnRiders(youSpec) {
   for (const r of riders) {
-    for (const c of r.silks) scene.remove(c.line);
+    for (const c of r.silks) disposeSilk(c);
+    if (r.cocoons) for (const c of r.cocoons) if (c.mesh.parent) c.mesh.parent.remove(c.mesh);
     if (r.mount) scene.remove(r.mount);
   }
   riders.length = 0;
@@ -1141,13 +1374,13 @@ function showPick() {
     const S = SPECIES[id], sel = pickChoice.spec === id ? ' sel' : '';
     return `<button class="pick${sel}" data-s="${id}"><b>${S.name}</b><div class="ab">${S.abilityName}</div><div class="bl">${S.blurb}</div></button>`;
   }).join('');
-  openOvl('pick', `<h2>Spider Jockey v0.1</h2>
+  openOvl('pick', `<h2>Spider Jockey v0.2</h2>
     <p class="sub">Silkball is the Rocketball port: 2v2, walk your mount, snag the ball with silk, score. <a href="../3d/" target="_blank" rel="noopener">RJ 3D v0.9.5 (shelved)</a></p>
-    <div class="sub">PICK YOUR MOUNT — each species has one ability</div>
+    <div class="sub">PICK YOUR MOUNT — nine species, each with one ability</div>
     <div class="picks">${cards}</div>
     <div class="lays rrow">ROUND: ${RLENS.map(v => `<button data-r="${v}" class="${v === RLEN ? 'sel' : ''}">${v === 'free' ? 'Free' : v + ' min'}</button>`).join('')}</div>
     <div class="btns"><button class="go" id="pkGo">PLAY SILKBALL</button><button class="go alt" id="pkHelp">❓ CONTROLS</button></div>
-    <p class="sub">Unofficial fan-made homage; not affiliated with the 1996 Rocket Jockey. Procedural mounts for now; drop a .glb in models/ later.</p>`);
+    <p class="sub">Unofficial fan-made homage; not affiliated with the 1996 Rocket Jockey. Nine low-poly mounts; a procedural spider fills in if a model is missing.</p>`);
   for (const b of document.querySelectorAll('#ovl .pick')) b.addEventListener('click', () => { pickChoice.spec = b.dataset.s; localStorage.setItem('sj_species', pickChoice.spec); showPick(); });
   for (const b of document.querySelectorAll('#ovl [data-r]')) b.addEventListener('click', () => { RLEN = b.dataset.r; localStorage.setItem('sj_rlen', RLEN); showPick(); });
   $('pkGo').addEventListener('click', () => newRound(false));
@@ -1219,7 +1452,7 @@ function sim(dt) {
   for (const r of riders) { if (r.ai) aiThink(r, dt); stepRider(r, dt); }
   separateRiders(dt);
   for (const b of [...balls]) { for (const r of riders) bumpBall(r, b); stepBall(b, dt); }
-  stepWebs(dt); stepBursts(dt); stepCamera(dt); updAbHint();
+  stepWebs(dt); stepBursts(dt); stepCocoons(dt); stepCamera(dt); updAbHint();
   if (msgT > 0) { msgT -= dt; if (msgT <= 0) $('msg').style.opacity = 0; }
 }
 
@@ -1251,14 +1484,15 @@ function applyTestInputs(o) {
 }
 
 function hookState() {
-  const pack = r => r && ({ name: r.name, spec: r.spec, team: r.team, x: r.x, y: r.y, z: r.z, h: r.h, vx: r.vx, vy: r.vy, vz: r.vz, spd: r.spd, cool: r.cool, stun: r.stun, slowT: r.slowT, sprintT: r.sprintT, air: !!r.air, mount: r.mountSource, silk: r.silks.map(c => ({ st: c.st, kind: c.kind, x: c.x, y: c.y, z: c.z })), pts: r.pts, brain: r.ai ? r.brain.why : null });
+  const pack = r => r && ({ name: r.name, spec: r.spec, team: r.team, x: r.x, y: r.y, z: r.z, h: r.h, vx: r.vx, vy: r.vy, vz: r.vz, spd: r.spd, cool: r.cool, stun: r.stun, slowT: r.slowT, sprintT: r.sprintT, air: !!r.air, hidden: !!r.hidden, camoT: r.camoT, burrowT: r.burrowT, dashT: r.dashT, lungeT: r.lungeT, cocoons: (r.cocoons || []).length, mount: r.mountSource, silk: r.silks.map(c => ({ st: c.st, kind: c.kind, x: c.x, y: c.y, z: c.z })), pts: r.pts, brain: r.ai ? r.brain.why : null });
   return {
     version: VERSION, frames, t: simTime, screen, ovl: ovlMode, mode: 'silkball',
     species: player && player.spec, score: teamGoals.slice(),
     you: pack(player), ai: riders.filter(r => r.ai).map(pack),
     riders: riders.map(pack),
     balls: balls.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, last: b.last && b.last.name })),
-    webs: webs.map(w => ({ x: w.x, z: w.z, r: w.r, life: w.life, team: w.team })),
+    webs: webs.map(w => ({ x: w.x, z: w.z, r: w.r, life: w.life, team: w.team, kind: w.kind })),
+    webPatch: WEB_PATCH, loading: loadsOpen,
     wanda: ovlMode === 'wanda' ? { open: true, fact: lastFact && lastFact.text, id: lastFact && lastFact.id } : { open: false, fact: lastFact && lastFact.text, id: lastFact && lastFact.id },
     rnd: RND && { st: RND.st, t: RND.t, left: RND.left, len: RND.len, why: RND.why },
     stats: { ...stats },
@@ -1287,7 +1521,7 @@ function hookStep(dt, inputs, opts) {
           for (const r of riders) { if (r.ai) aiThink(r, dt); stepRider(r, dt); }
           separateRiders(dt);
           for (const b of [...balls]) { for (const q of riders) bumpBall(q, b); stepBall(b, dt); }
-          stepWebs(dt); stepBursts(dt);
+          stepWebs(dt); stepBursts(dt); stepCocoons(dt);
         }
       }
     }
@@ -1308,7 +1542,7 @@ const hook = {
   playerSpeed(v) { if (!player) return; const f = fwd(player); player.vx = f.x * v; player.vz = f.z * v; player.spd = v; },
   placeAI(i, x, z, h) { const a = riders.filter(r => r.ai)[i]; if (!a) return; a.x = x; a.z = z; if (h != null) a.h = h; a.vx = a.vz = 0; syncMount(a); },
   speedAI(i, v) { const a = riders.filter(r => r.ai)[i]; if (!a) return; const f = fwd(a); a.vx = f.x * v; a.vz = f.z * v; },
-  setSpecies(name, id) { const r = riders.find(q => q.name === name); id = resolveSpec(id) || id; if (!r || !SPECIES[id]) return false; r.spec = id; r.cool = 0; bindMount(r, makeProceduralSpider(id), 'proc'); ensureMount(r, id); return true; },
+  setSpecies(name, id) { const r = riders.find(q => q.name === name); id = resolveSpec(id) || id; if (!r || !SPECIES[id]) return false; r.spec = id; r.cool = 0; r.hidden = false; r.camoT = 0; r.burrowT = 0; r._burrowY = 0; r.dashT = 0; r.lungeT = 0; bindMount(r, makeProceduralSpider(id), 'proc'); ensureMount(r, id); return true; },
   fireAbility(name) { const r = name ? riders.find(q => q.name === name) : player; if (!r) return false; r.cool = 0; const prev = screen, st = RND && RND.st; screen = 'play'; if (RND) RND.st = 'live'; const out = fireAbility(r); screen = prev; if (RND) RND.st = st; return out; },
   fireSilk(name, i) { const r = name ? riders.find(q => q.name === name) : player; return r ? fireSilk(r, i || 0) : false; },
   releaseSilk(name, i) { const r = name ? riders.find(q => q.name === name) : player; if (r) releaseSilk(r, i || 0); },
@@ -1322,6 +1556,9 @@ const hook = {
   setTimeLeft(s) { if (!RND) return; if (!RND.len) RND.len = s; RND.left = s; if (RND.len < s) RND.len = s; RND.t = RND.len - s; },
   setRLen(v) { RLEN = String(v); },
   youAI(on) { if (!player) return; player.ai = !!on; if (on) player.brain.cool = 0.1; },
+  loading: () => loadsOpen,
+  webPatch: () => WEB_PATCH,
+  propsReady: () => PROP_IDS.filter(n => !!props[n]),
   layout: () => LAY, setLayout, diff: () => diff,
   facts: () => WANDA_FACTS.map(f => f.id), lastFact: () => lastFact,
   species: () => SPEC_IDS, help: () => ({ open: ovlMode === 'help', text: ovlMode === 'help' ? $('ovl').innerText : '', lay: LAY, back: helpBack }),
@@ -1333,7 +1570,11 @@ window.__game = hook; window.__sj = hook;
 
 // ---------------- boot ----------------
 applyQuality(); applyLayout(); resize();
-import('three/addons/loaders/GLTFLoader.js').then(m => { GLTFLoaderCls = m.GLTFLoader; for (const r of riders) ensureMount(r, r.spec); }).catch(() => {});
+import('three/addons/loaders/GLTFLoader.js').then(async m => {
+  GLTFLoaderCls = m.GLTFLoader;
+  await loadAllProps();
+  for (const r of riders) await ensureMount(r, r.spec);
+}).catch(() => {});
 if (skipTut) { newRound(false); skipCount(); } else showPick();
 requestAnimationFrame(loop);
 </script>

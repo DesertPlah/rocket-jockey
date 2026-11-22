@@ -1,6 +1,6 @@
 // Spider Jockey service worker: own cache, scope is /spider/ so it never shares the 2D/3D cache.
 // Bump VERSION on every deploy that changes cached files (old caches are deleted on activate).
-const VERSION = 'sj-pwa-2026-11-22a'; // Spider Jockey v0.1
+const VERSION = 'sj-pwa-2026-11-22b'; // Spider Jockey v0.2
 const SHELL = ['./', './index.html', './manifest.webmanifest',
   './icons/sj-192.png', './icons/sj-512.png'];
 const CDN = [
