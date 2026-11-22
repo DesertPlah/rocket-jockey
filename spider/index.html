@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<link rel="icon" href="icons/sj-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/sj-192.png">
+<meta name="theme-color" content="#1a140c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Spider Jockey">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Spider Jockey v0.1</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#100c08;touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:system-ui,Arial,sans-serif}
+canvas{display:block;touch-action:none}
+.hud{position:fixed;color:#fff;text-shadow:0 0 3px #000,1px 1px 0 #000;pointer-events:none;z-index:5}
+#ver{top:6px;left:8px;font-size:13px;opacity:.85}
+#fps{top:6px;right:8px;font-size:13px;font-family:monospace}
+#score{top:6px;left:50%;transform:translateX(-50%);font-size:20px;font-weight:bold}
+#rtime{top:30px;left:50%;transform:translateX(-50%);font-size:14px;font-weight:bold;color:#fff}
+#rtime.low{color:#ff6a5a}
+#rcount{top:32%;left:50%;transform:translateX(-50%);font-size:72px;font-weight:900;color:#ffd84a;display:none;text-shadow:0 0 8px #000,3px 3px 0 #000}
+#msg{top:34%;left:50%;transform:translate(-50%,-50%);font-size:26px;font-weight:bold;color:#ffd84a;opacity:0;transition:opacity .25s}
+#trick{top:20%;left:50%;transform:translateX(-50%);font-size:18px;font-weight:bold;color:#ffb040;text-align:center}
+#abHint{top:52px;left:8px;font-size:12px;opacity:.9}
+#topbtns{position:fixed;top:28px;right:8px;z-index:6;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:55%}
+#topbtns button{background:rgba(0,0,0,.45);color:#fff;border:1px solid #fff8;border-radius:6px;font-size:12px;padding:4px 8px}
+.btn{position:fixed;z-index:6;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:14px;border:3px solid rgba(255,255,255,.7);touch-action:none;text-align:center;line-height:1.1}
+.btn.on{filter:brightness(1.6);transform:scale(.94)}
+#bBoost{right:24px;bottom:22px;width:96px;height:96px;background:rgba(255,120,30,.45)}
+#bL{right:150px;bottom:70px;width:78px;height:78px;background:rgba(40,200,255,.4)}
+#bR{right:46px;bottom:140px;width:78px;height:78px;background:rgba(255,80,200,.4)}
+#bT{left:22px;bottom:150px;width:72px;height:72px;background:rgba(180,80,255,.45);font-size:13px}
+#bT.off{opacity:.4}
+#bT.ready{opacity:1;box-shadow:0 0 12px #c9f}
+#stickBase,#stickKnob{position:fixed;z-index:6;border-radius:50%;pointer-events:none;display:none}
+#stickBase{width:120px;height:120px;margin:-60px 0 0 -60px;border:3px solid rgba(255,255,255,.5);background:rgba(255,255,255,.08)}
+#stickKnob{width:54px;height:54px;margin:-27px 0 0 -27px;background:rgba(255,255,255,.55)}
+#stickHint{left:40px;bottom:40px;font-size:12px;opacity:.6}
+#cross{position:fixed;left:50%;top:42%;width:14px;height:14px;margin:-7px;border:2px solid #fff9;border-radius:50%;z-index:4;pointer-events:none}
+.desk .btn,.desk #stickHint{display:none}
+body:not(.desk) #cross,body.touched #cross{display:none!important}
+@media (pointer:coarse){#cross{display:none!important}}
+body.lay-hybrid #bT{display:none!important}
+body.lay-hybrid #bR{right:16px;bottom:16px;width:92px;height:92px}
+body.lay-hybrid #bL{right:126px;bottom:16px;width:92px;height:92px}
+body.lay-hybrid #bBoost{right:72px;bottom:126px;width:90px;height:90px}
+body.lay-hybrid #bAb{display:flex}
+#bAb{left:18px;bottom:22px;width:78px;height:78px;background:rgba(180,80,255,.45);font-size:12px;display:none}
+body.lay-classic #bAb{display:none}
+body.lay-gesture .btn,body.lay-gesture #bAb{display:none!important}
+.gz{position:fixed;top:66px;bottom:8px;z-index:4;pointer-events:none;border:2px dashed rgba(255,255,255,.45);border-radius:14px;display:none;align-items:center;justify-content:center;text-align:center;color:#fff;font-weight:bold;font-size:15px;text-shadow:0 0 3px #000;transition:opacity .6s;background:rgba(255,255,255,.04)}
+#gzL{left:calc(50% + 6px);right:calc(25% + 3px)}#gzR{left:calc(75% + 3px);right:6px}
+#gzUp{position:fixed;left:50%;right:0;top:74px;z-index:4;pointer-events:none;text-align:center;font-size:13px;font-weight:bold;color:#ffcf7a;display:none;text-shadow:0 0 3px #000}
+#gzAb{position:fixed;left:8px;bottom:8px;width:28%;height:22%;z-index:4;pointer-events:none;border:2px dashed rgba(200,140,255,.5);border-radius:14px;display:none;align-items:center;justify-content:center;color:#e6c;font-weight:bold;font-size:14px;text-shadow:0 0 3px #000}
+body.lay-gesture.gzon .gz,body.lay-gesture.gzon #gzUp,body.lay-gesture.gzon #gzAb{display:flex}
+#ovl{position:fixed;inset:0;height:100dvh;z-index:15;background:rgba(0,0,0,.72);display:none;align-items:flex-start;justify-content:center;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 0;box-sizing:border-box;color:#fff;text-align:center}
+#ovl.show{display:flex}
+#ovl .card{max-width:560px;width:88%;max-height:calc(100dvh - 12px);overflow:auto;margin:auto;box-sizing:border-box;background:rgba(20,16,24,.95);border:2px solid #fff6;border-radius:14px;padding:12px 18px}
+#ovl .card.wide{max-width:900px;width:96%}
+#ovl h2{margin:2px 0 8px;font-size:20px;color:#ffd84a}
+#ovl :is(.lays,.mrow){display:flex;gap:8px;justify-content:center;margin:6px 0 10px;flex-wrap:wrap}
+#ovl :is(.lays,.mrow) button,#ovl .go{font-size:15px;font-weight:bold;padding:10px 12px;border-radius:10px;border:2px solid #fff8;background:rgba(255,255,255,.1);color:#fff;min-width:110px}
+#ovl :is(.lays,.mrow) button.sel{background:#2f7d3a;border-color:#7dff8a}
+#ovl .go{background:#c46a12;border-color:#ffc070;min-width:160px;margin-top:6px}
+#ovl .go.alt{background:rgba(255,255,255,.12);border-color:#fff8}
+#ovl ul{text-align:left;margin:4px 0;padding-left:18px;font-size:14px;line-height:1.35}
+#ovl .sub{font-size:12px;opacity:.75;margin:4px 0}
+#ovl .btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px}
+#ovl .btns .go{min-width:120px;padding:8px 10px}
+#ovl .picks{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:8px 0}
+#ovl .pick{width:148px;text-align:left;padding:8px 10px;border-radius:12px;border:2px solid #fff5;background:rgba(255,255,255,.07);color:#fff;cursor:pointer}
+#ovl .pick.sel{border-color:#ffd84a;background:#3a2a10;box-shadow:0 0 0 1px #ffd84a88}
+#ovl .pick b{display:block;color:#ffd84a;font-size:14px}
+#ovl .pick .ab{color:#c9a0ff;font-size:12px;font-weight:bold}
+#ovl .pick .bl{font-size:11px;opacity:.8;margin-top:3px;line-height:1.3}
+#ovl .wanda{display:flex;gap:12px;align-items:flex-start;text-align:left}
+#ovl .wanda svg{flex:0 0 88px;width:88px;height:88px}
+#ovl .wanda .fact{font-size:15px;line-height:1.4;margin:0}
+#ovl .help .hk th{white-space:nowrap;color:#ffd84a;font-weight:bold;padding-right:8px}
+#ovl .help .hk td{text-align:left;white-space:normal;font-size:13px}
+#ovl table{border-collapse:collapse;width:100%;font-size:13px}
+#ovl .stand td{font-size:15px;padding:2px 6px}
+#ovl .nYOU{color:#7dff8a}#ovl .nRED{color:#ff7a7a}#ovl .nGOLD{color:#ffd84a}#ovl .nVIOLET{color:#c69cff}
+#ovl .stand tr.nYOU{background:#2f7d3a66}
+#ovl a{color:#ffd84a}
+#rotHint{position:fixed;left:50%;bottom:8px;transform:translateX(-50%);z-index:8;background:rgba(0,0,0,.55);color:#ffd84a;padding:4px 10px;border-radius:8px;font-size:12px;display:none;pointer-events:none}
+@media (orientation:portrait){
+  #rotHint{display:block}
+  #bBoost{right:16px;bottom:16px;width:80px;height:80px}
+  #bL{right:112px;bottom:16px;width:70px;height:70px}
+  #bR{right:16px;bottom:104px;width:70px;height:70px}
+  body.lay-hybrid #bR{right:12px;bottom:12px;width:78px;height:78px}
+  body.lay-hybrid #bL{right:100px;bottom:12px;width:78px;height:78px}
+  body.lay-hybrid #bBoost{right:52px;bottom:100px;width:76px;height:76px}
+  body.lay-hybrid #bAb{left:12px;bottom:16px;width:68px;height:68px}
+  #bT,#bAb{left:12px;bottom:16px;width:68px;height:68px}
+  #topbtns{top:48px;max-width:48%}
+  #score{font-size:16px}
+  #ovl .card{width:94%;padding:10px 12px}
+  #ovl .pick{width:42%}
+}
+#ovl .btns{position:sticky;bottom:0;background:rgba(20,16,24,.97);padding:6px 0 2px;z-index:1}
+@media (max-height:430px){
+  #ovl .card{padding:4px 10px 8px}
+  #ovl h2{font-size:16px;margin:0 0 2px}
+  #ovl .go{padding:6px 10px;margin-top:3px}
+  #ovl :is(.lays,.mrow) button{padding:5px 8px}
+  #ovl .sub{margin:1px 0;font-size:11px}
+  #ovl .picks{margin:4px 0;gap:6px}
+  #ovl .pick{padding:5px 8px;width:140px}
+  #ovl .pick .bl{display:none}
+  #ovl .pick b{font-size:13px}
+  #ovl .wanda .fact{font-size:13px}
+  #ovl .wanda svg{flex-basis:64px;width:64px;height:64px}
+}
+</style>
+<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {}));</script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head><body>
+<div id="ver" class="hud">Spider Jockey v0.1</div>
+<div id="score" class="hud">0 — 0</div><div id="rtime" class="hud"></div><div id="rcount" class="hud"></div>
+<div id="fps" class="hud">-- fps</div>
+<div id="msg" class="hud"></div><div id="trick" class="hud"></div>
+<div id="abHint" class="hud"></div>
+<div id="topbtns"><button id="bPause">⏸</button><button id="bCtl">🎮 HYBRID</button><button id="bDiff">AI: NORMAL</button><button id="bLQ">LQ: on</button><button id="bFS">⛶</button></div>
+<div id="cross"></div>
+<div id="stickBase"></div><div id="stickKnob"></div><div id="stickHint" class="hud">drag left side to steer</div>
+<div id="bL" class="btn">◀ SILK</div><div id="bR" class="btn">SILK ▶</div><div id="bBoost" class="btn">BOOST</div><div id="bT" class="btn">ABILITY</div><div id="bAb" class="btn">ABILITY</div>
+<div id="gzL" class="gz">◀ SILK<br>tap / hold</div><div id="gzR" class="gz">SILK ▶<br>tap / hold</div>
+<div id="gzUp">flick ▲ = BOOST (keep holding)</div>
+<div id="gzAb">ABILITY</div>
+<div id="ovl"><div class="card"></div></div>
+<div id="rotHint">Landscape feels better ↻ — portrait still plays</div>
+<script type="module">
+import * as THREE from 'three';
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const lerp = (a, b, t) => a + (b - a) * t;
+const angDiff = (a, b) => { let d = (b - a + Math.PI) % (Math.PI * 2); if (d < 0) d += Math.PI * 2; return d - Math.PI; };
+const TOUCH = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
+if (!TOUCH) document.body.classList.add('desk');
+const VERSION = 'Spider Jockey v0.1';
+const QS = new URLSearchParams(location.search);
+
+// ---------------- species + Wanda facts ----------------
+const SPECIES = {
+  jumping: { id:'jumping', name:'Jumping spider', short:'Jumping', ability:'hop', abilityName:'HOP',
+    blurb:'A sharp-eyed pouncer. Leap forward and up.',
+    aliases:['jumping','jumping-spider','jump'], color:0xc4a06a, belly:0xe8d0a8, mark:0x3a2a18,
+    scale:0.88, mass:0.9, base:13.5, boost:20, turn:2.6, cool:3.2, jumpV:13, jumpF:16, r:1.7 },
+  wolf: { id:'wolf', name:'Wolf spider', short:'Wolf', ability:'speed', abilityName:'SPRINT',
+    blurb:'A ground chaser. Burst into a short sprint.',
+    aliases:['wolf','wolf-spider'], color:0x6b5340, belly:0xbca080, mark:0x2a2018,
+    scale:1.0, mass:1.0, base:16, boost:24, turn:2.3, cool:6.0, sprintMul:1.65, sprintT:2.2, r:1.85 },
+  tarantula: { id:'tarantula', name:'Tarantula', short:'Tarantula', ability:'kick', abilityName:'HAIR KICK',
+    blurb:'A heavy tank. Kick urticating hairs that knock foes back.',
+    aliases:['tarantula'], color:0x4a2c1a, belly:0x7a4a28, mark:0x2a1810,
+    scale:1.18, mass:1.65, base:10, boost:16, turn:1.7, cool:4.2, kickR:7.2, kickF:22, tough:0.55, r:2.15 },
+  widow: { id:'widow', name:'Black widow', short:'Widow', ability:'bite', abilityName:'SLOW BITE',
+    blurb:'A patient hunter. Bite at close range to slow a rival.',
+    aliases:['widow','black-widow','blackwidow'], color:0x141414, belly:0x1a1a1a, mark:0xc01414,
+    scale:0.9, mass:0.95, base:13, boost:19, turn:2.4, cool:5.0, biteR:4.4, slowMul:0.38, slowT:3.5, r:1.7 },
+  orb: { id:'orb', name:'Orb weaver', short:'Orb weaver', ability:'web', abilityName:'WEB TRAP',
+    blurb:'A silk architect. Drop a web that snares anyone who walks in.',
+    aliases:['orb','orb-weaver','orbweaver','argiope'], color:0x1a1a14, belly:0xf0d030, mark:0xf0d030,
+    scale:1.02, mass:1.0, base:12, boost:18, turn:2.05, cool:7.0, webR:4.2, webLife:14, webSlow:0.12, webMax:2, r:1.9 }
+};
+const SPEC_IDS = Object.keys(SPECIES);
+const SPEC_ALIASES = {};
+for (const id of SPEC_IDS) for (const a of SPECIES[id].aliases) SPEC_ALIASES[a] = id;
+function resolveSpec(s) { return SPEC_ALIASES[(s || '').toLowerCase()] || null; }
+
+// Curated, true facts. Sources are well-established natural-history (not folklore).
+const WANDA_FACTS = [
+  { id:'eyes', text:'Jumping spiders have four large, forward-facing eyes and can see in color — unusual among spiders.' },
+  { id:'wolfbabies', text:'Wolf spiders carry their egg sacs on their spinnerets. After hatching, the spiderlings ride on their mother’s back.' },
+  { id:'hairs', text:'Many New World tarantulas kick tiny urticating hairs off their abdomen when threatened. The hairs can irritate skin and eyes.' },
+  { id:'latrotoxin', text:'Black widow venom contains latrotoxin, a neurotoxin. Bites hurt, but with modern care they are rarely fatal.' },
+  { id:'recycle', text:'Garden orb weavers often eat their own web at dawn and spin a fresh one, recycling the silk protein.' },
+  { id:'dragline', text:'Dragline silk is, pound for pound, stronger than steel and about as tough as Kevlar.' },
+  { id:'eye-count', text:'Most spiders have eight eyes, but some have six, two, or none — especially species that live in caves.' },
+  { id:'external', text:'Spiders digest prey outside their bodies: they regurgitate enzymes onto it, then drink the liquefied tissue.' },
+  { id:'pedicel', text:'A spider’s “waist” is the pedicel, a narrow stem that joins the cephalothorax to the abdomen.' },
+  { id:'safety-line', text:'A jumping spider can leap many times its body length, and it trails a silk safety line — a dragline — as it jumps.' },
+  { id:'maratus', text:'Male peacock spiders (Maratus) raise and wave colorful abdominal flaps in a courtship dance.' },
+  { id:'goliath', text:'The Goliath birdeater (Theraphosa blondi) is the heaviest spider; its leg span can reach about 28 cm (11 in).' },
+  { id:'hemocyanin', text:'A spider’s blood is pale blue because it uses hemocyanin, a copper-based protein, to carry oxygen.' },
+  { id:'kinds-of-silk', text:'Silk leaves the spinnerets as a liquid and hardens as it is drawn. Different glands make dragline, capture, and wrapping silk.' },
+  { id:'crab-color', text:'Some crab spiders can change color over several days to match the flowers they hunt on.' },
+  { id:'shy', text:'Only a few spider species are dangerous to people. Almost all would rather flee than bite.' }
+];
+let wandaUsed = [];
+function nextWandaFact() {
+  if (wandaUsed.length >= WANDA_FACTS.length) wandaUsed = [];
+  const pool = WANDA_FACTS.filter(f => !wandaUsed.includes(f.id));
+  const f = pool[Math.floor(Math.random() * pool.length)];
+  wandaUsed.push(f.id); return f;
+}
+
+// ---------------- tuning ----------------
+const T = {
+  ARENA: 50, ACCEL: 14, BRAKE: 18, CAM_D: 11, CAM_H: 5.6, CAM_W: 5.5, LOOK_W: 8,
+  SILK_MAX: 24, SILK_SPEED: 42, SILK_LIFE: 2.6, SILK_FWD: 8 * Math.PI / 180, REEL: 28, MIN_LEN: 3.2,
+  TIP_R: 0.45, ROPE_K: 22, CARRY_L: 5.5, WHIP: 1.4, LOFT: 2.4, RIDER_R: 1.2,
+  GRAV: 28, BALL_R: 1.25, BALL_BOUNCE: 0.55, BALL_ROLL: 0.45, BALL_AIR: 0.08, BALL_WALL: 0.65,
+  GZ: 46, GW: 11, GH: 6.5, MAX_BALLS: 1, FIRST: 1.1, AFTER: 1.4, PTS_GOAL: 25, PTS_ASSIST: 8,
+  STUN: 0.4, WEB_HOLD: 1.15
+};
+const TEAMS = [{ name:'GREEN', css:'#7dff8a', hex:0x2ad04a }, { name:'RED', css:'#ff7a7a', hex:0xe03030 }];
+const DIFFS = {
+  EASY:   { think:[0.8, 1.3], err:2.6, lead:0.25, fireCool:[3.8, 6.5], ab:0.12, lazy:0.55, spd:0.78, aim:1.3, react:0.9 },
+  NORMAL: { think:[0.35, 0.6], err:1.0, lead:0.7, fireCool:[1.6, 2.8], ab:0.45, lazy:0.16, spd:0.95, aim:0.95, react:0.55 },
+  HARD:   { think:[0.14, 0.28], err:0.22, lead:1.0, fireCool:[0.55, 1.1], ab:0.8, lazy:0, spd:1.06, aim:0.7, react:0.3 }
+};
+const LAYOUTS = ['CLASSIC', 'HYBRID', 'GESTURE'];
+let LAY = LAYOUTS.includes((QS.get('layout') || '').toUpperCase()) ? QS.get('layout').toUpperCase()
+  : LAYOUTS.includes(localStorage.getItem('sj_layout')) ? localStorage.getItem('sj_layout') : 'HYBRID';
+let diff = DIFFS[localStorage.getItem('sj_diff')] ? localStorage.getItem('sj_diff') : (DIFFS[QS.get('diff')] ? QS.get('diff') : 'NORMAL');
+let lowQ = localStorage.getItem('sj_lq') !== '0';
+const RLENS = ['1', '2', '3', 'free'];
+let RLEN = RLENS.includes(QS.get('len')) ? QS.get('len') : (RLENS.includes(localStorage.getItem('sj_rlen')) ? localStorage.getItem('sj_rlen') : '2');
+let skipTut = QS.get('tut') === '0' || QS.get('help') === '0';
+
+// ---------------- audio ----------------
+let actx = null;
+function ensureAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {} } if (actx && actx.state === 'suspended') actx.resume().catch(() => {}); }
+function beep(f, d, type, g) {
+  if (!actx) return;
+  const o = actx.createOscillator(), a = actx.createGain();
+  o.type = type || 'square'; o.frequency.value = f; a.gain.value = g || 0.05;
+  a.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + d);
+  o.connect(a).connect(actx.destination); o.start(); o.stop(actx.currentTime + d);
+}
+function noise(d, g) {
+  if (!actx) return;
+  const n = actx.createBuffer(1, actx.sampleRate * d, actx.sampleRate);
+  const c = n.getChannelData(0); for (let i = 0; i < c.length; i++) c[i] = Math.random() * 2 - 1;
+  const s = actx.createBufferSource(), a = actx.createGain(); s.buffer = n; a.gain.value = g || 0.04;
+  a.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + d); s.connect(a).connect(actx.destination); s.start();
+}
+
+// ---------------- renderer / scene ----------------
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const SKY = 0x2a1c28; scene.background = new THREE.Color(SKY); scene.fog = new THREE.Fog(SKY, 40, 140);
+const camera = new THREE.PerspectiveCamera(65, 1, 0.3, 400);
+scene.add(new THREE.HemisphereLight(0xffd8b0, 0x3a2a18, 1.15));
+const sun = new THREE.DirectionalLight(0xffc070, 1.5); sun.position.set(30, 55, 20);
+sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left:-50, right:50, top:50, bottom:-50, near:8, far:160 });
+scene.add(sun, sun.target);
+function applyQuality() {
+  renderer.setPixelRatio(lowQ ? Math.min(1, devicePixelRatio) * (TOUCH ? 0.85 : 1) : Math.min(2, devicePixelRatio));
+  renderer.shadowMap.enabled = !lowQ; sun.castShadow = !lowQ; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+  $('bLQ').textContent = 'LQ: ' + (lowQ ? 'on' : 'off'); resize();
+}
+function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.fov = w / h < 1.15 ? 78 : 65; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize);
+const M = (c, opt) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, ...(opt || {}) });
+const up = new THREE.Vector3(0, 1, 0);
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+function box(w, h, d, c, x=0, y=0, z=0, parent=scene, kind='deco') {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(c)); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; m.userData.kind = kind; parent.add(m); return m;
+}
+const A = T.ARENA;
+{ const g = new THREE.PlaneGeometry(A * 2, A * 2, 12, 12).toNonIndexed(); g.rotateX(-Math.PI / 2);
+  const col = [], c1 = new THREE.Color(0xb08a4a), c2 = new THREE.Color(0xc49a58);
+  for (let i = 0; i < g.attributes.position.count; i += 6) { const c = ((i / 6) + Math.floor(i / 72)) % 2 ? c1 : c2; for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b); }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const gm = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true })); gm.receiveShadow = true; gm.userData.kind = 'ground'; scene.add(gm);
+  const out = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), M(0x6a5340)); out.rotation.x = -Math.PI / 2; out.position.y = -0.06; out.userData.kind = 'ground'; scene.add(out);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(8, 8.6, 28), new THREE.MeshBasicMaterial({ color: 0xf0e0b0, side: THREE.DoubleSide })); ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; scene.add(ring);
+  const mid = new THREE.Mesh(new THREE.PlaneGeometry(A * 2, 0.35), new THREE.MeshBasicMaterial({ color: 0xf0e0b0 })); mid.rotation.x = -Math.PI / 2; mid.position.y = 0.03; scene.add(mid);
+}
+// rodeo fence + stands
+for (let s = 0; s < 4; s++) for (let i = 0; i < 12; i++) {
+  const t = -A + (i + 0.5) * (A * 2 / 12), L = A * 2 / 12, c = (i + s) % 2 ? 0x6a3a18 : 0x8a5a28;
+  const [x, z, w, d] = s === 0 ? [t, -A - 0.7, L, 1.4] : s === 1 ? [t, A + 0.7, L, 1.4] : s === 2 ? [-A - 0.7, t, 1.4, L] : [A + 0.7, t, 1.4, L];
+  box(w, 2.4, d, c, x, 1.2, z, scene, 'wall');
+  const sx = s < 2 ? 0 : (s === 2 ? -1 : 1), sz = s < 2 ? (s === 0 ? -1 : 1) : 0;
+  for (let r = 0; r < 3; r++) box(s < 2 ? L : 2.6, 1.6 + r * 1.6, s < 2 ? 2.6 : L, [0x3a2a22, 0x4a3a30, 0x2e241c][(i + r) % 3], x + sx * (3.2 + r * 2.4), 0.8 + r * 0.9, z + sz * (3.2 + r * 2.4), scene, 'stand');
+}
+// goals
+const goalGroups = [];
+function buildGoals() {
+  for (const g of goalGroups) scene.remove(g); goalGroups.length = 0;
+  for (const s of [-1, 1]) {
+    const col = TEAMS[s > 0 ? 1 : 0].hex, g = new THREE.Group(); g.position.set(0, 0, s * T.GZ); scene.add(g); goalGroups.push(g);
+    const W = T.GW, H = T.GH, postR = 0.35;
+    for (const x of [-W / 2, W / 2]) {
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(postR, postR, H, 8), M(col)); p.position.set(x, H / 2, 0); p.castShadow = true; g.add(p);
+    }
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(postR, postR, W + 0.4, 8), M(col)); bar.rotation.z = Math.PI / 2; bar.position.set(0, H, 0); g.add(bar);
+    const net = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.12, side: THREE.DoubleSide }));
+    net.position.set(0, H / 2, -s * 0.4); g.add(net);
+    // back net
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.2, side: THREE.DoubleSide }));
+    back.position.set(0, H / 2, -s * 2.2); g.add(back);
+  }
+}
+buildGoals();
+
+// ---------------- riders / mounts ----------------
+const riders = [];
+let player = null, gold = null, red = null, violet = null;
+let GLTFLoaderCls = null;
+const modelCache = new Map(); // species id -> {scene clone template} or 'missing'
+const MODEL_PATHS = id => {
+  const aliases = SPECIES[id].aliases;
+  const paths = [];
+  for (const a of aliases) {
+    paths.push(`models/${a}.glb`);
+    paths.push(`../models/spider-jockey/${a}.glb`);
+    paths.push(`../models/${a}.glb`);
+  }
+  return paths;
+};
+
+function makeJockey(name, team, col) {
+  const g = new THREE.Group(); g.name = 'rider';
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.55, 4, 8), M(col)); body.position.y = 0.55; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), M(0xf0d0b0)); head.position.y = 1.05; g.add(head);
+  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), M(col)); helm.position.y = 1.12; g.add(helm);
+  return g;
+}
+
+function makeProceduralSpider(spec) {
+  const S = SPECIES[spec], sc = S.scale, g = new THREE.Group(); g.name = 'mount_' + spec;
+  const ceph = new THREE.Mesh(new THREE.SphereGeometry(0.55 * sc, 10, 8), M(S.color)); ceph.scale.set(0.95, 0.7, 1.05); ceph.position.set(0, 0.7 * sc, 0.35 * sc); ceph.castShadow = true; g.add(ceph);
+  const abd = new THREE.Mesh(new THREE.SphereGeometry(0.72 * sc, 10, 8), M(S.belly)); abd.scale.set(0.85, 0.75, 1.15); abd.position.set(0, 0.75 * sc, -0.85 * sc); abd.castShadow = true; g.add(abd);
+  if (spec === 'widow') {
+    const hg = new THREE.Mesh(new THREE.CircleGeometry(0.18 * sc, 3), new THREE.MeshBasicMaterial({ color: S.mark, side: THREE.DoubleSide }));
+    hg.rotation.x = Math.PI / 2; hg.position.set(0, 1.28 * sc, -0.85 * sc); g.add(hg);
+  }
+  if (spec === 'orb') {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.42 * sc, 0.07 * sc, 6, 12), M(S.mark)); band.rotation.x = Math.PI / 2; band.position.copy(abd.position); band.position.y += 0.15 * sc; g.add(band);
+  }
+  // eyes
+  const eyeM = M(0x111111); const glow = spec === 'jumping' ? 0xf0e8b0 : 0x111111;
+  const eyePos = spec === 'jumping' ? [[-0.16, 0.9, 0.75], [0.16, 0.9, 0.75], [-0.32, 0.82, 0.65], [0.32, 0.82, 0.65]] : [[-0.14, 0.85, 0.78], [0.14, 0.85, 0.78]];
+  for (const [x, y, z] of eyePos) { const e = new THREE.Mesh(new THREE.SphereGeometry((spec === 'jumping' ? 0.1 : 0.07) * sc, 8, 6), M(glow)); e.position.set(x * sc, y * sc, z * sc); g.add(e); }
+  const head = new THREE.Group(); head.name = 'head'; head.position.set(0, 0.9 * sc, 0.7 * sc); g.add(head);
+  const saddle = new THREE.Group(); saddle.name = 'saddle'; saddle.position.set(0, 1.35 * sc, 0.15 * sc); g.add(saddle);
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(0.55 * sc, 0.08, 0.45 * sc), M(0x3a2a18)); pad.position.y = -0.02; saddle.add(pad);
+  const spinneret = new THREE.Group(); spinneret.name = 'spinneret'; spinneret.position.set(0, 0.55 * sc, -1.7 * sc); g.add(spinneret);
+  const spn = new THREE.Mesh(new THREE.SphereGeometry(0.1 * sc, 6, 6), M(0xddd8c8)); spinneret.add(spn);
+
+  // eight two-segment legs. Local +X along the segment. Origin of the group is the joint.
+  const flares = [0.7, 0.28, -0.18, -0.7]; // yaw offsets front->back, radians from side
+  const upperLen = 1.15 * sc, lowerLen = 1.25 * sc, thick = 0.1 * sc;
+  for (const side of ['L', 'R']) {
+    const sgn = side === 'L' ? 1 : -1;
+    for (let i = 0; i < 4; i++) {
+      const upper = new THREE.Group(); upper.name = `leg_${side}${i + 1}_upper`;
+      const zAttach = (0.55 - i * 0.28) * sc, yAttach = 0.55 * sc, xAttach = sgn * 0.42 * sc;
+      upper.position.set(xAttach, yAttach, zAttach);
+      // rest orientation: yaw so +X points outward and along flare, then a downward bend
+      const yaw = (side === 'L' ? Math.PI / 2 : -Math.PI / 2) + sgn * flares[i];
+      upper.rotation.order = 'YZX';
+      upper.rotation.y = yaw; upper.rotation.z = -0.55; // drop
+      const um = new THREE.Mesh(new THREE.CylinderGeometry(thick * 1.15, thick * 0.9, upperLen, 5), M(S.color));
+      um.rotation.z = -Math.PI / 2; um.position.x = upperLen / 2; um.castShadow = true; upper.add(um);
+      const lower = new THREE.Group(); lower.name = `leg_${side}${i + 1}_lower`;
+      lower.position.x = upperLen; lower.rotation.z = 1.15; // knee
+      const lm = new THREE.Mesh(new THREE.CylinderGeometry(thick * 0.85, thick * 0.45, lowerLen, 5), M(S.color));
+      lm.rotation.z = -Math.PI / 2; lm.position.x = lowerLen / 2; lm.castShadow = true; lower.add(lm);
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(thick * 0.7, 6, 4), M(S.mark)); foot.position.x = lowerLen; lower.add(foot);
+      upper.add(lower); g.add(upper);
+    }
+  }
+  return g;
+}
+
+function storeLegRest(mount) {
+  const rest = {};
+  mount.traverse(o => {
+    if (/^leg_[LR][1-4]_(upper|lower)$/.test(o.name)) {
+      rest[o.name] = { rx: o.rotation.x, ry: o.rotation.y, rz: o.rotation.z };
+    }
+  });
+  mount.userData.legRest = rest;
+  return rest;
+}
+
+function findLeg(mount, name) { return mount.getObjectByName(name); }
+
+function poseLegs(r, dt) {
+  const mount = r.mount; if (!mount) return;
+  const rest = mount.userData.legRest || storeLegRest(mount);
+  const spd = Math.hypot(r.vx, r.vz);
+  const walking = spd > 0.4 && r.y < 0.2;
+  if (walking) r.gaitT = (r.gaitT || 0) + dt * (5.5 + spd * 0.35);
+  const stride = walking ? clamp(spd / 10, 0.25, 1) : (r.y > 0.2 ? 0.15 : 0.08);
+  const tuck = r.y > 0.2 ? 0.35 : 0;
+  // Alternating tetrapod: A = L1 R2 L3 R4, B = R1 L2 R3 L4
+  const groupOf = n => (n === 'L1' || n === 'R2' || n === 'L3' || n === 'R4') ? 0 : Math.PI;
+  for (const side of ['L', 'R']) for (let i = 1; i <= 4; i++) {
+    const tag = side + i;
+    const u = findLeg(mount, `leg_${tag}_upper`), l = findLeg(mount, `leg_${tag}_lower`);
+    if (!u || !l) continue;
+    const ur = rest[u.name] || { rx:0, ry:0, rz:0 }, lr = rest[l.name] || { rx:0, ry:0, rz:0 };
+    const phase = r.gaitT + groupOf(tag);
+    const swing = Math.sin(phase) * 0.32 * stride;
+    const lift = Math.max(0, Math.sin(phase + Math.PI * 0.5)) * 0.28 * stride;
+    const idle = !walking ? Math.sin((r.gaitT || 0) * 0.8 + i) * 0.03 : 0;
+    u.rotation.x = ur.rx + swing * 0.25 + idle;
+    u.rotation.y = ur.ry + swing * (side === 'L' ? 1 : -1) * 0.15;
+    u.rotation.z = ur.rz - lift - tuck;
+    l.rotation.z = lr.rz + lift * 0.7 + tuck * 0.5;
+  }
+}
+
+function bindMount(r, group, source) {
+  if (r.mount) { if (r.jockey && r.jockey.parent) r.jockey.parent.remove(r.jockey); scene.remove(r.mount); }
+  r.mount = group; r.mountSource = source;
+  storeLegRest(group);
+  r.saddle = group.getObjectByName('saddle') || group;
+  r.spinneret = group.getObjectByName('spinneret') || null;
+  r.head = group.getObjectByName('head') || null;
+  scene.add(group);
+  if (!r.jockey) r.jockey = makeJockey(r.name, r.team, TEAMS[r.team].hex);
+  r.saddle.add(r.jockey);
+  syncMount(r);
+}
+
+async function tryLoadGLB(id) {
+  if (modelCache.has(id)) return modelCache.get(id);
+  if (!GLTFLoaderCls) return 'missing'; // don't cache: loader may arrive a moment later
+  const loader = new GLTFLoaderCls();
+  for (const url of MODEL_PATHS(id)) {
+    try {
+      const r = await fetch(url); // probe first so a miss is not a loader console error
+      if (!r.ok) continue;
+      const buf = await r.arrayBuffer();
+      const base = url.slice(0, url.lastIndexOf('/') + 1);
+      const gltf = await new Promise((res, rej) => loader.parse(buf, base, res, rej));
+      modelCache.set(id, gltf); return gltf;
+    } catch (_) { /* try next path */ }
+  }
+  modelCache.set(id, 'missing'); return 'missing';
+}
+
+async function ensureMount(r, spec) {
+  r.spec = spec;
+  const gltf = await tryLoadGLB(spec);
+  if (gltf && gltf !== 'missing' && gltf.scene) {
+    const clone = gltf.scene.clone(true);
+    clone.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+    bindMount(r, clone, 'glb');
+  } else {
+    bindMount(r, makeProceduralSpider(spec), 'proc');
+  }
+}
+
+function syncMount(r) {
+  if (!r.mount) return;
+  r.mount.position.set(r.x, r.y, r.z);
+  r.mount.rotation.order = 'YXZ';
+  r.mount.rotation.y = r.h;
+  const bank = clamp(-r.steerVis * 0.25, -0.25, 0.25);
+  r.mount.rotation.z = bank;
+  r.mount.rotation.x = r.y > 0.15 ? -0.15 : 0;
+}
+
+function addRider(name, team, spec, x, z, h) {
+  const r = {
+    name, team, ai: name !== 'YOU', spec, x, y: 0, z, h, vx: 0, vy: 0, vz: 0, spd: 0,
+    throttle: 0, steer: 0, steerVis: 0, boost: false, gaitT: Math.random() * 10,
+    cool: 0, sprintT: 0, stun: 0, slowT: 0, air: false, inv: 0,
+    silks: [newSilk(), newSilk()], pts: 0, ko: 0, lastTouch: 0,
+    mount: null, mountSource: 'proc', saddle: null, spinneret: null, jockey: null,
+    brain: { cool: 0.2, fire: [0, 0], ab: 0, tgt: null, why: 'idle' },
+    mass: SPECIES[spec].mass, r: SPECIES[spec].r
+  };
+  riders.push(r);
+  bindMount(r, makeProceduralSpider(spec), 'proc');
+  ensureMount(r, spec); // swap in a .glb later if one appears; never blocks play
+  return r;
+}
+function newSilk() {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(9); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xf4efe0, transparent: true, opacity: 0.92 }));
+  line.visible = false; scene.add(line);
+  return { st: 'none', t: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, tgt: null, kind: null, line, len: 0, held: false };
+}
+
+function spinneretPos(r, out) {
+  out = out || _v;
+  if (r.spinneret) { r.spinneret.getWorldPosition(out); return out; }
+  return out.set(r.x - Math.sin(r.h) * -1.6, 0.6 + r.y, r.z - Math.cos(r.h) * -1.6);
+}
+function fwd(r) { return { x: Math.sin(r.h), z: Math.cos(r.h) }; }
+
+// ---------------- silk ----------------
+function fireSilk(r, i) {
+  const c = r.silks[i]; if (c.st !== 'none') return false;
+  const o = spinneretPos(r, _v);
+  const f = fwd(r);
+  const spd = T.SILK_SPEED;
+  Object.assign(c, { st: 'fly', t: 0, x: o.x, y: o.y, z: o.z, vx: f.x * spd + r.vx, vy: Math.sin(T.SILK_FWD) * spd, vz: f.z * spd + r.vz, tgt: null, kind: null, held: true, len: 0 });
+  beep(720 + i * 80, 0.08, 'square', 0.04); return true;
+}
+function releaseSilk(r, i) {
+  const c = r.silks[i]; if (c.st === 'none') return;
+  if (c.st === 'held' && c.tgt && c.kind === 'ball') {
+    const f = T.WHIP;
+    c.tgt.vx += (c.vx || 0) * 0.15 + Math.sin(r.h) * r.spd * 0.25 * f;
+    c.tgt.vy += T.LOFT * 0.25; c.tgt.vz += (c.vz || 0) * 0.15 + Math.cos(r.h) * r.spd * 0.25 * f;
+    stats.flings++;
+  }
+  c.st = 'retract'; c.tgt = null; c.kind = null; c.held = false;
+}
+function retractOrFire(r, i) {
+  const c = r.silks[i];
+  if (c.st === 'none') return fireSilk(r, i);
+  if (c.st === 'fly' || c.st === 'held') { releaseSilk(r, i); return true; }
+  return false;
+}
+
+function silkHitsBall(c, b) { return Math.hypot(c.x - b.x, c.y - b.y, c.z - b.z) < T.BALL_R + T.TIP_R + 0.3; }
+function silkHitsRider(c, q, owner) {
+  if (q === owner || q.inv > 0) return false;
+  return Math.hypot(c.x - q.x, (c.y - (q.y + 0.8)), c.z - q.z) < q.r + T.TIP_R;
+}
+
+function updateSilk(r, dt) {
+  const origin = spinneretPos(r, _v2);
+  for (let i = 0; i < 2; i++) {
+    const c = r.silks[i];
+    if (c.st === 'none') { c.line.visible = false; continue; }
+    c.t += dt;
+    if (c.st === 'fly') {
+      c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt; c.vy -= 6 * dt;
+      const dist = origin.distanceTo(_v3.set(c.x, c.y, c.z));
+      if (dist > T.SILK_MAX || c.t > T.SILK_LIFE) { c.st = 'retract'; }
+      // bounds bounce
+      if (Math.abs(c.x) > A - 0.5) { c.x = clamp(c.x, -A + 0.5, A - 0.5); c.vx *= -0.4; }
+      if (Math.abs(c.z) > A - 0.5) { c.z = clamp(c.z, -A + 0.5, A - 0.5); c.vz *= -0.4; }
+      if (c.y < 0.15) { c.y = 0.15; c.vy *= -0.2; }
+      for (const b of balls) if (silkHitsBall(c, b)) { c.st = 'held'; c.tgt = b; c.kind = 'ball'; b.last = r; b.lastT = 0; stats.snags++; beep(420, 0.1, 'triangle', 0.05); break; }
+      if (c.st === 'fly') for (const q of riders) if (silkHitsRider(c, q, r)) { c.st = 'held'; c.tgt = q; c.kind = 'rider'; beep(260, 0.1, 'sawtooth', 0.04); break; }
+    } else if (c.st === 'held') {
+      if (!c.tgt || (c.kind === 'ball' && !balls.includes(c.tgt))) { c.st = 'retract'; c.tgt = null; }
+      else {
+        if (c.kind === 'ball') { c.x = c.tgt.x; c.y = c.tgt.y; c.z = c.tgt.z; }
+        else { c.x = c.tgt.x; c.y = c.tgt.y + 0.8; c.z = c.tgt.z; }
+        const dx = c.x - origin.x, dy = c.y - origin.y, dz = c.z - origin.z, L = Math.hypot(dx, dy, dz) || 1;
+        const want = T.CARRY_L, stretch = L - want;
+        if (stretch > 0) {
+          const k = T.ROPE_K * stretch / L, invM = 1 / r.mass, invT = 1 / (c.kind === 'ball' ? 0.7 : c.tgt.mass);
+          const fx = dx * k, fy = dy * k, fz = dz * k;
+          r.vx += fx * invM * dt; r.vy += fy * invM * dt * 0.3; r.vz += fz * invM * dt;
+          c.tgt.vx -= fx * invT * dt; c.tgt.vy -= fy * invT * dt * (c.kind === 'ball' ? 1 : 0.3); c.tgt.vz -= fz * invT * dt;
+        }
+        // reel slightly toward carry length
+        if (L > T.CARRY_L + 0.4) { /* spring handles it */ }
+        if (c.t > 8) { c.st = 'retract'; c.tgt = null; }
+      }
+    } else if (c.st === 'retract') {
+      const dx = origin.x - c.x, dy = origin.y - c.y, dz = origin.z - c.z, L = Math.hypot(dx, dy, dz) || 1;
+      const step = T.REEL * dt;
+      if (L < step + 0.4) { c.st = 'none'; c.line.visible = false; continue; }
+      c.x += dx / L * step; c.y += dy / L * step; c.z += dz / L * step;
+    }
+    // draw sagging line
+    const midY = (origin.y + c.y) * 0.5 - Math.min(2.2, Math.hypot(c.x - origin.x, c.z - origin.z) * 0.08);
+    const arr = c.line.geometry.attributes.position.array;
+    arr[0] = origin.x; arr[1] = origin.y; arr[2] = origin.z;
+    arr[3] = (origin.x + c.x) * 0.5; arr[4] = midY; arr[5] = (origin.z + c.z) * 0.5;
+    arr[6] = c.x; arr[7] = c.y; arr[8] = c.z;
+    c.line.geometry.attributes.position.needsUpdate = true; c.line.geometry.computeBoundingSphere(); c.line.visible = true;
+  }
+}
+
+// ---------------- ball / silkball ----------------
+const balls = [], webs = [];
+const stats = { spawned: 0, snags: 0, flings: 0, goals: [0, 0], own: 0, kicks: 0, bites: 0, hops: 0, sprints: 0, webs: 0 };
+let teamGoals = [0, 0], dispCool = T.FIRST, lastCard = null, wandaFact = null;
+const ballGeo = new THREE.SphereGeometry(T.BALL_R, 18, 12);
+function makeBallMesh() {
+  const m = new THREE.Mesh(ballGeo, new THREE.MeshLambertMaterial({ color: 0xf2e6c0, emissive: 0x33280c })); m.castShadow = m.receiveShadow = true;
+  const dec = new THREE.Mesh(new THREE.TorusGeometry(T.BALL_R * 0.75, 0.05, 4, 16), new THREE.MeshBasicMaterial({ color: 0x4a3a20 })); dec.rotation.x = Math.PI / 2; m.add(dec);
+  scene.add(m); return m;
+}
+function spawnBall(x, z, vx, vz) {
+  if (balls.length >= T.MAX_BALLS) return null;
+  const b = { x: x ?? 0, y: T.BALL_R, z: z ?? 0, vx: vx || 0, vy: 0, vz: vz || 0, last: null, lastT: 99, mesh: makeBallMesh(), id: ++stats.spawned };
+  balls.push(b); return b;
+}
+function clearBalls() { for (const b of balls) scene.remove(b.mesh); balls.length = 0; }
+function clearWebs() { for (const w of webs) scene.remove(w.mesh); webs.length = 0; }
+
+function inGoalMouth(b, s) {
+  // s = +1 is the +z goal (attacked by GREEN / team 0). s = -1 is the -z goal (attacked by RED).
+  return Math.abs(b.x) < T.GW / 2 && b.y < T.GH && Math.abs(b.z) > T.GZ && Math.sign(b.z) === s && Math.abs(b.z) < T.GZ + 3.5;
+}
+function scoreGoal(b, s) {
+  const attackTeam = s > 0 ? 0 : 1; // who attacks this goal
+  const scorer = b.last;
+  const own = scorer && scorer.team !== attackTeam;
+  teamGoals[attackTeam] += 1; stats.goals[attackTeam] += 1; if (own) stats.own++;
+  if (scorer && !own) scorer.pts += T.PTS_GOAL;
+  flash(own ? 'OWN GOAL!' : (TEAMS[attackTeam].name + ' SCORES!'), own ? '#ff8866' : TEAMS[attackTeam].css);
+  beep(own ? 180 : 520, 0.25, 'square', 0.07); if (!own) { beep(780, 0.3, 'triangle', 0.05); }
+  scene.remove(b.mesh); const ix = balls.indexOf(b); if (ix >= 0) balls.splice(ix, 1);
+  // drop any silk holding it
+  for (const r of riders) for (const c of r.silks) if (c.tgt === b) { c.st = 'retract'; c.tgt = null; }
+  dispCool = T.AFTER; updScore();
+}
+
+function stepBall(b, dt) {
+  b.vx *= (1 - T.BALL_ROLL * dt); b.vz *= (1 - T.BALL_ROLL * dt); b.vy -= T.GRAV * dt;
+  if (b.y > T.BALL_R + 0.02) { b.vx *= (1 - T.BALL_AIR * dt); b.vz *= (1 - T.BALL_AIR * dt); }
+  b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; b.lastT += dt;
+  if (b.y < T.BALL_R) { b.y = T.BALL_R; if (b.vy < 0) b.vy *= -T.BALL_BOUNCE; if (Math.abs(b.vy) < 1) b.vy = 0; }
+  if (Math.abs(b.x) > A - T.BALL_R) { b.x = clamp(b.x, -A + T.BALL_R, A - T.BALL_R); b.vx *= -T.BALL_WALL; }
+  if (Math.abs(b.z) > A - T.BALL_R) {
+    if (Math.abs(b.x) < T.GW / 2 && b.y < T.GH) { /* open mouth — may score */ }
+    else { b.z = clamp(b.z, -A + T.BALL_R, A - T.BALL_R); b.vz *= -T.BALL_WALL; }
+  }
+  // posts of the goal as soft bumpers (sides of mouth)
+  for (const s of [-1, 1]) {
+    if (Math.abs(b.z - s * T.GZ) < T.BALL_R + 0.5 && Math.abs(Math.abs(b.x) - T.GW / 2) < T.BALL_R + 0.4 && b.y < T.GH + 0.4) {
+      b.x += Math.sign(b.x || 1) * 0.4; b.vx += Math.sign(b.x || 1) * 4;
+    }
+  }
+  if (inGoalMouth(b, 1)) scoreGoal(b, 1);
+  else if (inGoalMouth(b, -1)) scoreGoal(b, -1);
+  b.mesh.position.set(b.x, b.y, b.z);
+  b.mesh.rotation.x += b.vz * dt * 0.4; b.mesh.rotation.z -= b.vx * dt * 0.4;
+}
+
+function bumpBall(r, b) {
+  const dx = b.x - r.x, dz = b.z - r.z, d = Math.hypot(dx, dz) || 1, min = r.r + T.BALL_R;
+  if (d < min && Math.abs(b.y - (r.y + 0.4)) < 2.2) {
+    const nx = dx / d, nz = dz / d, overlap = min - d;
+    b.x += nx * overlap * 0.7; b.z += nz * overlap * 0.7; r.x -= nx * overlap * 0.3; r.z -= nz * overlap * 0.3;
+    const rel = (r.vx - b.vx) * nx + (r.vz - b.vz) * nz;
+    if (rel > 0) { const j = rel * 1.35; b.vx += nx * j; b.vz += nz * j; b.vy += Math.min(4, r.spd * 0.08); r.vx -= nx * j * 0.25; r.vz -= nz * j * 0.25; }
+    b.last = r; b.lastT = 0;
+  }
+}
+
+// ---------------- abilities + webs ----------------
+function canAbility(r) { return r.cool <= 0 && r.stun <= 0 && screen === 'play' && RND && RND.st === 'live'; }
+function fireAbility(r) {
+  if (!canAbility(r) && !(window.__sjForceAb)) return false;
+  const S = SPECIES[r.spec]; r.cool = S.cool;
+  if (S.ability === 'hop') {
+    r.vy = S.jumpV; r.y = Math.max(r.y, 0.05);
+    r.vx += Math.sin(r.h) * S.jumpF * 0.35; r.vz += Math.cos(r.h) * S.jumpF * 0.35;
+    r.air = true; stats.hops++; beep(660, 0.12, 'sine', 0.05); flash('HOP!', '#ffe08a'); return 'hop';
+  }
+  if (S.ability === 'speed') { r.sprintT = S.sprintT; stats.sprints++; beep(880, 0.15, 'square', 0.04); flash('SPRINT!', '#7dff8a'); return 'speed'; }
+  if (S.ability === 'kick') {
+    stats.kicks++; noise(0.18, 0.06); flash('HAIR KICK!', '#e8a060');
+    spawnKickBurst(r);
+    for (const q of riders) if (q !== r) {
+      const dx = q.x - r.x, dz = q.z - r.z, d = Math.hypot(dx, dz); const f = fwd(r);
+      if (d < S.kickR && dx * f.x + dz * f.z > 0.15 * d) {
+        const p = (1 - d / S.kickR) * S.kickF * (q.mass ? 1 / q.mass : 1) * (SPECIES[q.spec].tough || 1);
+        q.vx += (d ? dx / d : f.x) * p; q.vz += (d ? dz / d : f.z) * p; q.vy += 3; q.stun = T.STUN; q.y = Math.max(q.y, 0.05);
+      }
+    }
+    for (const b of balls) {
+      const dx = b.x - r.x, dz = b.z - r.z, d = Math.hypot(dx, dz); const f = fwd(r);
+      if (d < S.kickR + 1 && dx * f.x + dz * f.z > 0) { b.vx += (d ? dx / d : f.x) * S.kickF * 0.7; b.vz += (d ? dz / d : f.z) * S.kickF * 0.7; b.vy += 5; b.last = r; b.lastT = 0; }
+    }
+    return 'kick';
+  }
+  if (S.ability === 'bite') {
+    let best = null, bestD = S.biteR;
+    for (const q of riders) if (q !== r && q.team !== r.team) {
+      const d = Math.hypot(q.x - r.x, q.z - r.z); if (d < bestD) { best = q; bestD = d; }
+    }
+    if (best) { best.slowT = S.slowT; best.stun = Math.max(best.stun, 0.15); stats.bites++; beep(140, 0.2, 'sawtooth', 0.06); flash('BITE!', '#c04060'); return 'bite'; }
+    flash('Too far to bite', '#ccc'); r.cool = S.cool * 0.35; return 'bite-miss';
+  }
+  if (S.ability === 'web') {
+    const mine = webs.filter(w => w.owner === r).length;
+    if (mine >= S.webMax) { const old = webs.find(w => w.owner === r); if (old) removeWeb(old); }
+    dropWeb(r); stats.webs++; beep(500, 0.12, 'triangle', 0.05); flash('WEB TRAP!', '#e8d878'); return 'web';
+  }
+  return false;
+}
+const bursts = [];
+function spawnKickBurst(r) {
+  const f = fwd(r), g = new THREE.Group();
+  for (let i = 0; i < 14; i++) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.06, 4, 4), M(0xc4a070));
+    const a = r.h + rand(-0.7, 0.7); m.position.set(r.x, 0.8 + r.y, r.z);
+    m.userData.v = new THREE.Vector3(Math.sin(a) * rand(8, 16), rand(1, 5), Math.cos(a) * rand(8, 16)); g.add(m);
+  }
+  scene.add(g); bursts.push({ mesh: g, t: 0.45 });
+}
+function dropWeb(r) {
+  const S = SPECIES.orb, g = new THREE.Group(); g.position.set(r.x, 0.04, r.z);
+  const mat = new THREE.LineBasicMaterial({ color: 0xf0e8c0, transparent: true, opacity: 0.85 });
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4, geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(Math.sin(a) * S.webR, 0, Math.cos(a) * S.webR)]);
+    g.add(new THREE.Line(geo, mat));
+  }
+  for (const rad of [0.35, 0.62, 0.9]) {
+    const pts = []; for (let i = 0; i <= 24; i++) { const a = i / 24 * Math.PI * 2; pts.push(new THREE.Vector3(Math.sin(a) * S.webR * rad, 0, Math.cos(a) * S.webR * rad)); }
+    g.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), mat));
+  }
+  scene.add(g); webs.push({ x: r.x, z: r.z, r: S.webR, life: S.webLife, owner: r, team: r.team, mesh: g, hold: new Map() });
+}
+function removeWeb(w) { scene.remove(w.mesh); const i = webs.indexOf(w); if (i >= 0) webs.splice(i, 1); }
+function stepWebs(dt) {
+  for (const w of [...webs]) {
+    w.life -= dt; if (w.life <= 0) { removeWeb(w); continue; }
+    w.mesh.rotateY(dt * 0.15);
+    for (const r of riders) {
+      if (r === w.owner || r.team === w.team) continue;
+      const d = Math.hypot(r.x - w.x, r.z - w.z);
+      if (d < w.r + r.r * 0.3) {
+        let h = w.hold.get(r) || 0; h += dt; w.hold.set(r, h);
+        if (h < T.WEB_HOLD) { r.vx *= 0.15; r.vz *= 0.15; r.throttle = 0; }
+        else { r.vx *= 0.55; r.vz *= 0.55; } // struggle free, still slowed
+        r.inWeb = true;
+      }
+    }
+  }
+}
+function stepBursts(dt) {
+  for (const b of [...bursts]) {
+    b.t -= dt;
+    for (const m of b.mesh.children) { const v = m.userData.v; if (!v) continue; m.position.addScaledVector(v, dt); v.y -= 12 * dt; }
+    if (b.t <= 0) { scene.remove(b.mesh); bursts.splice(bursts.indexOf(b), 1); }
+  }
+}
+
+// ---------------- physics ----------------
+function wallPush(x, z, rad) {
+  // arena fence AABB: inside |x|,|z| <= A
+  let px = x, pz = z;
+  if (Math.abs(px) > A - rad) px = Math.sign(px) * (A - rad);
+  if (Math.abs(pz) > A - rad) {
+    // goal mouths are open at |x| < GW/2
+    if (Math.abs(px) > T.GW / 2 - 0.2) pz = Math.sign(pz) * (A - rad);
+    else pz = clamp(pz, -A - 2.5, A + 2.5);
+  }
+  return [px, pz];
+}
+
+function stepRider(r, dt) {
+  const S = SPECIES[r.spec];
+  r.cool = Math.max(0, r.cool - dt);
+  r.stun = Math.max(0, r.stun - dt);
+  r.slowT = Math.max(0, r.slowT - dt);
+  r.sprintT = Math.max(0, r.sprintT - dt);
+  r.inv = Math.max(0, r.inv - dt);
+  r.inWeb = false;
+
+  let throttle = r.stun > 0 ? 0 : r.throttle;
+  let steer = r.stun > 0 ? 0 : r.steer;
+  r.steerVis = lerp(r.steerVis, steer, 1 - Math.exp(-10 * dt));
+  r.h += steer * S.turn * dt;
+
+  const slow = r.slowT > 0 ? SPECIES.widow.slowMul : 1;
+  let maxSpd = (r.boost && throttle > 0 ? S.boost : S.base) * (r.sprintT > 0 ? S.sprintMul || 1.65 : 1) * slow;
+  if (r.ai) maxSpd *= DIFFS[diff].spd;
+  const want = throttle * maxSpd; // throttle in [-0.5, 1]
+  const f = fwd(r);
+  // approach desired planar velocity along heading
+  const tvx = f.x * want, tvz = f.z * want;
+  const acc = (Math.abs(want) < r.spd ? T.BRAKE : T.ACCEL);
+  r.vx = lerp(r.vx, tvx, 1 - Math.exp(-acc * dt / Math.max(0.4, S.mass)));
+  r.vz = lerp(r.vz, tvz, 1 - Math.exp(-acc * dt / Math.max(0.4, S.mass)));
+
+  if (r.y > 0.02 || r.vy > 0) { r.vy -= T.GRAV * dt; r.air = true; }
+  r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt;
+  if (r.y <= 0) { r.y = 0; if (r.vy < 0) r.vy = 0; r.air = false; }
+  const [nx, nz] = wallPush(r.x, r.z, r.r * 0.85);
+  if (nx !== r.x) { r.x = nx; r.vx *= -0.2; }
+  if (nz !== r.z) { r.z = nz; r.vz *= -0.2; }
+  r.spd = Math.hypot(r.vx, r.vz);
+  r.mass = S.mass; r.r = S.r;
+  poseLegs(r, dt);
+  syncMount(r);
+  updateSilk(r, dt);
+}
+
+function separateRiders(dt) {
+  for (let i = 0; i < riders.length; i++) for (let j = i + 1; j < riders.length; j++) {
+    const a = riders[i], b = riders[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1, min = a.r + b.r;
+    if (d < min) {
+      const nx = dx / d, nz = dz / d, ov = (min - d);
+      const ima = 1 / a.mass, imb = 1 / b.mass, s = ima + imb;
+      a.x -= nx * ov * (ima / s); a.z -= nz * ov * (ima / s);
+      b.x += nx * ov * (imb / s); b.z += nz * ov * (imb / s);
+      const rel = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz;
+      if (rel > 0) { const jimp = rel * 0.7; a.vx -= nx * jimp * (ima / s) * 2; a.vz -= nz * jimp * (ima / s) * 2; b.vx += nx * jimp * (imb / s) * 2; b.vz += nz * jimp * (imb / s) * 2; }
+    }
+  }
+}
+
+// ---------------- AI (Silkball) ----------------
+let aiFrozen = false;
+function aiThink(r, dt) {
+  if (!r.ai || aiFrozen) { if (aiFrozen && r.ai) { r.throttle = 0; r.steer = 0; r.boost = false; } return; }
+  const D = DIFFS[diff]; r.brain.cool -= dt; r.brain.fire[0] -= dt; r.brain.fire[1] -= dt; r.brain.ab -= dt;
+  if (r.brain.cool > 0 && r.brain.tgt) { aiDrive(r, r.brain.tgt); aiActs(r, D); return; }
+  r.brain.cool = rand(D.think[0], D.think[1]);
+  if (Math.random() < D.lazy) { r.brain.tgt = { x: r.x + rand(-12, 12), z: r.z + rand(-12, 12), kind: 'roam' }; r.brain.why = 'lazy'; aiDrive(r, r.brain.tgt); return; }
+  const ball = balls[0];
+  const attackZ = r.team === 0 ? T.GZ + 1 : -T.GZ - 1; // goal we attack
+  const defendZ = r.team === 0 ? -T.GZ : T.GZ;
+  // role: GOLD slightly more support; RED/VIOLET split attack/defend loosely
+  const isMate = r.name === 'GOLD';
+  let tgt = null, why = 'cruise';
+  if (ball) {
+    const heldByMe = r.silks.some(c => c.st === 'held' && c.tgt === ball);
+    const heldByFoe = riders.some(q => q.team !== r.team && q.silks.some(c => c.st === 'held' && c.tgt === ball));
+    const lead = D.lead;
+    const bx = ball.x + ball.vx * lead, bz = ball.z + ball.vz * lead;
+    if (heldByMe) { tgt = { x: 0, z: attackZ, kind: 'goal' }; why = 'carry'; }
+    else if (isMate && Math.hypot(bx, bz - defendZ) < 18 && Math.abs(bz - defendZ) < Math.abs(bz - attackZ)) { tgt = { x: bx, z: bz, kind: 'ball' }; why = 'defend'; }
+    else { tgt = { x: bx + rand(-D.err, D.err), z: bz + rand(-D.err, D.err), kind: 'ball' }; why = 'chase'; }
+    if (heldByFoe && !heldByMe) { const foe = riders.find(q => q.team !== r.team && q.silks.some(c => c.tgt === ball)); if (foe) { tgt = { x: foe.x, z: foe.z, kind: 'foe', who: foe }; why = 'stop'; } }
+  } else {
+    tgt = { x: 0, z: (r.team === 0 ? -8 : 8), kind: 'mid' }; why = 'wait';
+  }
+  r.brain.tgt = tgt; r.brain.why = why;
+  aiDrive(r, tgt); aiActs(r, D);
+}
+function aiDrive(r, tgt) {
+  if (!tgt) { r.throttle = 0; r.steer = 0; return; }
+  const dx = tgt.x - r.x, dz = tgt.z - r.z, dist = Math.hypot(dx, dz) || 1;
+  const want = Math.atan2(dx, dz), ad = angDiff(r.h, want);
+  r.steer = clamp(ad / 0.6, -1, 1);
+  r.throttle = dist < 2.5 && tgt.kind !== 'goal' ? (tgt.kind === 'ball' ? 0.4 : 0.15) : 1;
+  if (Math.abs(ad) > 1.1) r.throttle *= 0.4;
+  r.boost = dist > 14 && Math.abs(ad) < 0.5;
+  if (tgt.kind === 'goal' && dist < 10 && Math.abs(ad) < 0.35) r.boost = true;
+}
+function aiActs(r, D) {
+  const ball = balls[0];
+  // silk
+  for (let i = 0; i < 2; i++) {
+    const c = r.silks[i];
+    if (c.st === 'held' && c.kind === 'ball') {
+      // release when facing the attack goal and close enough to fling
+      const attackZ = r.team === 0 ? T.GZ : -T.GZ;
+      const toG = Math.atan2(0 - r.x, attackZ - r.z), ad = Math.abs(angDiff(r.h, toG));
+      const dG = Math.hypot(r.x, r.z - attackZ);
+      if (ad < 0.35 && dG < 22) releaseSilk(r, i);
+      continue;
+    }
+    if (c.st !== 'none' || r.brain.fire[i] > 0) continue;
+    if (!ball) continue;
+    const dx = ball.x - r.x, dz = ball.z - r.z, dist = Math.hypot(dx, dz);
+    const want = Math.atan2(dx, dz), ad = Math.abs(angDiff(r.h, want));
+    if (dist < T.SILK_MAX - 2 && dist > 3 && ad < 0.28 * D.aim) {
+      if (fireSilk(r, i)) r.brain.fire[i] = rand(D.fireCool[0], D.fireCool[1]);
+    }
+    // also try to silk a nearby foe who has the ball
+    const foe = riders.find(q => q.team !== r.team && Math.hypot(q.x - r.x, q.z - r.z) < 16 && q.silks.some(s => s.kind === 'ball'));
+    if (foe) {
+      const fd = Math.hypot(foe.x - r.x, foe.z - r.z), fa = Math.abs(angDiff(r.h, Math.atan2(foe.x - r.x, foe.z - r.z)));
+      if (fd < 14 && fa < 0.3 && fireSilk(r, i)) r.brain.fire[i] = rand(D.fireCool[0], D.fireCool[1]);
+    }
+  }
+  // ability
+  if (r.brain.ab <= 0 && canAbility(r) && Math.random() < D.ab * 0.08 + (D.ab * 0.25 * dtSafe())) {
+    const S = SPECIES[r.spec];
+    let use = false;
+    if (S.ability === 'hop' && ((ball && Math.hypot(ball.x - r.x, ball.z - r.z) < 12) || r.brain.why === 'chase')) use = true;
+    if (S.ability === 'speed' && r.brain.why === 'chase') use = true;
+    if (S.ability === 'kick') {
+      const near = riders.some(q => q !== r && q.team !== r.team && Math.hypot(q.x - r.x, q.z - r.z) < S.kickR)
+        || (ball && Math.hypot(ball.x - r.x, ball.z - r.z) < S.kickR);
+      use = near;
+    }
+    if (S.ability === 'bite') use = riders.some(q => q.team !== r.team && Math.hypot(q.x - r.x, q.z - r.z) < S.biteR);
+    if (S.ability === 'web' && (r.brain.why === 'defend' || (ball && Math.hypot(ball.x - r.x, ball.z - r.z) < 10))) use = true;
+    if (use) { fireAbility(r); r.brain.ab = 1.2; }
+  }
+}
+function dtSafe() { return 0.016; } // used only as a small per-think chance scale
+
+// ---------------- camera / fx ----------------
+const camPos = new THREE.Vector3(0, 8, -16), camLook = new THREE.Vector3();
+function stepCamera(dt) {
+  const r = player || riders[0]; if (!r) return;
+  const f = fwd(r);
+  const back = T.CAM_D + (r.air ? 1.5 : 0), h = T.CAM_H + r.y * 0.6;
+  const want = _v.set(r.x - f.x * back, h, r.z - f.z * back);
+  const k = 1 - Math.exp(-T.CAM_W * dt);
+  camPos.lerp(want, k);
+  camLook.lerp(_v2.set(r.x + f.x * 5, 1.2 + r.y, r.z + f.z * 5), 1 - Math.exp(-T.LOOK_W * dt));
+  camera.position.copy(camPos); camera.lookAt(camLook);
+}
+let msgT = 0;
+function flash(text, col) { const el = $('msg'); el.textContent = text; el.style.color = col || '#ffd84a'; el.style.opacity = 1; msgT = 1.35; }
+function updScore() { $('score').innerHTML = `<span style="color:${TEAMS[0].css}">${teamGoals[0]}</span> — <span style="color:${TEAMS[1].css}">${teamGoals[1]}</span>`; }
+function updAbHint() {
+  if (!player) return;
+  const S = SPECIES[player.spec];
+  const ready = player.cool <= 0;
+  $('abHint').textContent = S.abilityName + (ready ? ' ready' : ' ' + player.cool.toFixed(1) + 's');
+  $('abHint').style.opacity = ready ? 1 : 0.7;
+  for (const id of ['bT', 'bAb']) { const el = $(id); if (!el) continue; el.textContent = S.abilityName; el.classList.toggle('ready', ready); el.classList.toggle('off', !ready); }
+}
+
+// ---------------- input ----------------
+const inp = { stickX: 0, stickY: 0, boostT: false, cabL: false, cabR: false, mouseL: false, mouseR: false, abT: false, gL: false, gR: false, gBoost: false, gAb: false };
+let anyInput = false, abQ = false, silkEdge = [false, false];
+function firstInput() { anyInput = true; ensureAudio(); }
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true; firstInput();
+  if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (e.code === 'Space' && !e.repeat) abQ = true;
+  if (e.code === 'KeyF' && !e.repeat) abQ = true;
+  if (e.code === 'KeyH' && !e.repeat) { if (ovlMode === 'help') closeOvl(); else if (!ovlMode || ovlMode === 'pause') showHelp(ovlMode === 'pause' ? 'pause' : null); }
+  if ((e.code === 'KeyP' || e.code === 'Escape') && !e.repeat) { if (ovlMode === 'pause') closeOvl(); else if (screen === 'play' && !ovlMode) showPause(); }
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+const cvs = renderer.domElement;
+addEventListener('touchstart', () => document.body.classList.add('touched'), { capture: true, passive: true });
+const btnIds = [];
+function bindBtn(id, key) {
+  const el = $(id), ids = new Set();
+  const set = v => { inp[key] = v; el.classList.toggle('on', v); };
+  btnIds.push({ ids, set });
+  el.addEventListener('touchstart', e => { e.preventDefault(); firstInput(); for (const t of e.changedTouches) ids.add(t.identifier); set(true); if (key === 'abT') abQ = true; }, { passive: false });
+  el.addEventListener('mousedown', e => { firstInput(); set(true); if (key === 'abT') abQ = true; });
+  el.addEventListener('mouseup', () => set(false)); el.addEventListener('mouseleave', () => { if (!ids.size) set(false); });
+}
+const btnEnd = e => { const live = new Set([...e.touches].map(t => t.identifier));
+  for (const b of btnIds) { for (const t of e.changedTouches) b.ids.delete(t.identifier); for (const i of [...b.ids]) if (!live.has(i)) b.ids.delete(i); if (!b.ids.size) b.set(false); } };
+document.addEventListener('touchend', btnEnd, true); document.addEventListener('touchcancel', btnEnd, true);
+bindBtn('bBoost', 'boostT'); bindBtn('bL', 'cabL'); bindBtn('bR', 'cabR'); bindBtn('bT', 'abT'); bindBtn('bAb', 'abT');
+
+// stick (HYBRID / GESTURE / CLASSIC left-half drag)
+let stickId = null, stickX0 = 0, stickY0 = 0, classicId = null, classicX0 = 0;
+function showStick(on, x, y) {
+  $('stickBase').style.display = $('stickKnob').style.display = on ? 'block' : 'none';
+  if (on) { $('stickBase').style.left = $('stickKnob').style.left = x + 'px'; $('stickBase').style.top = $('stickKnob').style.top = y + 'px'; }
+}
+function moveKnob(dx, dy) { $('stickKnob').style.left = (stickX0 + dx) + 'px'; $('stickKnob').style.top = (stickY0 + dy) + 'px'; }
+function setStick(dx, dy) {
+  const R = 60, m = Math.hypot(dx, dy), s = m > R ? R / m : 1;
+  inp.stickX = clamp((dx * s) / R, -1, 1); inp.stickY = clamp((-dy * s) / R, -1, 1);
+  moveKnob(dx * s, dy * s);
+}
+function isLeftStickZone(x) { return x < innerWidth * 0.5; }
+
+const gT = new Map(); const gHold = [0, 0]; let gBoostN = 0, gzT = 0;
+const GZ_FLICK = 42, GZ_FLICK_T = 260;
+function gestStart(t) {
+  if (t.clientX < innerWidth * 0.32 && t.clientY > innerHeight * 0.7) { inp.gAb = true; abQ = true; gT.set(t.identifier, { kind: 'ab' }); return; }
+  const side = t.clientX < innerWidth * 0.75 ? 0 : 1;
+  const g = { kind: 'silk', x0: t.clientX, y0: t.clientY, t0: performance.now(), side, fired: false, boost: false };
+  g.fired = player && player.silks[side].st === 'none';
+  if (g.fired) retractOrFire(player, side);
+  gHold[side]++; gT.set(t.identifier, g); syncG();
+}
+function gestMove(t) {
+  const g = gT.get(t.identifier); if (!g || g.kind !== 'silk') return;
+  const dy = g.y0 - t.clientY, dt = performance.now() - g.t0;
+  if (!g.boost && dy > GZ_FLICK && dt < GZ_FLICK_T) { g.boost = true; gBoostN++; syncG(); }
+}
+function gestEnd(t) {
+  const g = gT.get(t.identifier); if (!g) return; gT.delete(t.identifier);
+  if (g.kind === 'ab') { inp.gAb = [...gT.values()].some(q => q.kind === 'ab'); return; }
+  gHold[g.side]--; if (gHold[g.side] < 0) gHold[g.side] = 0;
+  if (g.boost) { gBoostN = Math.max(0, gBoostN - 1); }
+  else if (player && player.silks[g.side].st !== 'none' && player.silks[g.side].st !== 'retract') retractOrFire(player, g.side);
+  syncG();
+}
+function syncG() { inp.gL = gHold[0] > 0; inp.gR = gHold[1] > 0; inp.gBoost = gBoostN > 0; }
+
+cvs.addEventListener('mousedown', e => { firstInput(); if (e.button === 0) inp.mouseL = true; if (e.button === 2) inp.mouseR = true; if (e.button === 1) { abQ = true; e.preventDefault(); } });
+addEventListener('mouseup', e => { if (e.button === 0) inp.mouseL = false; if (e.button === 2) inp.mouseR = false; });
+cvs.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
+function onPtrDown(e) {
+  if (e.pointerType === 'mouse' && e.target.closest && e.target.closest('.btn, #topbtns, #ovl')) return;
+  if (ovlMode) return;
+  firstInput();
+  const x = e.clientX, y = e.clientY;
+  if (LAY === 'GESTURE' && x >= innerWidth * 0.5) { gestStart({ identifier: e.pointerId, clientX: x, clientY: y }); return; }
+  if (isLeftStickZone(x) || LAY === 'CLASSIC') {
+    stickId = e.pointerId; stickX0 = x; stickY0 = y; showStick(LAY !== 'CLASSIC', x, y); setStick(0, 0);
+    if (LAY === 'CLASSIC') { classicId = e.pointerId; classicX0 = x; }
+  }
+}
+function onPtrMove(e) {
+  if (LAY === 'GESTURE' && gT.has(e.pointerId)) gestMove({ identifier: e.pointerId, clientX: e.clientX, clientY: e.clientY });
+  if (e.pointerId !== stickId) return;
+  setStick(e.clientX - stickX0, e.clientY - stickY0);
+}
+function onPtrUp(e) {
+  if (gT.has(e.pointerId)) gestEnd({ identifier: e.pointerId, clientX: e.clientX, clientY: e.clientY });
+  if (e.pointerId === stickId) { stickId = null; inp.stickX = 0; inp.stickY = 0; showStick(false); }
+}
+cvs.addEventListener('pointerdown', onPtrDown);
+addEventListener('pointermove', onPtrMove);
+addEventListener('pointerup', onPtrUp);
+addEventListener('pointercancel', onPtrUp);
+
+function applyLayout() {
+  for (const l of LAYOUTS) document.body.classList.toggle('lay-' + l.toLowerCase(), l === LAY);
+  $('bCtl').textContent = '🎮 ' + LAY;
+  if (LAY !== 'GESTURE') { gT.clear(); gHold[0] = gHold[1] = 0; gBoostN = 0; syncG(); document.body.classList.remove('gzon'); }
+  else { document.body.classList.add('gzon'); setTimeout(() => document.body.classList.remove('gzon'), 2200); }
+}
+function setLayout(l, save = true) { if (!LAYOUTS.includes(l)) return; LAY = l; if (save) localStorage.setItem('sj_layout', l); applyLayout(); if (ovlMode === 'pause') showPause(); }
+
+$('bDiff').addEventListener('click', () => { const n = Object.keys(DIFFS); diff = n[(n.indexOf(diff) + 1) % n.length]; localStorage.setItem('sj_diff', diff); $('bDiff').textContent = 'AI: ' + diff; });
+$('bLQ').addEventListener('click', () => { lowQ = !lowQ; localStorage.setItem('sj_lq', lowQ ? '1' : '0'); applyQuality(); });
+$('bFS').addEventListener('click', () => { firstInput(); const d = document.documentElement; if (!document.fullscreenElement) { (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d)?.then?.(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {}); } else document.exitFullscreen?.(); });
+$('bCtl').addEventListener('click', () => setLayout(LAYOUTS[(LAYOUTS.indexOf(LAY) + 1) % LAYOUTS.length]));
+$('bPause').addEventListener('click', () => { if (ovlMode === 'pause') closeOvl(); else if (screen === 'play') showPause(); else if (ovlMode) closeOvl(); });
+$('bDiff').textContent = 'AI: ' + diff;
+
+let silkWas = [false, false];
+function collectPlayerInput() {
+  if (!player) return;
+  const keySteer = (keys.KeyA || keys.ArrowLeft ? -1 : 0) + (keys.KeyD || keys.ArrowRight ? 1 : 0);
+  const keyThr = (keys.KeyW || keys.ArrowUp ? 1 : 0) + (keys.KeyS || keys.ArrowDown ? -0.55 : 0);
+  const stickSteer = inp.stickX;
+  const stickThr = inp.stickY;
+  let steer = clamp(keySteer + stickSteer, -1, 1);
+  let throttle = 0;
+  if (keyThr || Math.abs(stickThr) > 0.18) throttle = clamp(keyThr + stickThr, -0.55, 1);
+  else if (Math.abs(steer) > 0.15 && TOUCH && LAY === 'CLASSIC') throttle = 0.7; // classic: dragging also walks
+  // desktop default: if steering with no throttle, turn in place; W to walk. Also allow always-creep? no.
+  player.steer = steer; player.throttle = throttle;
+  player.boost = !!(keys.ShiftLeft || keys.ShiftRight || inp.boostT || inp.gBoost);
+  const silkL = !!(keys.KeyQ || inp.cabL || inp.mouseL || inp.gL);
+  const silkR = !!(keys.KeyE || inp.cabR || inp.mouseR || inp.gR);
+  for (const [i, down] of [[0, silkL], [1, silkR]]) {
+    if (down && !silkWas[i]) retractOrFire(player, i);
+    if (!down && silkWas[i] && player.silks[i].st === 'held') releaseSilk(player, i);
+    if (!down && silkWas[i] && player.silks[i].st === 'fly') { /* hold to keep flying; release starts retract after a miss? keep flying until life */ }
+    silkWas[i] = down;
+  }
+  if (abQ || inp.abT && !player._abHeld) { fireAbility(player); abQ = false; player._abHeld = true; }
+  if (!inp.abT && !keys.Space && !keys.KeyF) player._abHeld = false;
+  abQ = false;
+}
+
+// ---------------- rounds / UI ----------------
+let screen = 'pick', ovlMode = null, helpBack = null, frames = 0, simTime = 0, paused = false;
+let RND = null, lastFact = null;
+const pickChoice = { spec: resolveSpec(QS.get('species')) || localStorage.getItem('sj_species') || 'jumping' };
+if (!SPECIES[pickChoice.spec]) pickChoice.spec = 'jumping';
+
+function closeOvl() { ovlMode = null; $('ovl').classList.remove('show'); $('ovl').querySelector('.card').innerHTML = ''; }
+function openOvl(mode, html, wide) {
+  ovlMode = mode; const o = $('ovl'); o.classList.add('show'); const c = o.querySelector('.card'); c.className = 'card' + (wide ? ' wide' : '') + (mode === 'help' ? ' help' : ''); c.innerHTML = html;
+}
+
+function assignAISpecies(youSpec) {
+  const leftover = SPEC_IDS.filter(id => id !== youSpec);
+  // prefer flavorful defaults, then fill
+  const prefer = { GOLD: 'wolf', RED: 'tarantula', VIOLET: 'widow' };
+  const used = new Set([youSpec]), out = {};
+  for (const n of ['GOLD', 'RED', 'VIOLET']) {
+    const p = prefer[n];
+    out[n] = (!used.has(p) ? p : leftover.find(id => !used.has(id))) || leftover[0];
+    used.add(out[n]);
+  }
+  return out;
+}
+
+function spawnRiders(youSpec) {
+  for (const r of riders) {
+    for (const c of r.silks) scene.remove(c.line);
+    if (r.mount) scene.remove(r.mount);
+  }
+  riders.length = 0;
+  const aiSpec = assignAISpecies(youSpec);
+  player = addRider('YOU', 0, youSpec, -8, -22, 0);
+  gold = addRider('GOLD', 0, aiSpec.GOLD, 8, -22, 0);
+  red = addRider('RED', 1, aiSpec.RED, 8, 22, Math.PI);
+  violet = addRider('VIOLET', 1, aiSpec.VIOLET, -8, 22, Math.PI);
+}
+
+function fmtT(t) { t = Math.max(0, t); const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ':' + String(s).padStart(2, '0'); }
+
+function newRound(keepSpecies) {
+  const spec = (player && keepSpecies) ? player.spec : pickChoice.spec;
+  spawnRiders(spec);
+  clearBalls(); clearWebs();
+  teamGoals = [0, 0]; stats.goals = [0, 0]; stats.own = 0; dispCool = T.FIRST;
+  for (const r of riders) { r.pts = 0; r.cool = 0; r.stun = 0; r.slowT = 0; r.sprintT = 0; }
+  const L = RLEN === 'free' ? 0 : (+RLEN) * 60;
+  RND = { st: 'count', t: 0, left: L || 0, len: L, count: 3 };
+  screen = 'play'; updScore(); $('rcount').style.display = 'block'; $('rcount').textContent = '3';
+  closeOvl(); flash('SILKBALL!', '#ffd84a');
+}
+
+function skipCount() { if (RND && RND.st === 'count') { RND.st = 'live'; RND.count = 0; $('rcount').style.display = 'none'; dispCool = Math.min(dispCool, 0.35); } }
+
+function endRound(why) {
+  if (!RND || RND.st === 'over') return;
+  RND.st = 'over'; RND.why = why || 'time'; $('rcount').style.display = 'none';
+  lastFact = nextWandaFact(); wandaFact = lastFact;
+  showWanda();
+}
+
+function showWanda() {
+  const g = teamGoals, winner = g[0] === g[1] ? 'It’s a draw.' : (g[0] > g[1] ? 'Green wins this one.' : 'Red takes the round.');
+  const rows = riders.map(r => `<tr class="n${r.name}"><td class="n${r.name}">${r.name}</td><td>${SPECIES[r.spec].short}</td><td>${r.pts}</td></tr>`).join('');
+  const svg = `<svg viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <circle cx="44" cy="44" r="42" fill="#1c1410" stroke="#e8c450" stroke-width="3"/>
+    <path d="M44 40 L18 18 M44 40 L10 36 M44 46 L16 62 M44 50 L22 78 M44 40 L70 18 M44 40 L78 36 M44 46 L72 62 M44 50 L66 78" stroke="#c4a06a" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <ellipse cx="44" cy="54" rx="14" ry="12" fill="#3a2a1a"/>
+    <ellipse cx="44" cy="40" rx="11" ry="9" fill="#6a4a28"/>
+    <circle cx="39" cy="38" r="3.4" fill="#f4e8b0"/><circle cx="49" cy="38" r="3.4" fill="#f4e8b0"/>
+    <circle cx="39" cy="38" r="1.7" fill="#111"/><circle cx="49" cy="38" r="1.7" fill="#111"/>
+    <circle cx="34" cy="41" r="1.2" fill="#111"/><circle cx="54" cy="41" r="1.2" fill="#111"/>
+  </svg>`;
+  openOvl('wanda', `<div class="wanda">${svg}<div><h2>Wanda says hi</h2>
+    <p class="fact">${lastFact.text}</p>
+    <p class="sub">A real spider fact, from your jumping-spider host, between Silkball rounds.</p></div></div>
+    <h2 style="margin-top:12px">${winner}</h2>
+    <div class="sub">SILKBALL  ${g[0]} — ${g[1]}  (${RND.why === 'time' ? 'time' : RND.why})</div>
+    <table class="stand"><tr><th></th><th>Mount</th><th>Pts</th></tr>${rows}</table>
+    <div class="btns"><button class="go" id="wNext">NEXT ROUND</button><button class="go alt" id="wPick">CHANGE MOUNT</button></div>`);
+  $('wNext').addEventListener('click', () => newRound(true));
+  $('wPick').addEventListener('click', () => showPick());
+}
+
+function showPick() {
+  screen = 'pick'; RND = null;
+  const cards = SPEC_IDS.map(id => {
+    const S = SPECIES[id], sel = pickChoice.spec === id ? ' sel' : '';
+    return `<button class="pick${sel}" data-s="${id}"><b>${S.name}</b><div class="ab">${S.abilityName}</div><div class="bl">${S.blurb}</div></button>`;
+  }).join('');
+  openOvl('pick', `<h2>Spider Jockey v0.1</h2>
+    <p class="sub">Silkball is the Rocketball port: 2v2, walk your mount, snag the ball with silk, score. <a href="../3d/" target="_blank" rel="noopener">RJ 3D v0.9.5 (shelved)</a></p>
+    <div class="sub">PICK YOUR MOUNT — each species has one ability</div>
+    <div class="picks">${cards}</div>
+    <div class="lays rrow">ROUND: ${RLENS.map(v => `<button data-r="${v}" class="${v === RLEN ? 'sel' : ''}">${v === 'free' ? 'Free' : v + ' min'}</button>`).join('')}</div>
+    <div class="btns"><button class="go" id="pkGo">PLAY SILKBALL</button><button class="go alt" id="pkHelp">❓ CONTROLS</button></div>
+    <p class="sub">Unofficial fan-made homage; not affiliated with the 1996 Rocket Jockey. Procedural mounts for now; drop a .glb in models/ later.</p>`);
+  for (const b of document.querySelectorAll('#ovl .pick')) b.addEventListener('click', () => { pickChoice.spec = b.dataset.s; localStorage.setItem('sj_species', pickChoice.spec); showPick(); });
+  for (const b of document.querySelectorAll('#ovl [data-r]')) b.addEventListener('click', () => { RLEN = b.dataset.r; localStorage.setItem('sj_rlen', RLEN); showPick(); });
+  $('pkGo').addEventListener('click', () => newRound(false));
+  $('pkHelp').addEventListener('click', () => showHelp('pick'));
+}
+
+function showPause() {
+  openOvl('pause', `<h2>Paused</h2>
+    <div class="sub">LAYOUT</div><div class="lays">${LAYOUTS.map(l => `<button data-l="${l}" class="${l === LAY ? 'sel' : ''}">${l}</button>`).join('')}</div>
+    <div class="sub">ROUND LENGTH (next round)${RND ? ' · this round ' + (RND.len ? fmtT(RND.left) : 'free ' + fmtT(RND.t)) : ''}</div>
+    <div class="lays rrow">${RLENS.map(v => `<button data-r="${v}" class="${v === RLEN ? 'sel' : ''}">${v === 'free' ? 'Free play' : v + ' min'}</button>`).join('')}</div>
+    <ul><li>WASD / arrows or the left stick: turn and walk. Shift or BOOST to sprint.</li><li>Q / E, mouse buttons, or SILK: fire, hold to keep a snag, tap again to let go.</li><li>Space / F or ABILITY: your mount’s one trick.</li></ul>
+    <div class="btns"><button class="go" id="pzGo">RESUME</button><button class="go alt" id="pzEnd">END ROUND</button><button class="go alt" id="pzHelp">❓ CONTROLS</button><button class="go alt" id="pzPick">MOUNTS</button></div>`);
+  for (const b of document.querySelectorAll('#ovl [data-l]')) b.addEventListener('click', () => setLayout(b.dataset.l));
+  for (const b of document.querySelectorAll('#ovl [data-r]')) b.addEventListener('click', () => { RLEN = b.dataset.r; localStorage.setItem('sj_rlen', RLEN); showPause(); });
+  $('pzGo').addEventListener('click', () => closeOvl());
+  $('pzEnd').addEventListener('click', () => { closeOvl(); endRound('quit'); });
+  $('pzHelp').addEventListener('click', () => showHelp('pause'));
+  $('pzPick').addEventListener('click', () => showPick());
+}
+
+function showHelp(back) {
+  helpBack = back || null;
+  const touch = {
+    CLASSIC: ['Left half: drag sideways to steer (and walk). ABILITY button on the left.', 'Right: BOOST, ◀ SILK / SILK ▶ (hold to keep a snag, tap again to let go).'],
+    HYBRID: ['Left thumb: a stick appears where you touch. ◀ ▶ steer, push ▲ to walk, ▼ to back up.', 'Right thumb: ◀ SILK / SILK ▶ and BOOST. Left-side ABILITY button uses your mount’s trick.'],
+    GESTURE: ['Left thumb: the same stick (steer + walk).', 'Right half: two invisible silk zones. Hold to keep a snag, touch again to let go. Flick up ▲ = BOOST. Lower-left dashed zone = ABILITY.']
+  };
+  openOvl('help', `<h2>Controls</h2>
+    <div class="lays">${LAYOUTS.map(l => `<button data-hl="${l}" class="${l === LAY ? 'sel' : ''}">${l}</button>`).join('')}</div>
+    <table class="hk"><tr><th>Walk / turn</th><td>W A S D or arrow keys, or the left stick</td></tr>
+    <tr><th>Sprint</th><td>Shift, or BOOST</td></tr>
+    <tr><th>Silk</th><td>Q / E, or left / right mouse, or the SILK buttons. Hold to keep a snag on the ball or a rival. Tap again (or release a held snag) to let go and fling.</td></tr>
+    <tr><th>Ability</th><td>Space or F, or the ABILITY button — hop, sprint, hair-kick, slow bite, or web trap, depending on your mount.</td></tr>
+    <tr><th>Pause / help</th><td>P or Esc to pause, H for this card.</td></tr></table>
+    <div class="sub">Touch — ${LAY}</div>
+    <ul class="hul">${touch[LAY].map(t => `<li>${t}</li>`).join('')}</ul>
+    <p class="sub">Silkball: you and GOLD attack the far (red) goal. Snag the ball with silk or bump it in. First to more goals when time runs out.</p>
+    <div class="btns"><button class="go" id="hlGo">${helpBack ? 'BACK' : 'GOT IT'}</button></div>`);
+  for (const b of document.querySelectorAll('#ovl [data-hl]')) b.addEventListener('click', () => { setLayout(b.dataset.hl); showHelp(helpBack); });
+  $('hlGo').addEventListener('click', () => { if (helpBack === 'pause') showPause(); else if (helpBack === 'pick') showPick(); else closeOvl(); });
+}
+
+// ---------------- main loop ----------------
+function sim(dt) {
+  dt = Math.min(0.05, Math.max(0, dt));
+  if (screen !== 'play' || !RND) return;
+  if (RND.st === 'count') {
+    RND.count -= dt;
+    const n = Math.ceil(RND.count);
+    $('rcount').style.display = 'block';
+    $('rcount').textContent = n > 0 ? String(n) : 'GO';
+    if (RND.count <= 0) { RND.st = 'live'; $('rcount').style.display = 'none'; flash('GO!', '#7dff8a'); }
+    // still pose idle
+    for (const r of riders) { poseLegs(r, dt); syncMount(r); }
+    stepCamera(dt); return;
+  }
+  if (RND.st !== 'live') { stepCamera(dt); return; }
+  RND.t += dt;
+  if (RND.len) { RND.left = Math.max(0, RND.len - RND.t); $('rtime').textContent = fmtT(RND.left); $('rtime').classList.toggle('low', RND.left <= 15); if (RND.left <= 0) { endRound('time'); return; } }
+  else $('rtime').textContent = fmtT(RND.t);
+
+  if (!ovlMode) collectPlayerInput();
+  else if (player) { player.throttle = 0; player.steer = 0; player.boost = false; }
+
+  dispCool -= dt;
+  if (dispCool <= 0 && balls.length < T.MAX_BALLS) { spawnBall(rand(-1, 1), rand(-1, 1), 0, 0); dispCool = 99; }
+
+  for (const r of riders) { if (r.ai) aiThink(r, dt); stepRider(r, dt); }
+  separateRiders(dt);
+  for (const b of [...balls]) { for (const r of riders) bumpBall(r, b); stepBall(b, dt); }
+  stepWebs(dt); stepBursts(dt); stepCamera(dt); updAbHint();
+  if (msgT > 0) { msgT -= dt; if (msgT <= 0) $('msg').style.opacity = 0; }
+}
+
+let acc = 0, lastT = performance.now(), fpsT = 0, fpsN = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  const raw = Math.min(0.08, (now - lastT) / 1000); lastT = now;
+  const running = screen === 'play' && RND && (RND.st === 'live' || RND.st === 'count') && !ovlMode;
+  if (running) {
+    acc += raw; const stepDt = 1 / 60; let n = 0;
+    while (acc >= stepDt && n < 5) { sim(stepDt); simTime += stepDt; acc -= stepDt; n++; }
+  } else acc = 0;
+  if (screen === 'play' && riders.length) { for (const r of riders) syncMount(r); }
+  renderer.render(scene, camera); frames++;
+  fpsN++; fpsT += raw; if (fpsT >= 0.5) { $('fps').textContent = Math.round(fpsN / fpsT) + ' fps'; fpsN = 0; fpsT = 0; }
+}
+
+function applyTestInputs(o) {
+  if (!o || !player) return;
+  if (o.steer != null) player.steer = o.steer;
+  if (o.throttle != null) player.throttle = o.throttle;
+  if (o.boost != null) player.boost = !!o.boost;
+  if (o.heading != null) player.h = o.heading;
+  if (o.silkL) retractOrFire(player, 0);
+  if (o.silkR) retractOrFire(player, 1);
+  if (o.releaseL) releaseSilk(player, 0);
+  if (o.releaseR) releaseSilk(player, 1);
+  if (o.ability) fireAbility(player);
+}
+
+function hookState() {
+  const pack = r => r && ({ name: r.name, spec: r.spec, team: r.team, x: r.x, y: r.y, z: r.z, h: r.h, vx: r.vx, vy: r.vy, vz: r.vz, spd: r.spd, cool: r.cool, stun: r.stun, slowT: r.slowT, sprintT: r.sprintT, air: !!r.air, mount: r.mountSource, silk: r.silks.map(c => ({ st: c.st, kind: c.kind, x: c.x, y: c.y, z: c.z })), pts: r.pts, brain: r.ai ? r.brain.why : null });
+  return {
+    version: VERSION, frames, t: simTime, screen, ovl: ovlMode, mode: 'silkball',
+    species: player && player.spec, score: teamGoals.slice(),
+    you: pack(player), ai: riders.filter(r => r.ai).map(pack),
+    riders: riders.map(pack),
+    balls: balls.map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, last: b.last && b.last.name })),
+    webs: webs.map(w => ({ x: w.x, z: w.z, r: w.r, life: w.life, team: w.team })),
+    wanda: ovlMode === 'wanda' ? { open: true, fact: lastFact && lastFact.text, id: lastFact && lastFact.id } : { open: false, fact: lastFact && lastFact.text, id: lastFact && lastFact.id },
+    rnd: RND && { st: RND.st, t: RND.t, left: RND.left, len: RND.len, why: RND.why },
+    stats: { ...stats },
+    nan: riders.some(r => [r.x, r.y, r.z, r.vx, r.vy, r.vz].some(n => !Number.isFinite(n))) || balls.some(b => [b.x, b.y, b.z, b.vx, b.vy, b.vz].some(n => !Number.isFinite(n)))
+  };
+}
+
+function hookStep(dt, inputs, opts) {
+  const prevOvl = ovlMode, prevScreen = screen;
+  if (inputs) { if (ovlMode && inputs.force) closeOvl(); applyTestInputs(inputs); }
+  // tests drive the sim even if the rAF loop is paused behind an overlay, unless still on pick
+  if (screen === 'play' && RND) {
+    const hold = ovlMode; ovlMode = null; // skip collectPlayerInput; test inputs already applied
+    const st = RND.st;
+    if (st === 'count' || st === 'live') {
+      // call sim but skip collectPlayerInput by faking overlay then restoring after collect — cleaner: direct
+      if (RND.st === 'count') {
+        RND.count -= dt;
+        if (RND.count <= 0) { RND.st = 'live'; $('rcount').style.display = 'none'; }
+      } else if (RND.st === 'live') {
+        RND.t += dt;
+        if (RND.len) { RND.left = Math.max(0, RND.len - RND.t); if (RND.left <= 0) endRound('time'); }
+        if (RND.st === 'live') {
+          dispCool -= dt;
+          if (dispCool <= 0 && balls.length < T.MAX_BALLS) { spawnBall(0, 0, 0, 0); dispCool = 99; }
+          for (const r of riders) { if (r.ai) aiThink(r, dt); stepRider(r, dt); }
+          separateRiders(dt);
+          for (const b of [...balls]) { for (const q of riders) bumpBall(q, b); stepBall(b, dt); }
+          stepWebs(dt); stepBursts(dt);
+        }
+      }
+    }
+    if (ovlMode == null) ovlMode = hold;
+    stepCamera(dt); updAbHint(); updScore();
+  }
+  if (!opts || opts.draw !== false) renderer.render(scene, camera); frames++; simTime += dt;
+  return hookState();
+}
+
+const hook = {
+  version: VERSION, mode: 'silkball',
+  state: hookState,
+  step: hookStep,
+  frames: () => frames,
+  freezeAI(on) { aiFrozen = on !== false; for (const r of riders) if (r.ai) { r.throttle = 0; r.steer = 0; r.boost = false; r.brain.cool = on ? 1e9 : 0.2; } },
+  setPlayer(x, z, h, y) { if (!player) return; if (x != null) player.x = x; if (z != null) player.z = z; if (h != null) player.h = h; if (y != null) player.y = y; player.vx = player.vz = 0; syncMount(player); },
+  playerSpeed(v) { if (!player) return; const f = fwd(player); player.vx = f.x * v; player.vz = f.z * v; player.spd = v; },
+  placeAI(i, x, z, h) { const a = riders.filter(r => r.ai)[i]; if (!a) return; a.x = x; a.z = z; if (h != null) a.h = h; a.vx = a.vz = 0; syncMount(a); },
+  speedAI(i, v) { const a = riders.filter(r => r.ai)[i]; if (!a) return; const f = fwd(a); a.vx = f.x * v; a.vz = f.z * v; },
+  setSpecies(name, id) { const r = riders.find(q => q.name === name); id = resolveSpec(id) || id; if (!r || !SPECIES[id]) return false; r.spec = id; r.cool = 0; bindMount(r, makeProceduralSpider(id), 'proc'); ensureMount(r, id); return true; },
+  fireAbility(name) { const r = name ? riders.find(q => q.name === name) : player; if (!r) return false; r.cool = 0; const prev = screen, st = RND && RND.st; screen = 'play'; if (RND) RND.st = 'live'; const out = fireAbility(r); screen = prev; if (RND) RND.st = st; return out; },
+  fireSilk(name, i) { const r = name ? riders.find(q => q.name === name) : player; return r ? fireSilk(r, i || 0) : false; },
+  releaseSilk(name, i) { const r = name ? riders.find(q => q.name === name) : player; if (r) releaseSilk(r, i || 0); },
+  spawnBall(x, z, vx, vz) { return spawnBall(x, z, vx, vz) && hookState().balls.slice(-1)[0]; },
+  clearBalls, clearWebs,
+  holdDisp() { dispCool = 99; },
+  newRound: (k) => newRound(!!k),
+  skipCount, endRound, skipWanda: () => { if (ovlMode === 'wanda') closeOvl(); },
+  showPick, showWanda, showHelp, showPause, closeOvl, ovlMode: () => ovlMode,
+  start(spec) { if (spec) { pickChoice.spec = resolveSpec(spec) || spec; } newRound(false); skipCount(); },
+  setTimeLeft(s) { if (!RND) return; if (!RND.len) RND.len = s; RND.left = s; if (RND.len < s) RND.len = s; RND.t = RND.len - s; },
+  setRLen(v) { RLEN = String(v); },
+  youAI(on) { if (!player) return; player.ai = !!on; if (on) player.brain.cool = 0.1; },
+  layout: () => LAY, setLayout, diff: () => diff,
+  facts: () => WANDA_FACTS.map(f => f.id), lastFact: () => lastFact,
+  species: () => SPEC_IDS, help: () => ({ open: ovlMode === 'help', text: ovlMode === 'help' ? $('ovl').innerText : '', lay: LAY, back: helpBack }),
+  pickOf: () => pickChoice.spec,
+  renderer: () => { const gl = renderer.getContext(); const ext = gl && gl.getExtension('WEBGL_debug_renderer_info'); return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'unknown'; }
+};
+hook.helpDone = () => { if (ovlMode === 'help') closeOvl(); };
+window.__game = hook; window.__sj = hook;
+
+// ---------------- boot ----------------
+applyQuality(); applyLayout(); resize();
+import('three/addons/loaders/GLTFLoader.js').then(m => { GLTFLoaderCls = m.GLTFLoader; for (const r of riders) ensureMount(r, r.spec); }).catch(() => {});
+if (skipTut) { newRound(false); skipCount(); } else showPick();
+requestAnimationFrame(loop);
+</script>
+</body></html>
